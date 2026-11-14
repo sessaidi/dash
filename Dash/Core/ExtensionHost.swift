@@ -114,7 +114,7 @@ final class ExtensionHost: ExtensionContext {
     /// store is a lightweight migration, so hot-installed plugins can grow the schema.
     static func makeContainer(models: [any PersistentModel.Type], inMemory: Bool) throws -> ModelContainer {
         let schema = Schema([WidgetRecord.self, DashboardPage.self, SidebarSection.self, ClaudeCall.self,
-                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self] + models)
+                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self] + models)
         let configuration = inMemory
             ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             : ModelConfiguration(schema: schema, url: try storeURL())

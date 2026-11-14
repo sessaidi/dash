@@ -3,9 +3,10 @@ import DashKitUI
 import ClaudeCodeKit
 import Foundation
 import Observation
+import SwiftData
 
-struct ChatEntry: Identifiable, Equatable {
-    enum Kind: Equatable {
+struct ChatEntry: Identifiable, Equatable, Codable {
+    enum Kind: Equatable, Codable {
         case user(String)
         case text(String)
         case thinking(String)
@@ -16,6 +17,32 @@ struct ChatEntry: Identifiable, Equatable {
     let id: String
     var kind: Kind
     var toolUseID: String?
+}
+
+/// A past chat, kept so it can be reopened (and continued: Claude Code resumes its session).
+@Model
+final class ChatConversation {
+    @Attribute(.unique) var id: UUID
+    /// The first thing the user asked.
+    var title: String
+    var started: Date
+    var updated: Date
+    /// Claude Code's session, resumed when the conversation is reopened.
+    var sessionID: String?
+    var entriesData: Data
+
+    init(title: String) {
+        id = UUID()
+        self.title = title
+        started = .now
+        updated = .now
+        entriesData = Data("[]".utf8)
+    }
+
+    var entries: [ChatEntry] {
+        get { (try? JSONDecoder().decode([ChatEntry].self, from: entriesData)) ?? [] }
+        set { entriesData = (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8) }
+    }
 }
 
 /// One Claude Code turn, for the Debug window.
@@ -44,6 +71,8 @@ final class ChatSession {
     private(set) var live: [ChatEntry] = []
     private(set) var isRunning = false
     var isPanelVisible = true
+    /// The conversation on screen, saved after every turn.
+    private(set) var conversationID: UUID?
 
     @ObservationIgnored private let host: ExtensionHost
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -115,12 +144,56 @@ final class ChatSession {
 
     func reset() {
         stop()
+        saveConversation()
         transcript = []
         live = []
         code?.terminate()
         code = nil
         codeSessionID = nil
         sessionCost = 0
+        conversationID = nil
+    }
+
+    // MARK: History
+
+    /// Past conversations, most recent first.
+    func conversations() -> [ChatConversation] {
+        (try? host.context.fetch(FetchDescriptor<ChatConversation>(sortBy: [SortDescriptor(\.updated, order: .reverse)]))) ?? []
+    }
+
+    /// Stores the conversation on screen (created at its first message).
+    func saveConversation() {
+        guard let first = transcript.first(where: { if case .user = $0.kind { true } else { false } }), case .user(let question) = first.kind else { return }
+        let conversation: ChatConversation
+        if let id = conversationID, let existing = try? host.context.fetch(FetchDescriptor<ChatConversation>(predicate: #Predicate { $0.id == id })).first {
+            conversation = existing
+        } else {
+            conversation = ChatConversation(title: String(question.prefix(120)))
+            host.context.insert(conversation)
+            conversationID = conversation.id
+        }
+        conversation.entries = transcript
+        conversation.sessionID = codeSessionID
+        conversation.updated = .now
+        try? host.context.save()
+    }
+
+    /// Puts a past conversation back on screen; the next message continues it.
+    func open(_ conversation: ChatConversation) {
+        guard conversation.id != conversationID else { return }
+        reset()
+        transcript = conversation.entries
+        codeSessionID = conversation.sessionID
+        conversationID = conversation.id
+    }
+
+    func delete(_ conversation: ChatConversation) {
+        if conversation.id == conversationID {
+            conversationID = nil
+            reset()
+        }
+        host.context.delete(conversation)
+        try? host.context.save()
     }
 
     private struct ToolCall {
@@ -176,6 +249,7 @@ final class ChatSession {
             isRunning = false
             live = []
             task = nil
+            saveConversation()
         }
         let previousActivityID = lastActivityID
         var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"

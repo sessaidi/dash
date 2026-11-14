@@ -3,6 +3,7 @@ import DashKitUI
 import SwiftUI
 
 struct ChatPanel: View {
+    @State private var showingHistory = false
     /// Folds the panel into its narrow rail.
     var onFold: (() -> Void)?
     @Environment(ChatSession.self) private var chat
@@ -50,6 +51,13 @@ struct ChatPanel: View {
             }
             Text("\(settings.model) · Claude Code").font(.caption).foregroundStyle(.secondary)
             Spacer()
+            Button("History", systemImage: "clock.arrow.circlepath") { showingHistory.toggle() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Past conversations")
+                .popover(isPresented: $showingHistory, arrowEdge: .bottom) {
+                    ChatHistoryList(chat: chat) { showingHistory = false }
+                }
             Button("New Chat", systemImage: "square.and.pencil") { chat.reset() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -399,5 +407,66 @@ struct ChatSidePanel: View {
 
     private func toggle() {
         withAnimation(.smooth(duration: 0.32)) { folded.toggle() }
+    }
+}
+
+/// Past conversations: search, reopen (it continues where it stopped), delete.
+private struct ChatHistoryList: View {
+    let chat: ChatSession
+    let onOpen: () -> Void
+    @State private var search = ""
+    @State private var conversations: [ChatConversation] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField("Search conversations", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .padding(10)
+            Divider()
+            let shown = conversations.filter { conversation in
+                search.isEmpty || conversation.title.localizedCaseInsensitiveContains(search)
+                    || conversation.entries.contains { entry in
+                        switch entry.kind {
+                        case .user(let text), .text(let text): text.localizedCaseInsensitiveContains(search)
+                        default: false
+                        }
+                    }
+            }
+            if shown.isEmpty {
+                Text(conversations.isEmpty ? "No past conversations yet." : "Nothing matches.")
+                    .foregroundStyle(.secondary).padding(20)
+            } else {
+                List(shown) { conversation in
+                    Button {
+                        chat.open(conversation)
+                        onOpen()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(conversation.title).lineLimit(2)
+                                Text(conversation.updated.formatted(.relative(presentation: .named)))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if conversation.id == chat.conversationID { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            chat.delete(conversation)
+                            conversations = chat.conversations()
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .frame(width: 340, height: 420)
+        .onAppear {
+            chat.saveConversation()
+            conversations = chat.conversations()
+        }
     }
 }
