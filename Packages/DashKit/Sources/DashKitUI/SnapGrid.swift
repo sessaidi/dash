@@ -84,11 +84,10 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     let limits: [ID: GridLimits]
     let onCommit: ([ID: GridFrame]) -> Void
     let cell: (ID) -> Cell
-    /// Narrowest a column may get. Below it the grid stops squeezing widgets and re-packs them
-    /// into fewer columns (stacking them when the window is narrow); editing waits for more room.
+    /// Narrowest a column may get. A full window shows all the engine's columns; as it narrows
+    /// the grid drops one column at a time instead of squeezing them, and widgets keep their
+    /// width in columns (within their limits and the columns left). Editing waits for the full grid.
     let minimumColumnWidth: CGFloat
-    /// Width a column is designed for: a widget keeps about `w × designColumnWidth` points when re-packed.
-    let designColumnWidth: CGFloat
 
     private enum Kind { case move, resize }
     private struct Drag {
@@ -103,11 +102,10 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     public init(
         frames: [ID: GridFrame], engine: GridEngine = GridEngine(), rowHeight: CGFloat = 40, spacing: CGFloat = 16,
         editing: Bool = true, limits: [ID: GridLimits] = [:], header: AnyView? = nil,
-        minimumColumnWidth: CGFloat = 72, designColumnWidth: CGFloat = 96,
+        minimumColumnWidth: CGFloat = 60,
         onCommit: @escaping ([ID: GridFrame]) -> Void, @ViewBuilder cell: @escaping (ID) -> Cell
     ) {
         self.minimumColumnWidth = minimumColumnWidth
-        self.designColumnWidth = designColumnWidth
         self.frames = frames
         self.editing = editing
         self.header = header
@@ -122,17 +120,12 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     public var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width - spacing * 2, 0)
-            let full = Metrics(width: width, columns: engine.columns, rowHeight: rowHeight, spacing: spacing)
-            // Too narrow for the saved layout: re-pack into the columns that fit.
-            let reflowed = full.cellWidth < minimumColumnWidth
-            let columns = reflowed ? max(1, Int((width + spacing) / (minimumColumnWidth + spacing))) : engine.columns
-            let metrics = reflowed ? Metrics(width: width, columns: columns, rowHeight: rowHeight, spacing: spacing) : full
+            // As many columns as fit at the minimum width, up to the engine's (all of them full screen).
+            let columns = min(engine.columns, max(1, Int((width + spacing) / (minimumColumnWidth + spacing))))
+            let reflowed = columns < engine.columns
+            let metrics = Metrics(width: width, columns: columns, rowHeight: rowHeight, spacing: spacing)
             let editing = self.editing && !reflowed
-            let layout = reflowed
-                ? engine.reflow(frames, columns: columns) { frame in
-                    Int((CGFloat(frame.w) * designColumnWidth / (metrics.cellWidth + spacing)).rounded(.up))
-                }
-                : previewLayout(metrics)
+            let layout = reflowed ? engine.reflow(frames, columns: columns, limits: limits) : previewLayout(metrics)
             // While editing, spare rows below the last widget give room to drop things lower.
             let rows = engine.height(layout) + (editing ? 8 : 0) + (drag == nil ? 0 : 4)
             let height = max(metrics.height(rows: rows), editing ? proxy.size.height - spacing * 2 : 0)

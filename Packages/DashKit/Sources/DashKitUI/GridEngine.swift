@@ -168,15 +168,22 @@ public struct GridEngine: Sendable {
     }
 
     /// The layout re-packed into fewer columns, for a window too narrow for the saved one.
-    /// Cells keep their reading order and height; each gets `width(frame)` columns (clamped to
-    /// 1…`columns`) and goes in the first spot that isn't above the previous cell, so nothing
+    /// Cells keep their reading order and height; each keeps its width, clamped to its limits and
+    /// to `columns`, and goes in the first spot that isn't above the previous cell, so nothing
     /// jumps ahead of what came before it. The saved layout is untouched.
-    public func reflow<ID: Hashable>(_ frames: [ID: GridFrame], columns: Int, width: (GridFrame) -> Int) -> [ID: GridFrame] {
+    public func reflow<ID: Hashable>(_ frames: [ID: GridFrame], columns: Int, limits: [ID: GridLimits] = [:]) -> [ID: GridFrame] {
+        reflow(frames, columns: columns) { id, frame in
+            let limit = limits[id] ?? .any
+            return min(max(frame.w, limit.minW), limit.maxW)
+        }
+    }
+
+    public func reflow<ID: Hashable>(_ frames: [ID: GridFrame], columns: Int, width: (ID, GridFrame) -> Int) -> [ID: GridFrame] {
         let columns = max(1, columns)
         var placed: [ID: GridFrame] = [:]
         var floor = 0
         for (id, frame) in frames.sorted(by: { order($0.value, $1.value) }) {
-            let w = min(max(width(frame), 1), columns)
+            let w = min(max(width(id, frame), 1), columns)
             var y = floor
             search: while true {
                 for x in 0...(columns - w) {
