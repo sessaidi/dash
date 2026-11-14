@@ -55,18 +55,10 @@ struct DashiiView: View {
     /// The root bone (torso centre) in the view, from its top-left corner.
     static func root(scale: CGFloat) -> CGPoint { CGPoint(x: -rigBox.minX * scale, y: -rigBox.minY * scale) }
 
-    @State private var player = DashiiPlayer()
-
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let time = timeline.date.timeIntervalSince(player.epoch)
-            // Rasterized by Metal off the main thread: the rig's sprites, face and props are
-            // flattened into one GPU layer each frame instead of separate Core Animation draws.
-            Canvas(rendersAsynchronously: true) { context, _ in
-                player.render(into: &context, time: time, direction: direction, scale: scale)
-            }
-            .drawingGroup()
-        }
+        // Drawn by Dashii's own Metal renderer: the frame's sprites and shapes go to the GPU as
+        // one instanced draw, and drawing pauses while the window is hidden.
+        DashiiMetalView(direction: direction, scale: scale)
         .frame(width: Self.size(scale: scale).width, height: Self.size(scale: scale).height)
         .background {
             // The halo while busy, centred on the body.
@@ -129,12 +121,14 @@ final class DashiiPlayer {
         }
     }
 
-    func render(into context: inout GraphicsContext, time t: Double, direction: DashiiDirection, scale: CGFloat) {
+    /// One frame as a draw list, in view points (origin at the top-left of `DashiiView.size(scale:)`).
+    func frame(time t: Double, direction: DashiiDirection, scale: CGFloat) -> DashiiDrawList {
+        var list = DashiiDrawList()
         guard var animator, let rig = assets.rig, let clips = assets.clips else {
             // Assets missing from the bundle: a plain placeholder rather than nothing.
             let root = DashiiView.root(scale: scale)
-            context.fill(Path(ellipseIn: CGRect(x: root.x - 30, y: root.y - 60, width: 60, height: 60)), with: .color(.purple))
-            return
+            list.roundRect(CGRect(x: root.x - 30, y: root.y - 60, width: 60, height: 60), radius: 30, transform: .identity, fill: .init(0x7c3aed))
+            return list
         }
         let dt = DashiiMath.clamp(t - lastTime, 0, 0.1)
         lastTime = t
@@ -151,7 +145,7 @@ final class DashiiPlayer {
         if animator.state != wanted { animator.play(wanted, at: t) }
         self.animator = animator
         let age = t - animator.started
-        guard let clip = clips.clips[animator.state.rawValue] else { return }
+        guard let clip = clips.clips[animator.state.rawValue] else { return list }
         var pose = animator.pose(at: t)
         func add(_ bone: String, _ property: String, _ value: Double) { pose[bone, default: [:]][property, default: 0] += value }
 
@@ -288,17 +282,13 @@ final class DashiiPlayer {
             bones = DashiiMath.worldBones(rig.bones, pose: pose)
         }
 
-        var stage = context
         let root = DashiiView.root(scale: scale)
-        stage.translateBy(x: root.x, y: root.y)
-        stage.scaleBy(x: scale, y: scale)
+        var stage = CGAffineTransform(translationX: root.x, y: root.y).scaledBy(x: scale, y: scale)
         // Squash on landing: wide and short, springing back, anchored at the thruster.
         if let landed = direction.motion?.landedAt, t - landed >= 0, t - landed < 0.6 {
             let k = t - landed
             let squash = exp(-k * 7) * cos(k * 22) * 0.12
-            stage.translateBy(x: 0, y: 60)
-            stage.scaleBy(x: 1 + squash, y: 1 - squash)
-            stage.translateBy(x: 0, y: -60)
+            stage = stage.translatedBy(x: 0, y: 60).scaledBy(x: 1 + squash, y: 1 - squash).translatedBy(x: 0, y: -60)
         }
         let thrust = direction.motion?.airborne == true ? 1.5 : 1
         // A disc turned toward the viewer draws over the head (z 6), one turned away under it.
@@ -308,28 +298,28 @@ final class DashiiPlayer {
         }
         for attachment in rig.attachments.sorted(by: { z($0) < z($1) }) {
             draw(attachment, bones: bones, rig: rig, headYaw: yaw, bodyYaw: bodyYaw, time: t, thrust: thrust,
-                 depth: depth[attachment.bone], in: stage)
+                 depth: depth[attachment.bone], in: stage, into: &list)
         }
         if let head = bones["head"] {
             let expression = direction.sleepy ? "thinking" : (pettedAmount > 0.5 ? "happy" : clip.expression)
-            face(head, yaw: yaw, time: t, expression: expression, in: stage)
+            face(head, yaw: yaw, time: t, expression: expression, in: stage, into: &list)
         }
-        if let prop = clip.prop, let rootBone = bones["root"] { props(prop, root: rootBone, time: age, in: stage) }
+        if let prop = clip.prop, let rootBone = bones["root"] { props(prop, root: rootBone, time: age, in: stage, into: &list) }
+        return list
     }
 
-    private func sprite(_ region: String, at point: CGPoint, size: CGSize, pivot: CGPoint = CGPoint(x: 0.5, y: 0.5), in context: GraphicsContext) {
-        guard let image = assets.regions[region] else { return }
-        context.draw(Image(decorative: image, scale: 1),
-                     in: CGRect(x: point.x - size.width * pivot.x, y: point.y - size.height * pivot.y, width: size.width, height: size.height))
+    private func sprite(_ region: String, at point: CGPoint, size: CGSize, pivot: CGPoint = CGPoint(x: 0.5, y: 0.5),
+                        transform: CGAffineTransform, opacity: Double = 1, into list: inout DashiiDrawList) {
+        list.sprite(region, rect: CGRect(x: point.x - size.width * pivot.x, y: point.y - size.height * pivot.y, width: size.width, height: size.height),
+                    transform: transform, opacity: opacity)
     }
 
     private func draw(_ attachment: DashiiRig.Attachment, bones: [String: DashiiBone], rig: DashiiRig,
                       headYaw: Double, bodyYaw: Double, time: Double, thrust: Double, depth: Double?,
-                      in parent: GraphicsContext) {
+                      in parent: CGAffineTransform, into list: inout DashiiDrawList) {
         guard let bone = bones[attachment.bone] else { return }
-        var context = parent
-        context.translateBy(x: bone.x, y: bone.y)
-        context.rotate(by: .degrees(bone.rotation + attachment.rotation))
+        var context = parent.translatedBy(x: bone.x, y: bone.y).rotated(by: (bone.rotation + attachment.rotation) * .pi / 180)
+        var opacity = 1.0
         var region = attachment.region
         var width = attachment.size[0]
         var height = attachment.size[1]
@@ -337,34 +327,32 @@ final class DashiiPlayer {
         case "head":
             region = rig.directions.head[headView.rawValue] ?? region
             // Front views are symmetric artwork: mirroring them only flips the highlights.
-            context.scaleBy(x: headYaw < 0 && headView != .front ? -1 : 1, y: 1 - abs(gazeNow.pitch) * 0.0015)
+            context = context.scaledBy(x: headYaw < 0 && headView != .front ? -1 : 1, y: 1 - abs(gazeNow.pitch) * 0.0015)
         case "torso":
             region = rig.directions.torso[bodyView.rawValue] ?? region
             // Never mirror the front torso: its "P" logo would read as "q".
-            context.scaleBy(x: bodyYaw < 0 && bodyView != .front ? -1 : 1, y: 1)
+            context = context.scaledBy(x: bodyYaw < 0 && bodyView != .front ? -1 : 1, y: 1)
         case "thruster":
-            context.opacity = 0.82 + 0.18 * sin(time * 11)
+            opacity = 0.82 + 0.18 * sin(time * 11)
             height *= (1 + 0.09 * sin(time * 13)) * thrust
         case "discL", "discR":
             // Edge-on at the sides (front view), face-on when turned toward the viewer.
             let facing = abs(depth ?? 0)
             width *= 1 + 0.45 * facing
             // The disc art's rim faces outward: point it away from the head's centre.
-            if bone.x - (bones["head"]?.x ?? 0) > 0 { context.scaleBy(x: -1, y: 1) }
+            if bone.x - (bones["head"]?.x ?? 0) > 0 { context = context.scaledBy(x: -1, y: 1) }
         default:
             break
         }
         sprite(region, at: .zero, size: CGSize(width: width, height: height),
-               pivot: CGPoint(x: attachment.pivot[0], y: attachment.pivot[1]), in: context)
+               pivot: CGPoint(x: attachment.pivot[0], y: attachment.pivot[1]), transform: context, opacity: opacity, into: &list)
     }
 
-    private func face(_ head: DashiiBone, yaw: Double, time: Double, expression: String, in parent: GraphicsContext) {
+    private func face(_ head: DashiiBone, yaw: Double, time: Double, expression: String, in parent: CGAffineTransform,
+                      into list: inout DashiiDrawList) {
         let view = headView
         guard view != .back else { return }
-        var context = parent
-        context.translateBy(x: head.x, y: head.y)
-        context.rotate(by: .degrees(head.rotation))
-        context.scaleBy(x: yaw < 0 ? -1 : 1, y: 1)
+        let context = parent.translatedBy(x: head.x, y: head.y).rotated(by: head.rotation * .pi / 180).scaledBy(x: yaw < 0 ? -1 : 1, y: 1)
         let flip = yaw < 0 ? -1.0 : 1.0
         let cx = (view == .profile ? 48 : view == .threequarter ? 15 : 0) + gazeNow.eyeX * flip
         let cy = 13 + gazeNow.eyeY + gazeNow.pitch * 0.13
@@ -372,78 +360,66 @@ final class DashiiPlayer {
         let phase = time.truncatingRemainder(dividingBy: 4.7)
         let blink = phase > 4.48 && phase < 4.64
         let eyes = view == .profile ? [cx] : [cx - separation, cx + separation]
-        let style = StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
-        let color = expression == "error" ? Color(hex: 0xff6e86) : Color(hex: 0xc4faff)
-        var glow = context
-        glow.addFilter(.shadow(color: Color(hex: 0x22d3ee), radius: 3.5))
+        let color = DashiiColor(expression == "error" ? 0xff6e86 : 0xc4faff)
+        let glow = DashiiGlow(color: DashiiColor(0x22d3ee), radius: 3.5)
         for x in eyes {
-            var path = Path()
+            var path = DashiiStroke()
             if expression == "error" {
-                path.move(to: CGPoint(x: x - 5, y: cy - 6)); path.addLine(to: CGPoint(x: x + 5, y: cy + 6))
-                path.move(to: CGPoint(x: x + 5, y: cy - 6)); path.addLine(to: CGPoint(x: x - 5, y: cy + 6))
+                path.line(CGPoint(x: x - 5, y: cy - 6), CGPoint(x: x + 5, y: cy + 6))
+                path.line(CGPoint(x: x + 5, y: cy - 6), CGPoint(x: x - 5, y: cy + 6))
             } else if blink || expression == "thinking" {
-                path.move(to: CGPoint(x: x - 6, y: cy + 2))
-                path.addQuadCurve(to: CGPoint(x: x + 6, y: cy + 2), control: CGPoint(x: x, y: cy + 5))
+                path.quad(CGPoint(x: x - 6, y: cy + 2), control: CGPoint(x: x, y: cy + 5), to: CGPoint(x: x + 6, y: cy + 2))
             } else if expression == "happy" {
-                path.move(to: CGPoint(x: x - 9, y: cy + 5))
-                path.addQuadCurve(to: CGPoint(x: x + 9, y: cy + 5), control: CGPoint(x: x, y: cy - 14))
+                path.quad(CGPoint(x: x - 9, y: cy + 5), control: CGPoint(x: x, y: cy - 14), to: CGPoint(x: x + 9, y: cy + 5))
             } else if expression == "focused" {
-                path.move(to: CGPoint(x: x - 7, y: cy - 5))
-                path.addLine(to: CGPoint(x: x + 3, y: cy))
-                path.addLine(to: CGPoint(x: x - 7, y: cy + 5))
+                path.polyline([CGPoint(x: x - 7, y: cy - 5), CGPoint(x: x + 3, y: cy), CGPoint(x: x - 7, y: cy + 5)])
             } else {
                 sprite("eye", at: CGPoint(x: x, y: cy),
-                       size: CGSize(width: view == .profile ? 9 : 12, height: expression == "curious" ? 25 : 23), in: context)
+                       size: CGSize(width: view == .profile ? 9 : 12, height: expression == "curious" ? 25 : 23), transform: context, into: &list)
                 continue
             }
-            glow.stroke(path, with: .color(color), style: style)
+            list.stroke(path, width: 5, transform: context, color: color, glow: glow)
         }
     }
 
-    private func props(_ kind: String, root: DashiiBone, time: Double, in parent: GraphicsContext) {
+    private func props(_ kind: String, root: DashiiBone, time: Double, in parent: CGAffineTransform, into list: inout DashiiDrawList) {
         let x = root.x, y = root.y
-        let font = Font.system(size: 20, weight: .semibold)
         switch kind {
         case "work":
-            var context = parent
-            context.translateBy(x: x + 8, y: y + 27)
-            context.rotate(by: .radians(-0.07))
-            let card = Path(roundedRect: CGRect(x: -41, y: -20, width: 82, height: 43), cornerRadius: 7)
-            var glow = context
-            glow.addFilter(.shadow(color: Color(hex: 0x22d3ee), radius: 6))
-            glow.fill(card, with: .color(Color(hex: 0x0c8fc4, opacity: 0xaa / 255)))
-            glow.stroke(card, with: .color(Color(hex: 0x9df2ff)), lineWidth: 2)
-            context.draw(Text("</>").font(font).foregroundStyle(Color(hex: 0xe8fbff)), at: CGPoint(x: 0, y: -1))
-            context.fill(Path(CGRect(x: -27, y: 13, width: 30 + 12 * sin(time * 4), height: 2)), with: .color(Color(hex: 0xbcf8ff)))
+            let context = parent.translatedBy(x: x + 8, y: y + 27).rotated(by: -0.07)
+            let card = CGRect(x: -41, y: -20, width: 82, height: 43)
+            list.roundRect(card, radius: 7, transform: context, fill: DashiiColor(0x0c8fc4, alpha: 0xaa / 255),
+                           stroke: DashiiColor(0x9df2ff), lineWidth: 2, glow: DashiiGlow(color: DashiiColor(0x22d3ee), radius: 6))
+            list.text("</>", center: CGPoint(x: 0, y: -1), transform: context, color: DashiiColor(0xe8fbff))
+            list.roundRect(CGRect(x: -27, y: 13, width: 30 + 12 * sin(time * 4), height: 2), radius: 0, transform: context, fill: DashiiColor(0xbcf8ff))
         case "delegation":
             let ox = x + 112, oy = y - 70
-            var wire = Path()
-            wire.move(to: CGPoint(x: x + 65, y: y - 5)); wire.addLine(to: CGPoint(x: ox - 15, y: y - 5))
-            wire.addLine(to: CGPoint(x: ox - 15, y: oy)); wire.addLine(to: CGPoint(x: ox - 15, y: oy + 72))
-            parent.stroke(wire, with: .color(Color(hex: 0x9e92ff)), lineWidth: 2)
+            let wireColor = DashiiColor(0x9e92ff)
+            var wire = DashiiStroke()
+            wire.polyline([CGPoint(x: x + 65, y: y - 5), CGPoint(x: ox - 15, y: y - 5), CGPoint(x: ox - 15, y: oy), CGPoint(x: ox - 15, y: oy + 72)])
+            list.stroke(wire, width: 2, transform: parent, color: wireColor, roundCaps: false)
             let fills: [UInt32] = [0x5c4aa0, 0x147e9d, 0x22766b]
             for index in 0..<3 {
                 let py = oy + Double(index) * 36
-                var branch = Path()
-                branch.move(to: CGPoint(x: ox - 15, y: py)); branch.addLine(to: CGPoint(x: ox, y: py))
-                parent.stroke(branch, with: .color(Color(hex: 0x9e92ff)), lineWidth: 2)
-                let box = Path(roundedRect: CGRect(x: ox, y: py - 13, width: 39, height: 26), cornerRadius: 9)
-                parent.fill(box, with: .color(Color(hex: fills[index])))
-                parent.stroke(box, with: .color(Color(hex: 0xa6edff)), lineWidth: 2)
+                var branch = DashiiStroke()
+                branch.line(CGPoint(x: ox - 15, y: py), CGPoint(x: ox, y: py))
+                list.stroke(branch, width: 2, transform: parent, color: wireColor, roundCaps: false)
+                list.roundRect(CGRect(x: ox, y: py - 13, width: 39, height: 26), radius: 9, transform: parent,
+                               fill: DashiiColor(fills[index]), stroke: DashiiColor(0xa6edff), lineWidth: 2)
                 let active = Int(floor(time * 2)) % 3 == index
-                let eye = Color(hex: active ? 0xffffff : 0x8be7f5)
-                parent.fill(Path(CGRect(x: ox + 10, y: py - 4, width: 4, height: 8)), with: .color(eye))
-                parent.fill(Path(CGRect(x: ox + 25, y: py - 4, width: 4, height: 8)), with: .color(eye))
-                if active { parent.fill(Path(ellipseIn: CGRect(x: ox - 10, y: py - 3, width: 6, height: 6)), with: .color(eye)) }
+                let eye = DashiiColor(active ? 0xffffff : 0x8be7f5)
+                list.roundRect(CGRect(x: ox + 10, y: py - 4, width: 4, height: 8), radius: 0, transform: parent, fill: eye)
+                list.roundRect(CGRect(x: ox + 25, y: py - 4, width: 4, height: 8), radius: 0, transform: parent, fill: eye)
+                if active { list.roundRect(CGRect(x: ox - 10, y: py - 3, width: 6, height: 6), radius: 3, transform: parent, fill: eye) }
             }
         default:
             let symbols = ["question": "?", "thought": "···", "success": "✓", "error": "!"]
             let bx = x + 87, by = y - 147 + sin(time * 2) * 2
-            let bubble = Path(roundedRect: CGRect(x: bx - 21, y: by - 19, width: 42, height: 38), cornerRadius: 14)
-            parent.fill(bubble, with: .color(Color(hex: kind == "error" ? 0x702a4b : 0xf6f1ff)))
-            parent.stroke(bubble, with: .color(Color(hex: 0x9471df)), lineWidth: 2)
-            parent.draw(Text(symbols[kind] ?? "").font(font).foregroundStyle(Color(hex: kind == "error" ? 0xffafbf : 0x7c3aed)),
-                        at: CGPoint(x: bx, y: by))
+            list.roundRect(CGRect(x: bx - 21, y: by - 19, width: 42, height: 38), radius: 14, transform: parent,
+                           fill: DashiiColor(kind == "error" ? 0x702a4b : 0xf6f1ff), stroke: DashiiColor(0x9471df), lineWidth: 2)
+            if let symbol = symbols[kind] {
+                list.text(symbol, center: CGPoint(x: bx, y: by), transform: parent, color: DashiiColor(kind == "error" ? 0xffafbf : 0x7c3aed))
+            }
         }
     }
 }

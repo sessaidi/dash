@@ -359,6 +359,8 @@ final class DashiiAssets: @unchecked Sendable {
     let atlas: DashiiAtlas?
     /// Each atlas region cut out once.
     let regions: [String: CGImage]
+    /// The whole atlas, for the Metal renderer's texture.
+    let atlasImage: CGImage?
 
     var isLoaded: Bool { rig != nil && clips != nil && !regions.isEmpty }
 
@@ -371,13 +373,16 @@ final class DashiiAssets: @unchecked Sendable {
         clips = load("animations")
         atlas = load("atlas")
         var regions: [String: CGImage] = [:]
+        var whole: CGImage?
         if let atlas, let url = bundle.url(forResource: "atlas", withExtension: "png"),
            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
            let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+            whole = image
             for (name, region) in atlas.regions {
                 if let cut = image.cropping(to: region.rect) { regions[name] = cut }
             }
         }
         self.regions = regions
+        atlasImage = whole
     }
 }
