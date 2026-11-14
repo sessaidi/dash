@@ -109,4 +109,23 @@ struct BuiltPluginLoadingTests {
             #expect(!extensions.isEmpty, "\(zip.lastPathComponent)")
         }
     }
+
+    @Test func dependenciesAreTransitiveOrderedAndEnforced() async throws {
+        let json = """
+        {"format": 2, "name": "Test", "extensions": [
+          {"id": "wsx-test", "name": "Workspaces", "kind": "feature", "version": "1.0.0", "requires": ["agx-test", "git"], "plugin": {"download": "w.zip"}},
+          {"id": "agx-test", "name": "Agents", "kind": "feature", "version": "1.0.0", "requires": ["atx-test"], "plugin": {"download": "a.zip"}},
+          {"id": "atx-test", "name": "Atlassian", "kind": "integration", "version": "1.0.0", "plugin": {"download": "j.zip"}}
+        ]}
+        """
+        let index = try JSONDecoder().decode(RegistryIndex.self, from: Data(json.utf8))
+        let marketplace = MarketplaceFeature()
+        marketplace.setCatalog(index, label: "test")
+        let workspaces = try #require(index.extensions.first)
+        // Requirements of requirements, each after what it needs; built-ins (git) count as present.
+        #expect(marketplace.missingDependencies(of: workspaces).map(\.id) == ["atx-test", "agx-test"])
+        await #expect(throws: ToolError("Workspaces needs Atlassian, Agents first.")) { try await marketplace.install(workspaces, from: "test") }
+        // Nothing installed requires these, so removing is allowed (and a no-op here).
+        #expect(marketplace.dependents(of: "agx-test").isEmpty)
+    }
 }

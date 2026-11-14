@@ -66,6 +66,9 @@ final class MarketplaceFeature: DashExtension {
     /// "owner/name", "owner/name@ref", or a local folder path, one per line.
     var registriesText: String { didSet { DashDefaults.shared.set(registriesText, forKey: "marketplace.registries") } }
     private(set) var catalogs: [String: (index: RegistryIndex, commit: String)] = [:]
+
+    /// Tests put a registry index in place without fetching one.
+    func setCatalog(_ index: RegistryIndex, label: String) { catalogs[label] = (index, "test") }
     private(set) var errors: [String: String] = [:]
     private(set) var isLoading = false
     /// A loaded plugin was updated or removed: that takes effect after a relaunch.
@@ -277,16 +280,36 @@ final class MarketplaceFeature: DashExtension {
     }
 
     /// What an entry requires that isn't installed (nor built in), with its registry entry if one has it.
+    /// What counts as present: built into Dash, or a plugin still installed. A removed plugin's code
+    /// stays loaded (switched off) until Dash restarts, so loaded extensions alone don't count.
+    func isPresent(_ id: String) -> Bool {
+        ExtensionHost.builtInIDs.contains(id) || installed(id) != nil
+    }
+
+    /// Everything missing for `entry`, requirements of requirements included, in install order
+    /// (each one after what it needs).
     func missingDependencies(of entry: RegistryIndex.Entry) -> [MissingDependency] {
-        let present = Set(host?.extensions.map(\.id) ?? [])
-        return (entry.requires ?? []).filter { !present.contains($0) && installed($0) == nil }.map { id in
-            let found = catalogs.lazy.compactMap { label, catalog in catalog.index.extensions.first { $0.id == id }.map { ($0, label) } }.first
-            return MissingDependency(id: id, entry: found?.0, registry: found?.1)
+        var ordered: [MissingDependency] = []
+        var visiting: Set<String> = [entry.id]
+        func visit(_ requires: [String]) {
+            for id in requires where !isPresent(id) && !ordered.contains(where: { $0.id == id }) && !visiting.contains(id) {
+                visiting.insert(id)
+                let found = catalogs.lazy.compactMap { label, catalog in catalog.index.extensions.first { $0.id == id }.map { ($0, label) } }.first
+                visit(found?.0.requires ?? [])
+                ordered.append(MissingDependency(id: id, entry: found?.0, registry: found?.1))
+            }
         }
+        visit(entry.requires ?? [])
+        return ordered
     }
 
     func install(_ entry: RegistryIndex.Entry, from registryLabel: String) async throws {
         guard entry.builtIn != true else { throw ToolError("\(entry.name) is built into Dash; nothing to install.") }
+        // Every path (buttons, Claude, Install All) ends here: never install something whose requirements are missing.
+        let missing = missingDependencies(of: entry)
+        guard missing.isEmpty else {
+            throw ToolError("\(entry.name) needs \(missing.map { $0.entry?.name ?? $0.id }.joined(separator: ", ")) first.")
+        }
         guard let registry = registries.first(where: { $0.label == registryLabel }), let catalog = catalogs[registryLabel] else {
             throw ToolError("Unknown registry \(registryLabel).")
         }
@@ -294,6 +317,7 @@ final class MarketplaceFeature: DashExtension {
         if case .local = registry { await refresh() }
         let current = catalogs[registryLabel]?.index.extensions.first { $0.id == entry.id } ?? entry
         guard let plugin = current.plugin else { throw ToolError("\(entry.name) has no plugin to install.") }
+
         do {
             try await installPlugin(current, plugin, from: registry, commit: catalogs[registryLabel]?.commit ?? catalog.commit)
         } catch {
@@ -345,7 +369,19 @@ final class MarketplaceFeature: DashExtension {
 
     /// Removes a plugin. A loaded one stops now (background work, tools, widgets go quiet);
     /// its code leaves memory at the next launch.
-    func uninstall(_ id: String) {
+    /// Installed plugins that require `id`.
+    func dependents(of id: String) -> [String] {
+        catalogs.values.flatMap(\.index.extensions)
+            .filter { installed($0.id) != nil && ($0.requires ?? []).contains(id) }
+            .map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// Removes a plugin, unless an installed plugin requires it.
+    func uninstall(_ id: String) throws {
+        let needing = dependents(of: id)
+        guard needing.isEmpty else {
+            throw ToolError("\(needing.joined(separator: ", ")) \(needing.count == 1 ? "needs" : "need") it. Remove \(needing.count == 1 ? "that" : "those") first.")
+        }
         let host = host as? ExtensionHost
         if let record = host?.plugins.first(where: { $0.id == id }), case .loaded(let ids) = record.state {
             for item in host?.extensions ?? [] where ids.contains(item.id) { host?.setEnabled(item, false) }
@@ -532,7 +568,9 @@ private struct MarketplaceView: View {
                 ProgressView().controlSize(.small)
             } else {
                 if installed != nil {
-                    Button("Remove") { marketplace.uninstall(entry.id) }
+                    Button("Remove") {
+                        do { try marketplace.uninstall(entry.id) } catch { self.error = error.localizedDescription }
+                    }
                 }
                 Button("Details") { details = PendingInstall(entry: entry, registry: label) }
                 if installed?.version != entry.version {
