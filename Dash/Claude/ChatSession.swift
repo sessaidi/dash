@@ -67,7 +67,7 @@ final class ChatSession {
         host.chat = self
     }
 
-    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + host.availableTools }
+    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + host.availableTools }
 
     static let systemPrompt = """
         Dash is a macOS work dashboard. It shows the user's Jira board, \
@@ -89,6 +89,11 @@ final class ChatSession {
         user message. Use them to stay \
         current and mention what matters to the question; don't recite them. Call dashboard_activity to look \
         further back.
+
+        What the user is looking at (the page and its widgets, or the open note) arrives in <current-view> \
+        tags with each message. "This", "here", "this note", "these pods" refer to it: act on it without asking \
+        which one. Call view_current to read the view's live data or the open note, and view_show to open a page \
+        or note, for example to show what you just made or changed.
 
         The chat panel is narrow. Keep answers short, and after changing something say in one line what changed.
         """
@@ -166,9 +171,9 @@ final class ChatSession {
             task = nil
         }
         let previousActivityID = lastActivityID
-        var prompt = text
+        var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
-            prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n\n\(text)"
+            prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }
         lastActivityID = host.activity.latestID
         do {

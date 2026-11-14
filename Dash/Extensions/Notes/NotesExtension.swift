@@ -18,6 +18,11 @@ final class NotesExtension: DashExtension {
                                      category: .productivity, homepage: "https://github.com/sessaidi/dash")
 
     let store: NotesStore
+    /// The note open in the Notes view (so Claude knows what "this note" is), and whether it's being edited.
+    var openNote: String?
+    var openNoteEditing = false
+    /// Set to a title to have the Notes view open that note (Claude's view_show).
+    var openRequest: String?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private weak var host: (any ExtensionContext)?
 

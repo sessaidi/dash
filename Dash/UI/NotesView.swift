@@ -46,7 +46,17 @@ struct NotesView: View {
             store.reload()
             if selection == nil, let first = store.notes.first { open(first) }
         }
-        .onDisappear { flush() }
+        .onDisappear {
+            flush()
+            notes.openNote = nil
+        }
+        // Claude asked to show a note.
+        .task(id: notes.openRequest) {
+            guard let title = notes.openRequest else { return }
+            notes.openRequest = nil
+            if let note = store.note(titled: title) { open(note) }
+        }
+        .onChange(of: preview, initial: true) { notes.openNoteEditing = !preview }
         .sheet(isPresented: $exporting) { NoteExportSheet(store: store, current: exportTarget) }
     }
 
@@ -323,6 +333,7 @@ struct NotesView: View {
     private func open(_ note: NoteFile) {
         flush()
         selection = note
+        notes.openNote = note.title
         text = store.read(note)
         title = note.title
         error = nil
