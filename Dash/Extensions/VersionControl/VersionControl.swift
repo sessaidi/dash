@@ -316,3 +316,26 @@ enum VCSIdentity {
     }
 }
 
+/// The user is the sole author of every commit Dash makes: no co-author trailers, no
+/// "Generated with" attribution, whatever the message Claude wrote.
+enum VCSAuthorship {
+    /// Lines removed from commit messages (case-insensitive prefixes, after trimming).
+    static let forbidden = ["co-authored-by:", "co-developed-by:", "generated-by:", "assisted-by:"]
+
+    nonisolated static func soleAuthor(_ message: String) -> String {
+        let kept = message.split(separator: "\n", omittingEmptySubsequences: false).filter { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            if forbidden.contains(where: { line.hasPrefix($0) }) { return false }
+            // "🤖 Generated with [Claude Code](…)" and the like.
+            let plain = line.drop { !$0.isLetter }
+            return !(plain.hasPrefix("generated with") && (plain.contains("claude") || plain.contains("ai")))
+        }
+        // Drop the blank lines the removed trailers leave at the end.
+        var lines = kept.map(String.init)
+        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Said in every commit-making tool's description.
+    static let rule = "The user is the sole author: never add Co-Authored-By or other attribution trailers, nor \"Generated with\" lines (they are removed anyway)."
+}

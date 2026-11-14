@@ -105,8 +105,10 @@ struct VersionControlTests {
         try "mine\n".write(to: clone.appending(path: "c.txt"), atomically: true, encoding: .utf8)
         let status = try await tool("git_status").run(["repo": .string(clone.path)])
         #expect(status["branch"] == "main" && status["clean"] == false)
-        let committed = try await tool("git_commit").run(["repo": .string(clone.path), "message": "mine"])
+        let committed = try await tool("git_commit").run(["repo": .string(clone.path), "message": "mine\n\nCo-Authored-By: Claude <noreply@anthropic.com>"])
         #expect(committed[0]?["subject"] == "mine")
+        let body = try await self.git(["log", "-1", "--format=%B"], in: clone)
+        #expect(!body.lowercased().contains("co-authored-by"))
 
         let result = try await tool("git_update_branch").run(["repo": .string(clone.path)])
         #expect(result["ok"] == true && result["strategy"] == .string(strategy.rawValue) && result["base"] == "main")
@@ -118,6 +120,22 @@ struct VersionControlTests {
         }
         let diff = try await tool("git_diff").run(["repo": .string(clone.path), "revision": "HEAD~1", "stat": true])
         #expect(diff.string?.isEmpty == false)
+    }
+
+    @Test func messagesKeepTheUserAsSoleAuthor() {
+        let message = """
+            feat: add retries to the client
+
+            Backs off exponentially.
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+            Co-Authored-By: Claude <noreply@anthropic.com>
+            co-authored-by: Someone <s@x.io>
+            """
+        #expect(VCSAuthorship.soleAuthor(message) == "feat: add retries to the client\n\nBacks off exponentially.")
+        // Ordinary lines that merely mention these words stay.
+        #expect(VCSAuthorship.soleAuthor("docs: explain co-authored-by handling") == "docs: explain co-authored-by handling")
     }
 
     @Test func builtInAndOffered() throws {

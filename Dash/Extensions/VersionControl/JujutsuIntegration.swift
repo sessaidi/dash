@@ -125,19 +125,19 @@ final class JujutsuIntegration: Integration {
                 guard let self else { return nil }
                 return .string(try await jj(["git", "fetch"], in: try await repository(input), timeout: 180))
             },
-            ClaudeTool(name: "jj_new", description: "Start a new change (on @, or on the given revisions; several parents make a merge), optionally with a description.",
+            ClaudeTool(name: "jj_new", description: "Start a new change (on @, or on the given revisions; several parents make a merge), optionally with a description. " + VCSAuthorship.rule,
                        properties: ["repo": repo, "parents": ["type": "array", "items": ["type": "string"], "description": "Parent revisions (default @)."],
                                     "message": JSONSchema.string("Description.")], required: ["repo"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
                 var arguments = ["new"] + (input["parents"]?.array?.compactMap(\.string) ?? [])
-                if let message = input["message"]?.string { arguments += ["-m", message] }
+                if let message = input["message"]?.string { arguments += ["-m", VCSAuthorship.soleAuthor(message)] }
                 return .string(try await jj(arguments, in: try await repository(input)))
             },
-            ClaudeTool(name: "jj_describe", description: "Set a change's description (default @). Follows the repository's commit conventions (vcs_preferences).",
+            ClaudeTool(name: "jj_describe", description: "Set a change's description (default @). Follows the repository's commit conventions (vcs_preferences). " + VCSAuthorship.rule,
                        properties: ["repo": repo, "revision": JSONSchema.string("Change (default @)."), "message": JSONSchema.string("The description.")],
                        required: ["repo", "message"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
-                return .string(try await jj(["describe", "-r", input["revision"]?.string ?? "@", "-m", input["message"]?.string ?? ""], in: try await repository(input)))
+                return .string(try await jj(["describe", "-r", input["revision"]?.string ?? "@", "-m", VCSAuthorship.soleAuthor(input["message"]?.string ?? "")], in: try await repository(input)))
             },
             ClaudeTool(name: "jj_bookmark_set", description: "Point a bookmark at a change (default @), creating it if needed. Follows the repository's branch conventions.",
                        properties: ["repo": repo, "name": JSONSchema.string("Bookmark name."), "revision": JSONSchema.string("Change (default @).")],

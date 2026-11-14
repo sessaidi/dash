@@ -241,12 +241,12 @@ final class GitIntegration: Integration {
                 _ = try await git(arguments, in: try await repository(input))
                 return ["branch": .string(name)]
             },
-            ClaudeTool(name: "git_commit", description: "Commit changes: the given paths, or everything changed (including new files) when none are given. Follows the repository's commit conventions (vcs_preferences). Nothing is pushed.",
+            ClaudeTool(name: "git_commit", description: "Commit changes: the given paths, or everything changed (including new files) when none are given. Follows the repository's commit conventions (vcs_preferences). Nothing is pushed. " + VCSAuthorship.rule,
                        properties: ["repo": repo, "message": JSONSchema.string("The commit message."),
                                     "paths": ["type": "array", "items": ["type": "string"], "description": "Files to commit; omit for all changes."]],
                        required: ["repo", "message"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
-                guard let message = input["message"]?.string, !message.isEmpty else { throw ToolError("Missing message") }
+                guard let message = input["message"].flatMap(\.string).map(VCSAuthorship.soleAuthor), !message.isEmpty else { throw ToolError("Missing message") }
                 let url = try await repository(input)
                 let paths = input["paths"]?.array?.compactMap(\.string) ?? []
                 _ = try await git(paths.isEmpty ? ["add", "-A"] : ["add", "--"] + paths, in: url)
