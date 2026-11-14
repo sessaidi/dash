@@ -25,7 +25,7 @@ final class AppSettings {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = DashDefaults.shared) {
         self.defaults = defaults
         model = defaults.string(forKey: "model") ?? "claude-opus-5-5"
         effort = defaults.string(forKey: "effort") ?? "medium"
@@ -55,7 +55,16 @@ struct Preference<Value> {
     let defaultValue: Value
 
     var value: Value {
-        get { UserDefaults.standard.object(forKey: key) as? Value ?? defaultValue }
-        nonmutating set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { DashDefaults.shared.object(forKey: key) as? Value ?? defaultValue }
+        nonmutating set { DashDefaults.shared.set(newValue, forKey: key) }
     }
+}
+
+
+/// Dash's preferences. Under tests it's a separate domain, so a test run never changes the
+/// user's settings (repositories, enabled plugins, pages…), whatever the test does.
+enum DashDefaults {
+    static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    nonisolated(unsafe) static let shared: UserDefaults = isTesting ? UserDefaults(suiteName: "dev.sessaidi.Dash.tests")! : .standard
 }

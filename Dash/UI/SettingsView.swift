@@ -287,9 +287,9 @@ private struct PersonaSettings: View {
                     ForEach(Persona.Chattiness.allCases) { Text($0.title).tag($0) }
                 }
                 Button("Reset Position") {
-                    UserDefaults.standard.set(0.0, forKey: "mascot.offsetX")
-                    UserDefaults.standard.set(0.0, forKey: "mascot.offsetY")
-                    UserDefaults.standard.removeObject(forKey: "NSWindow Frame DashDesktopMascot")
+                    DashDefaults.shared.set(0.0, forKey: "mascot.offsetX")
+                    DashDefaults.shared.set(0.0, forKey: "mascot.offsetY")
+                    DashDefaults.shared.removeObject(forKey: "NSWindow Frame DashDesktopMascot")
                 }
             }
         }

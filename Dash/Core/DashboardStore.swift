@@ -134,8 +134,8 @@ final class DashboardStore {
 
     /// The first page gets the Home header once, on the first launch that has it.
     func seedHome() {
-        guard !UserDefaults.standard.bool(forKey: "home.seeded"), let first = pages().first else { return }
-        UserDefaults.standard.set(true, forKey: "home.seeded")
+        guard !DashDefaults.shared.bool(forKey: "home.seeded"), let first = pages().first else { return }
+        DashDefaults.shared.set(true, forKey: "home.seeded")
         if !pages().contains(where: \.showsHome) { first.showsHome = true }
         try? context.save()
     }
@@ -187,8 +187,8 @@ final class DashboardStore {
     /// The built-in section for pages not in a custom one. Its name is the user's to change.
     static let defaultSectionKey = "dash.defaultSection"
     var defaultSectionName: String {
-        get { UserDefaults.standard.string(forKey: Self.defaultSectionKey + ".name") ?? "Pages" }
-        set { UserDefaults.standard.set(newValue, forKey: Self.defaultSectionKey + ".name") }
+        get { DashDefaults.shared.string(forKey: Self.defaultSectionKey + ".name") ?? "Pages" }
+        set { DashDefaults.shared.set(newValue, forKey: Self.defaultSectionKey + ".name") }
     }
 
     func sections() -> [SidebarSection] {

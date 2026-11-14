@@ -79,8 +79,8 @@ enum PluginLoader {
     private static let approvalsKey = "dash.approvedPlugins"
 
     static var approvals: [String: String] {
-        get { UserDefaults.standard.dictionary(forKey: approvalsKey) as? [String: String] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: approvalsKey) }
+        get { DashDefaults.shared.dictionary(forKey: approvalsKey) as? [String: String] ?? [:] }
+        set { DashDefaults.shared.set(newValue, forKey: approvalsKey) }
     }
 
     static func approve(_ record: PluginRecord) {

@@ -22,6 +22,8 @@ struct DashApp: App {
         }
         // Under XCTest the app is only a test host: no real store, no polling of real accounts.
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        // Tests never touch the user's preferences.
+        if testing { PreferenceStore.defaults = DashDefaults.shared }
         // Secrets: before any extension reads one. Tests use a throwaway file, never the real store.
         SecretStorage.apply()
         if testing {

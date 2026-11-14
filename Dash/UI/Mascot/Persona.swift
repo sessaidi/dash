@@ -72,7 +72,7 @@ final class Persona {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = DashDefaults.shared) {
         self.defaults = defaults
         // "Dot" was the placeholder name before the mascot became Dashii.
         let saved = defaults.string(forKey: "persona.name").flatMap { $0.isEmpty || $0 == "Dot" ? nil : $0 }

@@ -21,7 +21,7 @@ final class NotesExtension: DashExtension {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private weak var host: (any ExtensionContext)?
 
-    init(defaults: UserDefaults = .standard, vault: URL? = nil) {
+    init(defaults: UserDefaults = DashDefaults.shared, vault: URL? = nil) {
         self.defaults = defaults
         let saved = defaults.string(forKey: "notes.vault").map { URL(fileURLWithPath: $0, isDirectory: true) }
         store = NotesStore(vault: vault ?? saved ?? NotesStore.defaultVault)

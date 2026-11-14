@@ -45,7 +45,7 @@ final class MascotController {
     @ObservationIgnored private let cooldown: TimeInterval
     @ObservationIgnored private var greeted: Bool
 
-    init(cooldown: TimeInterval = 30, greeted: Bool = UserDefaults.standard.bool(forKey: "persona.greeted")) {
+    init(cooldown: TimeInterval = 30, greeted: Bool = DashDefaults.shared.bool(forKey: "persona.greeted")) {
         self.cooldown = cooldown
         self.greeted = greeted
     }
@@ -83,7 +83,7 @@ final class MascotController {
     func greetIfNeeded(name: String) {
         guard !greeted else { return }
         greeted = true
-        UserDefaults.standard.set(true, forKey: "persona.greeted")
+        DashDefaults.shared.set(true, forKey: "persona.greeted")
         show(Bubble(kind: .greeting, text: "Hi, I'm \(name)! Click me to ask anything, drag me wherever I'm out of the way, and I'll pipe up when something needs you.", importance: .info))
     }
 

@@ -64,7 +64,7 @@ final class MarketplaceFeature: DashExtension {
     let optional = ["github"]
 
     /// "owner/name", "owner/name@ref", or a local folder path, one per line.
-    var registriesText: String { didSet { UserDefaults.standard.set(registriesText, forKey: "marketplace.registries") } }
+    var registriesText: String { didSet { DashDefaults.shared.set(registriesText, forKey: "marketplace.registries") } }
     private(set) var catalogs: [String: (index: RegistryIndex, commit: String)] = [:]
     private(set) var errors: [String: String] = [:]
     private(set) var isLoading = false
@@ -77,7 +77,7 @@ final class MarketplaceFeature: DashExtension {
     static let defaultRegistry = "sessaidi/dash-registry"
 
     init() {
-        if let saved = UserDefaults.standard.string(forKey: "marketplace.registries"), !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let saved = DashDefaults.shared.string(forKey: "marketplace.registries"), !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             registriesText = saved
         } else {
             let local = ("~/code/dash-registry" as NSString).expandingTildeInPath
@@ -250,10 +250,10 @@ final class MarketplaceFeature: DashExtension {
 
     private static var pluginInstalls: [String: InstallRecord] {
         get {
-            guard let data = UserDefaults.standard.data(forKey: pluginInstallsKey) else { return [:] }
+            guard let data = DashDefaults.shared.data(forKey: pluginInstallsKey) else { return [:] }
             return (try? JSONDecoder().decode([String: InstallRecord].self, from: data)) ?? [:]
         }
-        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: pluginInstallsKey) }
+        set { DashDefaults.shared.set(try? JSONEncoder().encode(newValue), forKey: pluginInstallsKey) }
     }
 
     func installed(_ id: String) -> InstallRecord? {

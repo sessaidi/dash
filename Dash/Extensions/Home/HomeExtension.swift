@@ -45,7 +45,7 @@ final class HomeExtension: DashExtension {
     /// Suggestions the user dismissed today.
     private(set) var dismissed: Set<String>
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = DashDefaults.shared) {
         self.defaults = defaults
         userName = defaults.string(forKey: "home.name") ?? Self.givenName(NSFullUserName())
         role = defaults.string(forKey: "home.role") ?? ""

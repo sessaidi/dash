@@ -13,7 +13,7 @@ enum SecretStorage {
 
     /// The saved choice, else the encrypted database.
     static var current: SecretBackend {
-        UserDefaults.standard.string(forKey: key).flatMap(SecretBackend.init(rawValue:)) ?? .database
+        DashDefaults.shared.string(forKey: key).flatMap(SecretBackend.init(rawValue:)) ?? .database
     }
 
     static func apply() {
@@ -38,7 +38,7 @@ enum SecretStorage {
     static func switchTo(_ backend: SecretBackend) -> Int {
         guard backend != Keychain.backend else { return 0 }
         let moved = Keychain.move(from: Keychain.backend, to: backend)
-        UserDefaults.standard.set(backend.rawValue, forKey: key)
+        DashDefaults.shared.set(backend.rawValue, forKey: key)
         Keychain.backend = backend
         SecretField.savedLabel = backend.savedLabel
         return moved

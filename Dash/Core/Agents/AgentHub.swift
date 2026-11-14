@@ -52,7 +52,7 @@ final class AgentHub {
     @ObservationIgnored private weak var host: ExtensionHost?
     @ObservationIgnored private var clock: Task<Void, Never>?
     @ObservationIgnored private var lastEventRun: [String: Date] = [:]
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults = DashDefaults.shared
     /// Keep this many reports per agent.
     static let keep = 200
 

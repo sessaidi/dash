@@ -49,7 +49,7 @@ final class KnowledgeExtension: DashExtension {
     }
 
     /// `url` nil keeps the graph in memory (tests).
-    init(defaults: UserDefaults = .standard, url: URL? = KnowledgeExtension.defaultURL) {
+    init(defaults: UserDefaults = DashDefaults.shared, url: URL? = KnowledgeExtension.defaultURL) {
         self.defaults = defaults
         store = try? KnowledgeStore(url: url)
         repositories = defaults.stringArray(forKey: "knowledge.repos") ?? []
@@ -130,7 +130,7 @@ final class KnowledgeExtension: DashExtension {
 
     /// Where clones live (the Agents plugin's code folder, ~/Codes by default).
     static var codeRoot: URL {
-        URL(fileURLWithPath: ((UserDefaults.standard.string(forKey: "agents.codeRoot") ?? "~/Codes") as NSString).expandingTildeInPath)
+        URL(fileURLWithPath: ((DashDefaults.shared.string(forKey: "agents.codeRoot") ?? "~/Codes") as NSString).expandingTildeInPath)
     }
 
     /// Git clones directly in a folder (worktrees under .worktrees aren't separate repositories).

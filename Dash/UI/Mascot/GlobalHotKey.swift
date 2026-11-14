@@ -47,7 +47,7 @@ final class DashAppDelegate: NSObject, NSApplicationDelegate {
     /// Right-click on the Dock icon.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
-        let persona = UserDefaults.standard.string(forKey: "persona.name").flatMap { $0.isEmpty || $0 == "Dot" ? nil : $0 } ?? "Dashii"
+        let persona = DashDefaults.shared.string(forKey: "persona.name").flatMap { $0.isEmpty || $0 == "Dot" ? nil : $0 } ?? "Dashii"
         for (title, name) in [("Ask \(persona)…", Notification.Name.summonMascot), ("New Page…", .dashNewPage), ("Add Widget…", .dashAddWidget)] {
             let item = NSMenuItem(title: title, action: #selector(post(_:)), keyEquivalent: "")
             item.target = self

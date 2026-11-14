@@ -21,12 +21,12 @@ final class ExtensionHost: ExtensionContext {
     /// Problems with the installed extensions (a feature whose integration is missing).
     private(set) var extensionErrors: [String] = []
     /// Integrations and features the user turned off.
-    private(set) var disabled: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "dash.disabledExtensions") ?? [])
+    private(set) var disabled: Set<String> = Set(DashDefaults.shared.stringArray(forKey: "dash.disabledExtensions") ?? [])
     /// What the main area shows: "page" (the selected page) or "notes".
     var mainView = "page"
     /// The page on screen.
-    var selectedPageID: UUID? = UUID(uuidString: UserDefaults.standard.string(forKey: "dash.selectedPage") ?? "") {
-        didSet { UserDefaults.standard.set(selectedPageID?.uuidString, forKey: "dash.selectedPage") }
+    var selectedPageID: UUID? = UUID(uuidString: DashDefaults.shared.string(forKey: "dash.selectedPage") ?? "") {
+        didSet { DashDefaults.shared.set(selectedPageID?.uuidString, forKey: "dash.selectedPage") }
     }
     /// The page's layout is unlocked (⌘E, or press and hold a widget's header): widgets wiggle and
     /// can be moved, resized, removed and added from the gallery.
@@ -203,7 +203,7 @@ final class ExtensionHost: ExtensionContext {
             disabled.insert(item.id)
             item.stop()
         }
-        UserDefaults.standard.set(disabled.sorted(), forKey: "dash.disabledExtensions")
+        DashDefaults.shared.set(disabled.sorted(), forKey: "dash.disabledExtensions")
         activity.emit(enabled ? "extension.enabled" : "extension.disabled", source: "dashboard",
                       title: "\(item.name) was turned \(enabled ? "on" : "off")", importance: .notable)
     }
@@ -299,20 +299,20 @@ final class ExtensionHost: ExtensionContext {
     /// Saved choices for a widget or an extension, by task id.
     func aiChoices(_ scope: AIScope) -> [String: AITaskChoice] {
         _ = aiRevision
-        guard let data = UserDefaults.standard.data(forKey: Self.aiKey(scope)) else { return [:] }
+        guard let data = DashDefaults.shared.data(forKey: Self.aiKey(scope)) else { return [:] }
         return (try? JSONDecoder().decode([String: AITaskChoice].self, from: data)) ?? [:]
     }
 
     func setAIChoice(_ choice: AITaskChoice?, task: String, scope: AIScope) {
         var choices = aiChoices(scope)
         choices[task] = choice
-        UserDefaults.standard.set(choices.isEmpty ? nil : try? JSONEncoder().encode(choices), forKey: Self.aiKey(scope))
+        DashDefaults.shared.set(choices.isEmpty ? nil : try? JSONEncoder().encode(choices), forKey: Self.aiKey(scope))
         aiRevision += 1
         activity.emit("ai.settings", source: "dashboard", title: "Changed AI settings for \(task)")
     }
 
     func clearAIChoices(_ scope: AIScope) {
-        UserDefaults.standard.removeObject(forKey: Self.aiKey(scope))
+        DashDefaults.shared.removeObject(forKey: Self.aiKey(scope))
         aiRevision += 1
     }
 

@@ -255,16 +255,20 @@ public struct PreferenceStore: Sendable {
 
     public func key(_ name: String) -> String { "\(prefix).\(name)" }
 
-    public func string(_ name: String) -> String? { UserDefaults.standard.string(forKey: key(name)) }
-    public func bool(_ name: String) -> Bool? { UserDefaults.standard.object(forKey: key(name)) as? Bool }
-    public func int(_ name: String) -> Int? { UserDefaults.standard.object(forKey: key(name)) as? Int }
-    public func set(_ value: Any?, _ name: String) { UserDefaults.standard.set(value, forKey: key(name)) }
+    /// Where preferences live; the host points it elsewhere under tests.
+    nonisolated(unsafe) public static var defaults = UserDefaults.standard
+    private var defaults: UserDefaults { Self.defaults }
+
+    public func string(_ name: String) -> String? { defaults.string(forKey: key(name)) }
+    public func bool(_ name: String) -> Bool? { defaults.object(forKey: key(name)) as? Bool }
+    public func int(_ name: String) -> Int? { defaults.object(forKey: key(name)) as? Int }
+    public func set(_ value: Any?, _ name: String) { defaults.set(value, forKey: key(name)) }
 
     public var storedKeys: [String] {
-        UserDefaults.standard.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix + ".") }.sorted()
+        defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(prefix + ".") }.sorted()
     }
 
     public func removeAll() {
-        for key in storedKeys { UserDefaults.standard.removeObject(forKey: key) }
+        for key in storedKeys { defaults.removeObject(forKey: key) }
     }
 }
