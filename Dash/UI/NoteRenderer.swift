@@ -100,15 +100,7 @@ struct NoteBlockView: View {
                     .overlay(alignment: .leading) { Capsule().fill(.tertiary).frame(width: 3) }
             }
         case .code(let language, let text):
-            VStack(alignment: .leading, spacing: 4) {
-                if let language, !language.isEmpty { Text(language).font(.caption2).foregroundStyle(.tertiary) }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(text).font(.callout.monospaced()).textSelection(.enabled)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
+            CodeBlockView(language: language, text: text, printing: context.printing)
         case .rule:
             Divider()
         case .table(let header, let rows):
@@ -272,5 +264,48 @@ struct TableRowLayout: Layout {
             subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: nil))
             x += width + spacing
         }
+    }
+}
+
+/// A fenced code block: language label, a copy button, and long lines scrolling sideways
+/// (with a visible scroller) instead of being cut off.
+private struct CodeBlockView: View {
+    let language: String?
+    let text: String
+    let printing: Bool
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if let language, !language.isEmpty { Text(language).font(.caption2).foregroundStyle(.tertiary) }
+                Spacer()
+                if !printing {
+                    Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        copied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            copied = false
+                        }
+                    }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
+                    .help("Copy code")
+                }
+            }
+            if printing {
+                Text(text).font(.callout.monospaced())
+            } else {
+                ScrollView(.horizontal) {
+                    Text(text).font(.callout.monospaced()).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                        .padding(.bottom, 6)
+                }
+                .scrollIndicators(.visible)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
     }
 }
