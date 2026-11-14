@@ -167,6 +167,32 @@ public struct GridEngine: Sendable {
         return GridFrame(x: 0, y: bottom, w: size.w, h: size.h)
     }
 
+    /// The layout re-packed into fewer columns, for a window too narrow for the saved one.
+    /// Cells keep their reading order and height; each gets `width(frame)` columns (clamped to
+    /// 1…`columns`) and goes in the first spot that isn't above the previous cell, so nothing
+    /// jumps ahead of what came before it. The saved layout is untouched.
+    public func reflow<ID: Hashable>(_ frames: [ID: GridFrame], columns: Int, width: (GridFrame) -> Int) -> [ID: GridFrame] {
+        let columns = max(1, columns)
+        var placed: [ID: GridFrame] = [:]
+        var floor = 0
+        for (id, frame) in frames.sorted(by: { order($0.value, $1.value) }) {
+            let w = min(max(width(frame), 1), columns)
+            var y = floor
+            search: while true {
+                for x in 0...(columns - w) {
+                    let candidate = GridFrame(x: x, y: y, w: w, h: frame.h)
+                    if !placed.values.contains(where: { $0.intersects(candidate) }) {
+                        placed[id] = candidate
+                        floor = y
+                        break search
+                    }
+                }
+                y += 1
+            }
+        }
+        return placed
+    }
+
     /// Reading order (top to bottom, left to right).
     public func order(_ a: GridFrame, _ b: GridFrame) -> Bool {
         a.y != b.y ? a.y < b.y : a.x < b.x

@@ -84,6 +84,11 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     let limits: [ID: GridLimits]
     let onCommit: ([ID: GridFrame]) -> Void
     let cell: (ID) -> Cell
+    /// Narrowest a column may get. Below it the grid stops squeezing widgets and re-packs them
+    /// into fewer columns (stacking them when the window is narrow); editing waits for more room.
+    let minimumColumnWidth: CGFloat
+    /// Width a column is designed for: a widget keeps about `w × designColumnWidth` points when re-packed.
+    let designColumnWidth: CGFloat
 
     private enum Kind { case move, resize }
     private struct Drag {
@@ -98,8 +103,11 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     public init(
         frames: [ID: GridFrame], engine: GridEngine = GridEngine(), rowHeight: CGFloat = 40, spacing: CGFloat = 16,
         editing: Bool = true, limits: [ID: GridLimits] = [:], header: AnyView? = nil,
+        minimumColumnWidth: CGFloat = 72, designColumnWidth: CGFloat = 96,
         onCommit: @escaping ([ID: GridFrame]) -> Void, @ViewBuilder cell: @escaping (ID) -> Cell
     ) {
+        self.minimumColumnWidth = minimumColumnWidth
+        self.designColumnWidth = designColumnWidth
         self.frames = frames
         self.editing = editing
         self.header = header
@@ -114,13 +122,28 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     public var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width - spacing * 2, 0)
-            let metrics = Metrics(width: width, columns: engine.columns, rowHeight: rowHeight, spacing: spacing)
-            let layout = previewLayout(metrics)
+            let full = Metrics(width: width, columns: engine.columns, rowHeight: rowHeight, spacing: spacing)
+            // Too narrow for the saved layout: re-pack into the columns that fit.
+            let reflowed = full.cellWidth < minimumColumnWidth
+            let columns = reflowed ? max(1, Int((width + spacing) / (minimumColumnWidth + spacing))) : engine.columns
+            let metrics = reflowed ? Metrics(width: width, columns: columns, rowHeight: rowHeight, spacing: spacing) : full
+            let editing = self.editing && !reflowed
+            let layout = reflowed
+                ? engine.reflow(frames, columns: columns) { frame in
+                    Int((CGFloat(frame.w) * designColumnWidth / (metrics.cellWidth + spacing)).rounded(.up))
+                }
+                : previewLayout(metrics)
             // While editing, spare rows below the last widget give room to drop things lower.
             let rows = engine.height(layout) + (editing ? 8 : 0) + (drag == nil ? 0 : 4)
             let height = max(metrics.height(rows: rows), editing ? proxy.size.height - spacing * 2 : 0)
             ScrollView {
                 if let header { header.padding(.horizontal, spacing).padding(.top, spacing) }
+                if reflowed && self.editing {
+                    Label("The window is too narrow to arrange widgets, so they're stacked. Make it wider to edit the layout.",
+                          systemImage: "arrow.left.and.right")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, spacing).padding(.top, spacing)
+                }
                 ZStack(alignment: .topLeading) {
                     Color.clear
                     if editing {
@@ -151,7 +174,7 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
                             .offset(x: rect.minX, y: rect.minY)
                     }
                     ForEach(Array(frames.keys), id: \.self) { id in
-                        let rect = liveRect(id, layout: layout, metrics: metrics)
+                        let rect = reflowed ? metrics.rect(layout[id] ?? frames[id]!) : liveRect(id, layout: layout, metrics: metrics)
                         let dragging = drag?.id == id
                         cell(id)
                             .frame(width: rect.width, height: rect.height)

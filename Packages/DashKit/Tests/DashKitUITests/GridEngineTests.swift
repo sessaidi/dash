@@ -79,4 +79,21 @@ struct GridEngineTests {
                                  limits: ["a": limits])
         #expect(laid["a"] == GridFrame(x: 0, y: 0, w: 6, h: 4))
     }
+
+    @Test func reflowKeepsOrderAndHeights() {
+        let engine = GridEngine()
+        // Side by side on the full grid: pods (6 wide) left of analytics (6 wide), notes below.
+        let frames = ["pods": GridFrame(x: 0, y: 0, w: 6, h: 8), "analytics": GridFrame(x: 6, y: 0, w: 6, h: 8),
+                      "notes": GridFrame(x: 0, y: 8, w: 4, h: 5)]
+        // Narrow: 6 columns, each widget wants all 6 → stacked in reading order.
+        let stacked = engine.reflow(frames, columns: 6) { _ in 6 }
+        #expect(stacked["pods"] == GridFrame(x: 0, y: 0, w: 6, h: 8))
+        #expect(stacked["analytics"] == GridFrame(x: 0, y: 8, w: 6, h: 8))
+        #expect(stacked["notes"] == GridFrame(x: 0, y: 16, w: 6, h: 5))
+        // Wider than asked is clamped; smaller ones share a row but never move above an earlier one.
+        let packed = engine.reflow(frames, columns: 8) { $0.w == 4 ? 4 : 99 }
+        #expect(packed["pods"]?.w == 8 && packed["analytics"]?.y == 8 && packed["notes"]?.y == 16)
+        let sideBySide = engine.reflow(["a": GridFrame(x: 0, y: 0, w: 3, h: 2), "b": GridFrame(x: 3, y: 0, w: 3, h: 4)], columns: 6) { $0.w }
+        #expect(sideBySide["a"] == GridFrame(x: 0, y: 0, w: 3, h: 2) && sideBySide["b"] == GridFrame(x: 3, y: 0, w: 3, h: 4))
+    }
 }
