@@ -59,7 +59,7 @@ struct WorkspaceAnalyticsWidget: DashboardWidget {
             if weekday != 1 && weekday != 7 && seed % 3 != 0 { values[day] = Double(seed % 40 + 5) * 80 }
             day = calendar.date(byAdding: .day, value: 1, to: day)!
         }
-        return AnalyticsLayout(metric: config.metric, values: values, from: start, to: end, sources: [("chat", 0.62), ("extension.pull-requests", 0.23), ("knowledge", 0.15)],
+        return AnalyticsLayout(metric: config.metric, values: values, from: start, to: end, sources: [("Chat", 0.62), ("Pull requests", 0.23), ("Knowledge", 0.15)],
                                title: Self.period(start, end), onPrevious: nil, onNext: nil)
     }
 
@@ -98,7 +98,9 @@ private struct WorkspaceAnalyticsView: View {
             bySource[Self.source(call.source), default: 0] += amount
         }
         let total = max(bySource.values.reduce(0, +), 1)
-        let sources = bySource.sorted { $0.value > $1.value }.prefix(3).map { ($0.key, $0.value / total) }
+        var sources = bySource.sorted { $0.value > $1.value }.prefix(3).map { ($0.key, $0.value / total) }
+        let rest = 1 - sources.reduce(0) { $0 + $1.1 }
+        if rest > 0.005 { sources.append(("Other", rest)) }
         return AnalyticsLayout(metric: config.metric, values: values, from: start, to: end, sources: Array(sources),
                                title: WorkspaceAnalyticsWidget.period(start, end),
                                onPrevious: { offset += 1 }, onNext: offset > 0 ? { offset -= 1 } : nil)
@@ -112,10 +114,20 @@ private struct WorkspaceAnalyticsView: View {
         }
     }
 
-    /// "extension.pull-requests/review" → "pull-requests".
+    /// A readable name for where requests came from: "extension.pull-requests/review" → "Pull requests",
+    /// "agent.agents-studio.55B6…" → "Agents studio" (ids are dropped so one agent's runs add up).
     static func source(_ source: String) -> String {
         let head = source.split(separator: "/").first.map(String.init) ?? source
-        return head.replacingOccurrences(of: "extension.", with: "").replacingOccurrences(of: "widget.", with: "widget ")
+        let parts = head.split(separator: ".").map(String.init).filter { part in
+            !["extension", "widget", "agent", "feature"].contains(part) && !isIdentifier(part)
+        }
+        let name = (parts.last ?? head).replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+        return name.prefix(1).uppercased() + name.dropFirst()
+    }
+
+    /// UUIDs and long hex runs: per-run ids, not names.
+    static func isIdentifier(_ text: String) -> Bool {
+        UUID(uuidString: text) != nil || (text.count >= 12 && text.allSatisfy { $0.isHexDigit || $0 == "-" })
     }
 }
 
@@ -146,34 +158,56 @@ struct AnalyticsLayout: View {
                 Button("Later", systemImage: "chevron.right") { onNext?() }
                     .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(onNext == nil)
             }
-            HStack(spacing: 14) {
-                if let peak, peak.value > 0 {
-                    (Text("Peak: ").foregroundStyle(.secondary)
-                        + Text("\(format(peak.value)) (\(peak.key.formatted(.dateTime.month(.abbreviated).day())))").monospaced())
-                        .font(.callout)
-                } else {
-                    Text("No activity in this period.").font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer()
+            // Four even tiles: total, peak day, active days, streak.
+            HStack(spacing: 8) {
                 stat(format(total), "total")
+                if let peak, peak.value > 0 {
+                    stat(format(peak.value), "peak · \(peak.key.formatted(.dateTime.month(.abbreviated).day()))")
+                } else {
+                    stat("—", "peak")
+                }
                 stat("\(values.values.filter { $0 > 0 }.count)", "active days")
                 stat("\(streak)", "day streak")
             }
             ActivityHeatmap(values: values, from: from, to: to, tint: tint, format: format)
-            if !sources.isEmpty {
-                HStack(spacing: 12) {
-                    ForEach(sources, id: \.0) { source, share in
-                        Text("\(source) \(Int((share * 100).rounded()))%").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
+                .frame(maxHeight: .infinity)
+            if !sources.isEmpty { sourcesBar }
         }
     }
 
     private func stat(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            Text(value).font(.callout.bold()).monospacedDigit()
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.callout.bold()).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 7))
+    }
+
+    /// Where the activity came from: one bar split by share, and a one-line legend.
+    private var sourcesBar: some View {
+        let colors: [Color] = [tint, tint.opacity(0.6), tint.opacity(0.35), .secondary.opacity(0.4)]
+        return VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geometry in
+                HStack(spacing: 2) {
+                    ForEach(Array(sources.enumerated()), id: \.offset) { index, entry in
+                        colors[min(index, colors.count - 1)].frame(width: max(2, geometry.size.width * entry.1 - 2))
+                    }
+                }
+                .clipShape(.capsule)
+            }
+            .frame(height: 6)
+            HStack(spacing: 10) {
+                ForEach(Array(sources.enumerated()), id: \.offset) { index, entry in
+                    HStack(spacing: 4) {
+                        Circle().fill(colors[min(index, colors.count - 1)]).frame(width: 6, height: 6)
+                        Text(entry.0).lineLimit(1).truncationMode(.middle)
+                        Text("\(Int((entry.1 * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .font(.caption)
+                }
+            }
         }
     }
 
