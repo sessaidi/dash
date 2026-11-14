@@ -436,6 +436,15 @@ actor KnowledgeStore {
         return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
     }
 
+    /// Edges per kind ("calls", "authored", …).
+    func edgeCounts() throws -> [String: Int] {
+        var result: [String: Int] = [:]
+        let statement = try prepare("SELECT kind, COUNT(*) FROM edges GROUP BY kind")
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW { result[text(statement, 0)] = Int(sqlite3_column_int64(statement, 1)) }
+        return result
+    }
+
     func counts() throws -> [String: Int] {
         var result: [String: Int] = [:]
         let statement = try prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
