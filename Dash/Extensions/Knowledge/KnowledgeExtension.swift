@@ -62,7 +62,12 @@ final class KnowledgeExtension: DashExtension {
 
     func start(host: any ExtensionContext) {
         self.host = host
-        Task { counts = (try? await store?.counts()) ?? [:] }
+        Task {
+            // The graph is the source of truth: a repository it indexed stays listed even if the
+            // preference lost it (only removing a repository drops it from both).
+            await restoreRepositories()
+            counts = (try? await store?.counts()) ?? [:]
+        }
         loop?.cancel()
         loop = Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))  // after launch settles
@@ -251,6 +256,12 @@ final class KnowledgeExtension: DashExtension {
             let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             return (process.terminationStatus, output)
         }.value
+    }
+
+    func restoreRepositories() async {
+        let indexed = (try? await store?.repositoryPaths()) ?? []
+        let missing = indexed.filter { !repositories.contains($0) && FileManager.default.fileExists(atPath: $0) }
+        if !missing.isEmpty { repositories += missing }
     }
 
     func removeRepository(_ path: String) {

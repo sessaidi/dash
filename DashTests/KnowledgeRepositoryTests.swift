@@ -37,4 +37,17 @@ struct KnowledgeRepositoryTests {
         #expect(knowledge.tools.first { $0.name == "knowledge_add_repository" }?.requiresApproval == true)
         #expect(knowledge.tools.first { $0.name == "knowledge_find_repos" }?.requiresApproval == false)
     }
+
+    @Test func indexedRepositoriesComeBackIfTheListLosesThem() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "dash-restore-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try checkout("svc", in: root)
+        try "package main\nfunc Handle() {}\n".write(to: repo.appending(path: "main.go"), atomically: true, encoding: .utf8)
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "k-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        _ = try await KnowledgeExtension.index(repo.path, store: store, history: false)
+        #expect(knowledge.repositories.isEmpty)
+        await knowledge.restoreRepositories()
+        #expect(knowledge.repositories == [repo.standardizedFileURL.path] || knowledge.repositories == [repo.path])
+    }
 }

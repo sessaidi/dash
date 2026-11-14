@@ -392,6 +392,18 @@ actor KnowledgeStore {
     }
 
     /// kind → count.
+    /// Paths of the repositories indexed in the graph (their nodes are "repo:<path>").
+    func repositoryPaths() throws -> [String] {
+        var result: [String] = []
+        let statement = try prepare("SELECT id FROM nodes WHERE kind = 'repo' ORDER BY id")
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = text(statement, 0)
+            if id.hasPrefix("repo:") { result.append(String(id.dropFirst(5))) }
+        }
+        return result
+    }
+
     func counts() throws -> [String: Int] {
         var result: [String: Int] = [:]
         let statement = try prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
