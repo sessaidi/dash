@@ -18,6 +18,10 @@ enum CoreComponents {
         let top = headings.map(\.level).min() ?? 1
         return AnyView(VStack(alignment: .leading, spacing: 4) {
             Label("Contents", systemImage: "list.bullet.indent").font(.caption.bold()).foregroundStyle(.secondary)
+            if headings.isEmpty {
+                Text("No headings yet. Lines starting with #, ## or ### show up here.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
             ForEach(Array(headings.enumerated()), id: \.offset) { _, heading in
                 Group {
                     if context.isPrinting { Text(heading.title) } else {
