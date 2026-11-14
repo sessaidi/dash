@@ -193,9 +193,17 @@ struct NotesView: View {
                         Button { open(parent) } label: { Label(parent.title, systemImage: "chevron.left").font(.caption) }
                             .buttonStyle(.link)
                     }
-                    TextField("Title", text: $title)
+                    // Wraps instead of being cut off when the toolbar leaves little room; Return renames.
+                    TextField("Title", text: $title, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.title2.bold())
+                        .lineLimit(1...3)
+                        .onChange(of: title) {
+                            if title.contains("\n") {
+                                title = title.replacingOccurrences(of: "\n", with: "")
+                                renameIfNeeded(note)
+                            }
+                        }
                         .onSubmit { renameIfNeeded(note) }
                 }
                 Spacer()
