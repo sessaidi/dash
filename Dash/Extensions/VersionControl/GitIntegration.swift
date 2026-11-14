@@ -122,6 +122,12 @@ final class GitIntegration: Integration {
                 let url = input["repo"]?.string == nil ? nil : try await VCSRepository.resolve(input["repo"]?.string, host: host)
                 return preferences.json(for: url)
             },
+            ClaudeTool(name: "vcs_identity", description: "Who commits and how: git's user name, email and signing settings (globally or in a repository), the SSH hosts in ~/.ssh/config with their identity files, the SSH public keys, whether an ssh-agent is running, and GPG secret keys when gpg is installed. Private keys are never read. Read-only.",
+                       properties: ["repo": JSONSchema.string("A repository, for its own config; omit for the global one.")]) { [weak self] input in
+                guard let self else { return nil }
+                let url = input["repo"]?.string == nil ? nil : try await VCSRepository.resolve(input["repo"]?.string, host: host)
+                return await VCSIdentity.json(repository: url)
+            },
             ClaudeTool(name: "git_status", description: "A git repository's branch, upstream, ahead/behind counts and changed files (staged, unstaged, untracked, conflicted). Read-only.",
                        properties: ["repo": repo], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }

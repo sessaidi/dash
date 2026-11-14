@@ -39,6 +39,32 @@ struct VersionControlTests {
         #expect(jj.first?["bookmarks"] == ["main", "feature"] && jj.first?["empty"] == true && jj.first?["working_copy"] == true && jj.first?["description"] == .null)
     }
 
+    @Test func readsSSHConfigAndGPG() {
+        let hosts = VCSIdentity.parseSSHConfig("""
+            # personal
+            Host github.com
+              HostName github.com
+              User git
+              IdentityFile ~/.ssh/id_ed25519
+              IdentitiesOnly yes
+            Host work-gh
+                HostName=github.com
+                IdentityFile = ~/.ssh/work
+                Port 443
+            Include extra
+            """) { $0 == "extra" ? "Host bastion\n  HostName 10.0.0.1\n  User ops" : nil }
+        #expect(hosts.map(\.patterns) == [["github.com"], ["work-gh"], ["bastion"]])
+        #expect(hosts[0].user == "git" && hosts[0].identityFiles == ["~/.ssh/id_ed25519"] && hosts[0].identitiesOnly == true)
+        #expect(hosts[1].hostName == "github.com" && hosts[1].port == "443" && hosts[1].identityFiles == ["~/.ssh/work"])
+        #expect(hosts[2].hostName == "10.0.0.1")
+        let keys = VCSIdentity.parseGPG("""
+            sec:u:255:22:ABCDEF0123456789:1700000000:1800000000::u:::scESC:::+:::23::0:
+            fpr:::::::::0123ABCDEF0123456789:
+            uid:u::::1700000000::HASH::Ada Lovelace <ada@x.io>::::::::::0:
+            """)
+        #expect(keys.first?.id == "ABCDEF0123456789" && keys.first?.algorithm == "EdDSA" && keys.first?.users == ["Ada Lovelace <ada@x.io>"])
+    }
+
     @Test func preferencesLayerPerRepository() throws {
         let preferences = VCSPreferences(defaults: UserDefaults(suiteName: "vcs-\(UUID())")!)
         let repo = temp(), jjRepo = temp()

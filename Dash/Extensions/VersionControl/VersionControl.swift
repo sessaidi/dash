@@ -182,3 +182,137 @@ enum VCSRepository {
     }
 }
 
+/// Who commits and how: the SSH setup from ~/.ssh (config hosts and public keys; private keys are
+/// never read) and commit signing (git's signing settings, and GPG secret keys when gpg is installed).
+enum VCSIdentity {
+    struct SSHHost: Equatable, Sendable {
+        var patterns: [String]
+        var hostName: String?
+        var user: String?
+        var port: String?
+        var identityFiles: [String] = []
+        var identitiesOnly: Bool?
+
+        var json: JSONValue {
+            ["host": .string(patterns.joined(separator: " ")), "hostname": hostName.map(JSONValue.string) ?? .null,
+             "user": user.map(JSONValue.string) ?? .null, "port": port.map(JSONValue.string) ?? .null,
+             "identity_files": .array(identityFiles.map { .string($0) }), "identities_only": identitiesOnly.map(JSONValue.bool) ?? .null]
+        }
+    }
+
+    struct GPGKey: Equatable, Sendable {
+        let id: String
+        let algorithm: String
+        let expires: Date?
+        var users: [String]
+    }
+
+    static var sshFolder: URL { FileManager.default.homeDirectoryForCurrentUser.appending(path: ".ssh") }
+
+    /// `Host` blocks of an ssh config (Include lines are followed one level, relative to ~/.ssh).
+    nonisolated static func parseSSHConfig(_ text: String, include: (String) -> String? = { _ in nil }) -> [SSHHost] {
+        var hosts: [SSHHost] = []
+        var current: SSHHost?
+        func flush() { if let current { hosts.append(current) } }
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            // "Key value", "Key=value" or "Key = value".
+            let parts = line.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "=" || $0 == "\t" })
+            guard parts.count == 2 else { continue }
+            let key = parts[0].lowercased()
+            let value = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " =\t\""))
+            switch key {
+            case "host":
+                flush()
+                current = SSHHost(patterns: value.split(separator: " ").map(String.init))
+            case "match":
+                flush()
+                current = SSHHost(patterns: ["match " + value])
+            case "include":
+                for file in value.split(separator: " ") {
+                    if let included = include(String(file)) { flush(); current = nil; hosts += parseSSHConfig(included) }
+                }
+            case "hostname": current?.hostName = value
+            case "user": current?.user = value
+            case "port": current?.port = value
+            case "identityfile": current?.identityFiles.append(value)
+            case "identitiesonly": current?.identitiesOnly = value.lowercased() == "yes"
+            default: break
+            }
+        }
+        flush()
+        return hosts
+    }
+
+    static func sshHosts() -> [SSHHost] {
+        guard let text = try? String(contentsOf: sshFolder.appending(path: "config"), encoding: .utf8) else { return [] }
+        return parseSSHConfig(text) { file in
+            let path = (file as NSString).expandingTildeInPath
+            let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : sshFolder.appending(path: path)
+            return try? String(contentsOf: url, encoding: .utf8)
+        }
+    }
+
+    /// The public keys in ~/.ssh: file, type and comment (the private halves are left alone).
+    static func sshPublicKeys() -> [JSONValue] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: sshFolder, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "pub" }.sorted { $0.lastPathComponent < $1.lastPathComponent }.compactMap { url in
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 2).map(String.init)
+            return ["file": .string(url.path), "type": .string(parts.first ?? "?"), "comment": parts.count > 2 ? .string(parts[2]) : .null]
+        }
+    }
+
+    /// `gpg --list-secret-keys --with-colons`: secret keys with their user ids and expiry.
+    nonisolated static func parseGPG(_ text: String) -> [GPGKey] {
+        var keys: [GPGKey] = []
+        for line in text.split(separator: "\n") {
+            let f = line.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            guard let kind = f.first else { continue }
+            if kind == "sec", f.count > 6 {
+                let algorithm = ["1": "RSA", "17": "DSA", "18": "ECDH", "19": "ECDSA", "22": "EdDSA"][f[3]] ?? f[3]
+                keys.append(GPGKey(id: f[4], algorithm: algorithm, expires: Double(f[6]).map { Date(timeIntervalSince1970: $0) }, users: []))
+            } else if kind == "uid", f.count > 9, !keys.isEmpty {
+                keys[keys.count - 1].users.append(f[9])
+            }
+        }
+        return keys
+    }
+
+    static func gpgKeys() async -> [GPGKey]? {
+        guard let gpg = VCSRunner.find("gpg") else { return nil }
+        let output = await VCSRunner.run(gpg, ["--list-secret-keys", "--with-colons"], in: FileManager.default.homeDirectoryForCurrentUser, timeout: 15)
+        return output.ok ? parseGPG(output.stdout) : []
+    }
+
+    /// git's identity and signing settings, in a repository (its own config over the global one) or globally.
+    static func gitSettings(in repository: URL?) async -> [String: String] {
+        guard let git = VCSRunner.find("git") else { return [:] }
+        var result: [String: String] = [:]
+        for key in ["user.name", "user.email", "user.signingkey", "commit.gpgsign", "tag.gpgsign", "gpg.format", "gpg.ssh.allowedSignersFile", "pull.rebase", "rebase.autoStash", "init.defaultBranch"] {
+            let arguments = (repository == nil ? ["config", "--global", "--get", key] : ["config", "--get", key])
+            let output = await VCSRunner.run(git, arguments, in: repository ?? FileManager.default.homeDirectoryForCurrentUser, timeout: 10)
+            if output.ok { result[key] = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        return result
+    }
+
+    /// Everything above as one JSON object, for Claude.
+    static func json(repository: URL?) async -> JSONValue {
+        let git = await gitSettings(in: repository)
+        let gpg = await gpgKeys()
+        let signing: JSONValue = [
+            "enabled": .bool(git["commit.gpgsign"] == "true"), "format": .string(git["gpg.format"] ?? "openpgp"),
+            "key": git["user.signingkey"].map(JSONValue.string) ?? .null,
+        ]
+        return ["git": .object(git.mapValues(JSONValue.string)), "signing": signing,
+                "ssh_hosts": .array(sshHosts().map(\.json)), "ssh_public_keys": .array(sshPublicKeys()),
+                "ssh_agent": .bool(ShellEnvironment.current["SSH_AUTH_SOCK"] != nil),
+                "gpg_keys": gpg.map { .array($0.map { key in
+                    ["id": .string(key.id), "algorithm": .string(key.algorithm), "users": .array(key.users.map { .string($0) }),
+                     "expires": key.expires.map { .string($0.formatted(.iso8601)) } ?? .null]
+                }) } ?? "gpg isn't installed"]
+    }
+}
+
