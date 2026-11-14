@@ -54,19 +54,28 @@ public struct ActivityHeatmap: View {
     }
 
     public var body: some View {
-        let weeks = weeks
+        let allWeeks = weeks
         let thresholds = thresholds
         GeometryReader { geometry in
             let labelWidth: CGFloat = 30
             let gap: CGFloat = 3
-            let cell = max(6, min(18, (geometry.size.width - labelWidth - gap * CGFloat(weeks.count)) / CGFloat(max(weeks.count, 1))))
+            // Squares fill the space: as wide as the weeks allow, as tall as 7 rows allow (labels and
+            // legend take about 40 points). Too narrow for every week at a readable size: the most recent ones.
+            let byHeight = (geometry.size.height - 40 - gap * 6) / 7
+            let fitting = max(1, Int((geometry.size.width - labelWidth) / (Self.minimumCell + gap)))
+            let weeks = Array(allWeeks.suffix(fitting))
+            let byWidth = (geometry.size.width - labelWidth - gap * CGFloat(weeks.count)) / CGFloat(max(weeks.count, 1))
+            let cell = max(Self.minimumCell, min(22, byWidth, byHeight))
             VStack(alignment: .leading, spacing: 6) {
                 // Month names over the week in which each month starts.
                 HStack(spacing: gap) {
                     Color.clear.frame(width: labelWidth, height: 1)
                     ForEach(Array(weeks.enumerated()), id: \.offset) { index, week in
                         let first = week.first { calendar.component(.day, from: $0) == 1 && $0 >= from && $0 <= to }
-                        Text(first.map { $0.formatted(.dateTime.month(.abbreviated)) } ?? (index == 0 ? from.formatted(.dateTime.month(.abbreviated)) : ""))
+                        let lead = index == 0 ? week.first { $0 >= from && $0 <= to } : nil
+                        // The first column names its month unless one starts within the next two weeks.
+                        let startsSoon = index == 0 && weeks.prefix(3).dropFirst().contains { $0.contains { calendar.component(.day, from: $0) == 1 } }
+                        Text((first ?? (startsSoon ? nil : lead)).map { $0.formatted(.dateTime.month(.abbreviated)) } ?? "")
                             .font(.caption2).foregroundStyle(.secondary)
                             .fixedSize()
                             .frame(width: cell, alignment: .leading)
@@ -96,8 +105,11 @@ public struct ActivityHeatmap: View {
                 .padding(.leading, labelWidth)
             }
         }
-        .frame(minHeight: 150)
+        .frame(minHeight: 7 * Self.minimumCell + 58)
     }
+
+    /// Smallest square drawn; below it older weeks are left out instead.
+    static let minimumCell: CGFloat = 9
 
     @ViewBuilder
     private func square(_ day: Date, cell: CGFloat, thresholds: [Double]) -> some View {
@@ -113,7 +125,7 @@ public struct ActivityHeatmap: View {
     @ViewBuilder
     private func shade(_ level: Int, cell: CGFloat) -> some View {
         if level == 0 {
-            Circle().fill(.quaternary).frame(width: max(2, cell * 0.22), height: max(2, cell * 0.22))
+            RoundedRectangle(cornerRadius: cell * 0.18).fill(.quaternary.opacity(0.6))
                 .frame(width: cell, height: cell)
         } else {
             RoundedRectangle(cornerRadius: cell * 0.18)
