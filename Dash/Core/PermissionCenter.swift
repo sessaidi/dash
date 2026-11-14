@@ -60,7 +60,22 @@ struct PermissionSheet: View {
     @Environment(PermissionCenter.self) private var center
 
     var body: some View {
+        // The buttons stay on screen whatever the prompt's length: the text scrolls instead.
         VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .vertical) {
+                content
+                ScrollView { content }.frame(height: 460)
+            }
+            .frame(maxHeight: 460)
+            buttons
+        }
+        .padding(22)
+        .frame(width: 480)
+        .interactiveDismissDisabled()
+    }
+
+    private var content: some View {
+            VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: request.icon)
                     .font(.title2)
@@ -86,6 +101,10 @@ struct PermissionSheet: View {
                 }
                 .frame(maxHeight: 260)
             }
+            }
+    }
+
+    private var buttons: some View {
             HStack {
                 Spacer()
                 Button(request.denyLabel) { center.resolve(false) }
@@ -93,10 +112,6 @@ struct PermissionSheet: View {
                 Button(request.allowLabel) { center.resolve(true) }
                     .keyboardShortcut(.defaultAction)
             }
-        }
-        .padding(22)
-        .frame(width: 480)
-        .interactiveDismissDisabled()
     }
 }
 

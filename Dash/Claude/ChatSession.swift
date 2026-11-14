@@ -129,6 +129,13 @@ final class ChatSession {
         let input: JSONValue
     }
 
+    /// What an approval prompt says about a tool: its first paragraph, kept short (descriptions
+    /// can carry long guides meant for Claude).
+    nonisolated static func summary(of description: String, limit: Int = 280) -> String {
+        let first = description.components(separatedBy: "\n\n").first ?? description
+        return first.count > limit ? String(first.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…" : first
+    }
+
     private func execute(_ call: ToolCall, tools: [ClaudeTool]) async -> (String, Bool) {
         guard let tool = tools.first(where: { $0.name == call.name }) else {
             return ("Unknown tool \(call.name).", true)
@@ -138,7 +145,7 @@ final class ChatSession {
         }
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
-                icon: "sparkles", title: "Claude wants to run \(call.name)", message: tool.description,
+                icon: "sparkles", title: "Claude wants to run \(call.name)", message: Self.summary(of: tool.description),
                 details: [.init(title: "Input", text: call.input.jsonString(pretty: true))])
             guard approved else { return ("The user declined this action.", true) }
         }
