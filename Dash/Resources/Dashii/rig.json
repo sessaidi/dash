@@ -1,0 +1,308 @@
+{
+  "format": "DashiiRig/1",
+  "name": "Dashii",
+  "units": "CSS points",
+  "coordinates": "x right, y down, clockwise degrees",
+  "atlas": "assets/atlas.json",
+  "bones": [
+    {
+      "name": "root",
+      "parent": null,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "name": "torso",
+      "parent": "root",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "name": "head",
+      "parent": "torso",
+      "x": 0,
+      "y": -68
+    },
+    {
+      "name": "earL",
+      "parent": "head",
+      "x": -46,
+      "y": -48
+    },
+    {
+      "name": "earR",
+      "parent": "head",
+      "x": 46,
+      "y": -48
+    },
+    {
+      "name": "discL",
+      "parent": "head",
+      "x": -72,
+      "y": 8
+    },
+    {
+      "name": "discR",
+      "parent": "head",
+      "x": 72,
+      "y": 8
+    },
+    {
+      "name": "thruster",
+      "parent": "torso",
+      "x": 0,
+      "y": 43
+    },
+    {
+      "name": "upperL",
+      "parent": "torso",
+      "x": -32,
+      "y": -20
+    },
+    {
+      "name": "foreL",
+      "parent": "upperL",
+      "x": 0,
+      "y": 32
+    },
+    {
+      "name": "handL",
+      "parent": "foreL",
+      "x": 0,
+      "y": 30
+    },
+    {
+      "name": "upperR",
+      "parent": "torso",
+      "x": 32,
+      "y": -20
+    },
+    {
+      "name": "foreR",
+      "parent": "upperR",
+      "x": 0,
+      "y": 32
+    },
+    {
+      "name": "handR",
+      "parent": "foreR",
+      "x": 0,
+      "y": 30
+    }
+  ],
+  "attachments": [
+    {
+      "bone": "thruster",
+      "region": "thruster",
+      "size": [
+        44,
+        44
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 0,
+      "rotation": 0
+    },
+    {
+      "bone": "earL",
+      "region": "ear_left",
+      "size": [
+        49,
+        58
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 1,
+      "rotation": 0
+    },
+    {
+      "bone": "earR",
+      "region": "ear_right",
+      "size": [
+        49,
+        58
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 1,
+      "rotation": 0
+    },
+    {
+      "bone": "torso",
+      "region": "torso_front",
+      "size": [
+        78,
+        82
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 3,
+      "rotation": 0
+    },
+    {
+      "bone": "head",
+      "region": "head_front",
+      "size": [
+        158,
+        130
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 6,
+      "rotation": 0
+    },
+    {
+      "bone": "discL",
+      "region": "ear_disc",
+      "size": [
+        32,
+        40
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 7,
+      "rotation": 0
+    },
+    {
+      "bone": "discR",
+      "region": "ear_disc",
+      "size": [
+        32,
+        40
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 5,
+      "rotation": 0
+    },
+    {
+      "bone": "upperL",
+      "region": "upper_arm",
+      "size": [
+        28,
+        41
+      ],
+      "pivot": [
+        0.5,
+        0.18
+      ],
+      "z": 4,
+      "rotation": -8
+    },
+    {
+      "bone": "foreL",
+      "region": "forearm",
+      "size": [
+        25,
+        36
+      ],
+      "pivot": [
+        0.5,
+        0.15
+      ],
+      "z": 8,
+      "rotation": 0
+    },
+    {
+      "bone": "handL",
+      "region": "hand",
+      "size": [
+        29,
+        28
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 9,
+      "rotation": 0
+    },
+    {
+      "bone": "upperR",
+      "region": "upper_arm",
+      "size": [
+        28,
+        41
+      ],
+      "pivot": [
+        0.5,
+        0.18
+      ],
+      "z": 4,
+      "rotation": -8
+    },
+    {
+      "bone": "foreR",
+      "region": "forearm",
+      "size": [
+        25,
+        36
+      ],
+      "pivot": [
+        0.5,
+        0.15
+      ],
+      "z": 8,
+      "rotation": 0
+    },
+    {
+      "bone": "handR",
+      "region": "hand",
+      "size": [
+        29,
+        28
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "z": 9,
+      "rotation": 0
+    }
+  ],
+  "ik": {
+    "upperLength": 32,
+    "lowerLength": 30,
+    "contactOffset": 34
+  },
+  "directions": {
+    "head": {
+      "front": "head_front",
+      "threequarter": "head_threequarter",
+      "profile": "head_profile",
+      "back": "head_back"
+    },
+    "torso": {
+      "front": "torso_front",
+      "threequarter": "torso_threequarter",
+      "profile": "torso_profile",
+      "back": "torso_back"
+    },
+    "thresholdsDegrees": [
+      22,
+      52,
+      135
+    ],
+    "leftViews": "mirror right views"
+  },
+  "gaze": {
+    "yawLimit": 60,
+    "pitchLimit": 22,
+    "eyeXLimit": 8,
+    "eyeYLimit": 5
+  }
+}

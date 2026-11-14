@@ -1,0 +1,287 @@
+import CryptoKit
+import Foundation
+
+/// Indexes one local repository into the knowledge graph, incrementally: only files whose
+/// content changed are parsed again. Builds repository → directory → file → symbol nodes,
+/// import edges, call edges (resolved by name), and, from git history, who changes which
+/// files, which files change together, and which tickets touched them.
+struct CodeIndexer: Sendable {
+    let root: URL
+    let store: KnowledgeStore
+    var readHistory = true
+    var historyDays = 180
+
+    struct Report: Sendable, Equatable {
+        var files = 0
+        var parsed = 0
+        var removed = 0
+        var symbols = 0
+    }
+
+    var repoID: String { "repo:" + root.path }
+
+    static let skippedDirectories: Set<String> = ["node_modules", "vendor", "Pods", ".build", "build", "dist", "DerivedData",
+                                                  "target", ".git", ".worktrees", ".terraform", "__pycache__", ".venv", "venv", "third_party", "Carthage"]
+    static let maxFileBytes = 1_000_000
+
+    func index() async throws -> Report {
+        var report = Report()
+        let remote = Self.remoteSlug(root)
+        let repoNode = KnowledgeNode(id: repoID, kind: "repo", name: root.lastPathComponent, qualified: remote ?? "",
+                                     repo: repoID, path: "", url: remote.map { "https://github.com/\($0)" } ?? "", source: "code")
+        let files = listFiles()
+        report.files = files.count
+        let known = try await store.fileHashes(repo: repoID)
+        let goModule = Self.goModule(root)
+
+        // Phase 1: nodes, containment, definitions and imports of changed files.
+        var changed: [(path: String, parsed: ParsedFile, symbolIDs: [String])] = []
+        var touchedDirectories = Set<String>()
+        // Written in batches, one transaction each.
+        var batch: [KnowledgeStore.FileGraph] = []
+        for path in files {
+            let url = root.appending(path: path)
+            guard let language = CodeParser.language(of: path),
+                  let data = try? Data(contentsOf: url), data.count <= Self.maxFileBytes,
+                  let text = String(data: data, encoding: .utf8) else { continue }
+            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            if known[path] == hash { continue }
+            let parsed = CodeParser.parse(text, language: language)
+            let (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
+            batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges))
+            if batch.count >= 200 {
+                try await store.replaceFiles(repo: repoID, batch)
+                batch.removeAll()
+            }
+            changed.append((path, parsed, symbolIDs))
+            report.parsed += 1
+            report.symbols += parsed.symbols.count
+            touchedDirectories.formUnion(Self.ancestors(of: path))
+        }
+        let current = Set(files)
+        for path in known.keys where !current.contains(path) {
+            batch.append(KnowledgeStore.FileGraph(path: path, nodes: [], edges: []))
+            report.removed += 1
+            touchedDirectories.formUnion(Self.ancestors(of: path))
+        }
+        try await store.replaceFiles(repo: repoID, batch)
+
+        // Directories: new or changed ones get a fresh `updated` (so Claude looks again);
+        // directories without files any more go.
+        let liveDirectories = Set(files.filter { CodeParser.language(of: $0) != nil }.flatMap(Self.ancestors))
+        let existingDirectories = try await store.nodes(kind: "directory", repo: repoID, limit: 100_000)
+        for directory in existingDirectories where !liveDirectories.contains(directory.path) {
+            try await store.removeNode(directory.id)
+        }
+        let existingPaths = Set(existingDirectories.map(\.path))
+        var directoryNodes: [KnowledgeNode] = []
+        var directoryEdges: [KnowledgeEdge] = []
+        for path in liveDirectories where touchedDirectories.contains(path) || !existingPaths.contains(path) {
+            directoryNodes.append(KnowledgeNode(id: directoryID(path), kind: "directory", name: (path as NSString).lastPathComponent,
+                                                qualified: path, repo: repoID, path: path, source: "code"))
+            let parent = (path as NSString).deletingLastPathComponent
+            directoryEdges.append(KnowledgeEdge(src: parent.isEmpty ? repoID : directoryID(parent), dst: directoryID(path), kind: "contains", source: "code"))
+        }
+        try await store.upsert([repoNode] + directoryNodes)
+        try await store.upsert(directoryEdges)
+
+        // Phase 2: calls, resolved by name against the whole repository's symbols.
+        let index = try await store.symbolIndex(repo: repoID)
+        var callEdges: [KnowledgeEdge] = []
+        for file in changed {
+            let directory = (file.path as NSString).deletingLastPathComponent
+            for (symbol, id) in zip(file.parsed.symbols, file.symbolIDs) {
+                for name in symbol.calls {
+                    let candidates = (index[name] ?? []).filter { $0 != id }
+                    guard !candidates.isEmpty else { continue }
+                    let sameFile = candidates.filter { $0.hasPrefix("sym:" + root.path + "/" + file.path + "#") }
+                    let sameDirectory = candidates.filter { $0.hasPrefix("sym:" + root.path + "/" + (directory.isEmpty ? "" : directory + "/")) }
+                    let targets = !sameFile.isEmpty ? sameFile : !sameDirectory.isEmpty && sameDirectory.count <= 3 ? sameDirectory : candidates.count <= 3 ? candidates : []
+                    for target in targets {
+                        callEdges.append(KnowledgeEdge(src: id, dst: target, kind: "calls", weight: 1 / Double(targets.count), source: "code"))
+                    }
+                }
+            }
+        }
+        try await store.upsert(callEdges)
+
+        if readHistory { try await indexHistory() }
+        try await store.setMeta("indexed:" + repoID, ISO8601DateFormatter().string(from: .now))
+        return report
+    }
+
+    // MARK: Nodes for one file
+
+    func fileID(_ path: String) -> String { "file:" + root.path + "/" + path }
+    func directoryID(_ path: String) -> String { "dir:" + root.path + "/" + path }
+
+    private func graph(for path: String, parsed: ParsedFile, hash: String, goModule: String?, files: [String])
+        -> (nodes: [KnowledgeNode], edges: [KnowledgeEdge], symbolIDs: [String]) {
+        let file = fileID(path)
+        let directory = (path as NSString).deletingLastPathComponent
+        var nodes = [KnowledgeNode(id: file, kind: "file", name: (path as NSString).lastPathComponent, qualified: path, repo: repoID,
+                                   path: path, language: parsed.language, hash: hash, source: "code")]
+        var edges = [KnowledgeEdge(src: directory.isEmpty ? repoID : directoryID(directory), dst: file, kind: "contains", source: "code")]
+        var used = Set<String>()
+        var symbolIDs: [String] = []
+        let base = "sym:" + root.path + "/" + path + "#"
+        for symbol in parsed.symbols {
+            let qualified = symbol.container.isEmpty ? symbol.name : "\(symbol.container).\(symbol.name)"
+            var id = base + qualified
+            if !used.insert(id).inserted { id += "@\(symbol.line)" }
+            symbolIDs.append(id)
+            nodes.append(KnowledgeNode(id: id, kind: "symbol", name: symbol.name, qualified: qualified, repo: repoID, path: path,
+                                       line: symbol.line, endLine: symbol.endLine, language: symbol.kind, signature: symbol.signature, source: "code"))
+            // Members hang off their type when it's declared in the same file.
+            let owner = symbol.container.isEmpty ? nil : nodes.first { $0.kind == "symbol" && $0.qualified == symbol.container }
+            edges.append(KnowledgeEdge(src: owner?.id ?? file, dst: id, kind: "defines", source: "code"))
+        }
+        for name in parsed.imports {
+            if let target = resolveImport(name, from: directory, language: parsed.language, goModule: goModule, files: files) {
+                edges.append(KnowledgeEdge(src: file, dst: target, kind: "imports", source: "code"))
+            } else {
+                let package = "pkg:\(parsed.language):\(name)"
+                nodes.append(KnowledgeNode(id: package, kind: "package", name: name, qualified: name, language: parsed.language, source: "code"))
+                edges.append(KnowledgeEdge(src: file, dst: package, kind: "imports", source: "code"))
+            }
+        }
+        return (nodes, edges, symbolIDs)
+    }
+
+    /// Imports that point inside the repository: relative JS/TS paths, and Go packages under
+    /// the module in go.mod.
+    private func resolveImport(_ name: String, from directory: String, language: String, goModule: String?, files: [String]) -> String? {
+        if language == "go", let goModule, name == goModule || name.hasPrefix(goModule + "/") {
+            let path = String(name.dropFirst(goModule.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return path.isEmpty ? repoID : directoryID(path)
+        }
+        // Relative paths: Markdown links, Terraform module sources, Makefile includes.
+        if ["markdown", "terraform", "makefile"].contains(language), !name.hasPrefix("/"), !name.contains("://") {
+            let joined = ((directory as NSString).appendingPathComponent(name.removingPercentEncoding ?? name) as NSString).standardizingPath
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if files.contains(joined) { return fileID(joined) }
+            if files.contains(where: { $0.hasPrefix(joined + "/") }) { return directoryID(joined) }
+            return nil
+        }
+        if ["typescript", "javascript", "vue"].contains(language), name.hasPrefix(".") {
+            let joined = ((directory as NSString).appendingPathComponent(name) as NSString).standardizingPath
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let candidates = [joined] + ["ts", "tsx", "js", "jsx", "mjs", "vue"].flatMap { [joined + "." + $0, joined + "/index." + $0] }
+            let known = Set(files)
+            if let match = candidates.first(where: known.contains) { return fileID(match) }
+        }
+        return nil
+    }
+
+    // MARK: Git history
+
+    /// Who changes which files, which files change together, and which tickets (keys in commit
+    /// subjects) touched them, over the last `historyDays`.
+    func indexHistory() async throws {
+        guard let log = Self.git(root, ["log", "--since=\(historyDays).days", "--no-merges", "-n", "3000",
+                                        "--format=%x1e%an%x1f%ae%x1f%s", "--name-only"]) else { return }
+        let indexed = try await store.fileHashes(repo: repoID)
+        var authored: [String: [String: Int]] = [:]
+        var names: [String: String] = [:]
+        var together: [String: Int] = [:]
+        var touched: [String: [String: Int]] = [:]
+        for commit in log.split(separator: "\u{1e}") {
+            let lines = commit.split(separator: "\n", omittingEmptySubsequences: true)
+            guard let header = lines.first else { continue }
+            let fields = header.split(separator: "\u{1f}", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count >= 3 else { continue }
+            let person = "person:" + fields[1].lowercased()
+            names[person] = fields[0]
+            let paths = lines.dropFirst().map(String.init).filter { indexed[$0] != nil }
+            for path in paths { authored[person, default: [:]][path, default: 0] += 1 }
+            for key in KnowledgeLinker.ticketKeys(in: fields[2]) {
+                for path in paths { touched["ticket:" + key, default: [:]][path, default: 0] += 1 }
+            }
+            if paths.count >= 2 && paths.count <= 20 {
+                let sorted = paths.sorted()
+                for i in sorted.indices { for j in sorted.indices where j > i { together[sorted[i] + "\n" + sorted[j], default: 0] += 1 } }
+            }
+        }
+        try await store.removeEdges(source: "git", repo: repoID)
+        try await store.ensure(names.map { KnowledgeNode(id: $0.key, kind: "person", name: $0.value, qualified: String($0.key.dropFirst(7)), source: "git") })
+        try await store.ensure(touched.keys.map { KnowledgeNode(id: $0, kind: "ticket", name: String($0.dropFirst(7)), qualified: String($0.dropFirst(7)), source: "git") })
+        var edges: [KnowledgeEdge] = []
+        for (person, files) in authored {
+            for (path, count) in files { edges.append(KnowledgeEdge(src: person, dst: fileID(path), kind: "authored", weight: Double(count), source: "git")) }
+        }
+        for (pair, count) in together where count >= 3 {
+            let paths = pair.split(separator: "\n").map(String.init)
+            edges.append(KnowledgeEdge(src: fileID(paths[0]), dst: fileID(paths[1]), kind: "changes_with", weight: Double(count), source: "git"))
+        }
+        for (ticket, files) in touched {
+            for (path, count) in files { edges.append(KnowledgeEdge(src: ticket, dst: fileID(path), kind: "touches", weight: Double(count), source: "git")) }
+        }
+        try await store.upsert(edges)
+    }
+
+    // MARK: Files and git
+
+    /// Tracked and untracked-but-not-ignored files (git), or a plain walk outside git.
+    func listFiles() -> [String] {
+        let listed = Self.git(root, ["ls-files", "-co", "--exclude-standard"])?
+            .split(separator: "\n").map(String.init)
+        let all = listed ?? walk()
+        return all.filter { path in
+            CodeParser.language(of: path) != nil
+                && !path.split(separator: "/").dropLast().contains { Self.skippedDirectories.contains(String($0)) }
+        }.sorted()
+    }
+
+    private func walk() -> [String] {
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey],
+                                                              options: [.skipsHiddenFiles]) else { return [] }
+        var result: [String] = []
+        let prefix = root.standardizedFileURL.path + "/"
+        for case let url as URL in enumerator {
+            if Self.skippedDirectories.contains(url.lastPathComponent) { enumerator.skipDescendants(); continue }
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                result.append(String(url.standardizedFileURL.path.dropFirst(prefix.count)))
+            }
+        }
+        return result
+    }
+
+    static func ancestors(of path: String) -> [String] {
+        var result: [String] = []
+        var current = (path as NSString).deletingLastPathComponent
+        while !current.isEmpty {
+            result.append(current)
+            current = (current as NSString).deletingLastPathComponent
+        }
+        return result
+    }
+
+    /// "owner/name" from the origin remote (GitHub, GitLab, SSH or HTTPS).
+    static func remoteSlug(_ root: URL) -> String? {
+        guard let remote = git(root, ["config", "--get", "remote.origin.url"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !remote.isEmpty else { return nil }
+        var path = remote
+        if let range = path.range(of: "://") { path = String(path[range.upperBound...]).split(separator: "/", maxSplits: 1).dropFirst().joined() }
+        else if let colon = path.firstIndex(of: ":") { path = String(path[path.index(after: colon)...]) }
+        if path.hasSuffix(".git") { path.removeLast(4) }
+        return path.isEmpty ? nil : path
+    }
+
+    static func goModule(_ root: URL) -> String? {
+        guard let text = try? String(contentsOf: root.appending(path: "go.mod"), encoding: .utf8) else { return nil }
+        return CodeParser.firstMatch(#"(?m)^module\s+(\S+)"#, in: text)
+    }
+
+    static func git(_ root: URL, _ arguments: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root.path] + arguments
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? String(decoding: data, as: UTF8.self) : nil
+    }
+}

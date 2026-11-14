@@ -1,0 +1,75 @@
+name: Dash
+options:
+  bundleIdPrefix: dev.sessaidi
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  ClaudeCodeKit:
+    path: Packages/ClaudeCodeKit
+  DashKit:
+    path: Packages/DashKit
+  # Apple's Markdown parser (CommonMark + GFM + block directives) for notes with components.
+  SwiftMarkdown:
+    url: https://github.com/swiftlang/swift-markdown
+    exactVersion: 0.7.3
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+targets:
+  Dash:
+    type: application
+    platform: macOS
+    sources: [Dash]
+    dependencies:
+      - package: ClaudeCodeKit
+      - package: DashKit
+        product: DashKit
+      - package: SwiftMarkdown
+        product: Markdown
+    entitlements:
+      path: Dash/Dash.entitlements
+      properties:
+        # Not sandboxed: the Agents extension runs git and the Claude Code CLI
+        # in your repositories, which the App Sandbox forbids.
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.audio-input: true
+        # Plugins are built separately; Dash pins approved ones to their SHA-256 instead.
+        com.apple.security.cs.disable-library-validation: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.sessaidi.Dash
+        GENERATE_INFOPLIST_FILE: YES
+        # Merged with the generated keys: App Transport Security (see the file).
+        INFOPLIST_FILE: Config/Dash-Info.plist
+        ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Dash
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Dash records your microphone during meetings you choose to transcribe.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Dash transcribes meeting audio on this Mac.
+        INFOPLIST_KEY_NSScreenCaptureUsageDescription: Dash captures Zoom's audio to transcribe meetings.
+  DashTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [DashTests]
+    dependencies:
+      - target: Dash
+      - package: DashKit
+        product: DashKit
+        embed: false
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Dash:
+    build:
+      targets:
+        Dash: all
+        DashTests: [test]
+    test:
+      targets: [DashTests]

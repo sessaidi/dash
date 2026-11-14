@@ -1,0 +1,283 @@
+{
+  "format": "DashiiAtlas/1",
+  "image": "assets/atlas.png",
+  "size": [
+    2048,
+    2048
+  ],
+  "padding": 4,
+  "regions": {
+    "head_front": {
+      "x": 4,
+      "y": 4,
+      "width": 261,
+      "height": 220,
+      "file": "assets/layers/head_front.png",
+      "sourceCell": [
+        0,
+        0
+      ],
+      "sourceCrop": [
+        26,
+        66,
+        287,
+        286
+      ]
+    },
+    "head_threequarter": {
+      "x": 516,
+      "y": 4,
+      "width": 260,
+      "height": 222,
+      "file": "assets/layers/head_threequarter.png",
+      "sourceCell": [
+        1,
+        0
+      ],
+      "sourceCrop": [
+        27,
+        63,
+        287,
+        285
+      ]
+    },
+    "head_profile": {
+      "x": 1028,
+      "y": 4,
+      "width": 242,
+      "height": 221,
+      "file": "assets/layers/head_profile.png",
+      "sourceCell": [
+        2,
+        0
+      ],
+      "sourceCrop": [
+        38,
+        64,
+        280,
+        285
+      ]
+    },
+    "head_back": {
+      "x": 1540,
+      "y": 4,
+      "width": 260,
+      "height": 222,
+      "file": "assets/layers/head_back.png",
+      "sourceCell": [
+        3,
+        0
+      ],
+      "sourceCrop": [
+        28,
+        65,
+        288,
+        287
+      ]
+    },
+    "ear_left": {
+      "x": 4,
+      "y": 516,
+      "width": 205,
+      "height": 198,
+      "file": "assets/layers/ear_left.png",
+      "sourceCell": [
+        0,
+        1
+      ],
+      "sourceCrop": [
+        50,
+        60,
+        255,
+        258
+      ]
+    },
+    "ear_right": {
+      "x": 516,
+      "y": 516,
+      "width": 202,
+      "height": 198,
+      "file": "assets/layers/ear_right.png",
+      "sourceCell": [
+        1,
+        1
+      ],
+      "sourceCrop": [
+        61,
+        60,
+        263,
+        258
+      ]
+    },
+    "ear_disc": {
+      "x": 1028,
+      "y": 516,
+      "width": 190,
+      "height": 210,
+      "file": "assets/layers/ear_disc.png",
+      "sourceCell": [
+        2,
+        1
+      ],
+      "sourceCrop": [
+        58,
+        60,
+        248,
+        270
+      ]
+    },
+    "torso_front": {
+      "x": 1540,
+      "y": 516,
+      "width": 255,
+      "height": 240,
+      "file": "assets/layers/torso_front.png",
+      "sourceCell": [
+        3,
+        1
+      ],
+      "sourceCrop": [
+        30,
+        43,
+        285,
+        283
+      ]
+    },
+    "upper_arm": {
+      "x": 4,
+      "y": 1028,
+      "width": 142,
+      "height": 214,
+      "file": "assets/layers/upper_arm.png",
+      "sourceCell": [
+        0,
+        2
+      ],
+      "sourceCrop": [
+        80,
+        47,
+        222,
+        261
+      ]
+    },
+    "forearm": {
+      "x": 516,
+      "y": 1028,
+      "width": 121,
+      "height": 170,
+      "file": "assets/layers/forearm.png",
+      "sourceCell": [
+        1,
+        2
+      ],
+      "sourceCrop": [
+        94,
+        79,
+        215,
+        249
+      ]
+    },
+    "hand": {
+      "x": 1028,
+      "y": 1028,
+      "width": 167,
+      "height": 156,
+      "file": "assets/layers/hand.png",
+      "sourceCell": [
+        2,
+        2
+      ],
+      "sourceCrop": [
+        72,
+        82,
+        239,
+        238
+      ]
+    },
+    "thruster": {
+      "x": 1540,
+      "y": 1028,
+      "width": 205,
+      "height": 178,
+      "file": "assets/layers/thruster.png",
+      "sourceCell": [
+        3,
+        2
+      ],
+      "sourceCrop": [
+        54,
+        72,
+        259,
+        250
+      ]
+    },
+    "torso_threequarter": {
+      "x": 4,
+      "y": 1540,
+      "width": 236,
+      "height": 232,
+      "file": "assets/layers/torso_threequarter.png",
+      "sourceCell": [
+        0,
+        3
+      ],
+      "sourceCrop": [
+        46,
+        45,
+        282,
+        277
+      ]
+    },
+    "torso_profile": {
+      "x": 516,
+      "y": 1540,
+      "width": 191,
+      "height": 231,
+      "file": "assets/layers/torso_profile.png",
+      "sourceCell": [
+        1,
+        3
+      ],
+      "sourceCrop": [
+        64,
+        46,
+        255,
+        277
+      ]
+    },
+    "torso_back": {
+      "x": 1028,
+      "y": 1540,
+      "width": 235,
+      "height": 230,
+      "file": "assets/layers/torso_back.png",
+      "sourceCell": [
+        2,
+        3
+      ],
+      "sourceCrop": [
+        38,
+        49,
+        273,
+        279
+      ]
+    },
+    "eye": {
+      "x": 1540,
+      "y": 1540,
+      "width": 83,
+      "height": 158,
+      "file": "assets/layers/eye.png",
+      "sourceCell": [
+        3,
+        3
+      ],
+      "sourceCrop": [
+        116,
+        82,
+        199,
+        240
+      ]
+    }
+  }
+}
