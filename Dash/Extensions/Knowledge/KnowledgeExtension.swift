@@ -437,6 +437,9 @@ final class KnowledgeExtension: DashExtension {
     private struct TraceInput: Decodable { let id: String; let direction: String?; let depth: Int? }
     private struct PathInput: Decodable { let from: String; let to: String }
     private struct LearnInput: Decodable { let directories: Int?; let repo: String? }
+    private struct ImpactInput: Decodable { let id: String }
+    private struct ExpertsInput: Decodable { let id: String }
+    private struct ContextInput: Decodable { let question: String; let limit: Int? }
     private struct FindInput: Decodable { let query: String? }
     private struct RepositoryInput: Decodable { let repository: String }
 
@@ -594,6 +597,57 @@ final class KnowledgeExtension: DashExtension {
                 return ["removed": .string(path)]
             },
             ClaudeTool(
+                name: "knowledge_impact",
+                description: "What a change to a symbol or file would affect: callers (three hops), files importing it, the tests covering it and its callers, files that usually change with it, and who knows it best. Use before changing or reviewing code.",
+                properties: ["id": JSONSchema.string("Symbol or file id from knowledge_search.")], required: ["id"]
+            ) { [weak self] input in
+                guard let self, let store else { return nil }
+                return try await impact(of: try input.toolInput(ImpactInput.self).id, store: store)
+            },
+            ClaudeTool(
+                name: "knowledge_experts",
+                description: "Who knows a file, directory or whole repository best: the people who changed it most in the recent git history, with commit counts.",
+                properties: ["id": JSONSchema.string("A repository, directory or file id.")], required: ["id"]
+            ) { [weak self] input in
+                guard let store = self?.store else { return nil }
+                let id = try input.toolInput(ExpertsInput.self).id
+                guard let node = try await store.node(id) else { throw ToolError("No node \(id). Use knowledge_search.") }
+                let repo = node.kind == "repo" ? node.id : node.repo
+                let experts = try await store.experts(repo: repo, path: node.kind == "repo" ? "" : node.path)
+                if experts.isEmpty { return ["experts": [], "note": "No git history in the graph for this. Make sure history reading is on in Knowledge settings."] }
+                return ["for": .string(node.kind == "repo" ? node.name : node.path),
+                        "experts": .array(experts.map { ["name": .string($0.person.name), "email": .string($0.person.qualified), "commits": .number(Double($0.commits))] })]
+            },
+            ClaudeTool(
+                name: "knowledge_context",
+                description: "Everything the graph knows that's relevant to a question, in one call: the best matching concepts, directories (with Claude's notes), files and symbols, each with the summary of where it lives. Use it to ground an answer about how the code works before reading files.",
+                properties: ["question": JSONSchema.string("The question, in plain words."), "limit": JSONSchema.integer("How many matches (default 12).")],
+                required: ["question"]
+            ) { [weak self] input in
+                guard let self, let store else { return nil }
+                let request = try input.toolInput(ContextInput.self)
+                return try await context(for: request.question, limit: min(request.limit ?? 12, 30), store: store)
+            },
+            ClaudeTool(
+                name: "knowledge_status",
+                description: "The state of the knowledge graph per repository: files and symbols indexed, how much Claude has studied, whether git history is linked, when it was last indexed. Use it to tell the user what Knowledge can answer well.",
+                properties: [:]
+            ) { [weak self] _ in
+                guard let self, let store else { return nil }
+                var repos: [JSONValue] = []
+                for repo in try await store.nodes(kind: "repo") {
+                    let coverage = try await store.coverage(repo: repo.id)
+                    repos.append(["repository": .string(repo.name), "id": .string(repo.id), "path": .string(String(repo.id.dropFirst(5))),
+                                  "studied_directories": .string("\(coverage.studied)/\(coverage.directories)"),
+                                  "history_links": .number(Double(try await store.edgeCount(kind: "authored", repo: repo.id))),
+                                  "test_links": .number(Double(try await store.edgeCount(kind: "tests", repo: repo.id))),
+                                  "last_indexed": (try await store.meta("indexed:" + repo.id)).map(JSONValue.string) ?? .null])
+                }
+                return ["repositories": .array(repos), "counts": .object((try await store.counts()).mapValues { .number(Double($0)) }),
+                        "settings": ["history": .bool(readHistory), "background_study": .bool(understand),
+                                     "directories_per_pass": .number(Double(understandBudget)), "hours_between_passes": .number(Double(understandHours))]]
+            },
+            ClaudeTool(
                 name: "knowledge_learn",
                 description: "Have Claude study more of the code now (directories not yet understood or changed since), improving later answers. Costs Claude usage.",
                 properties: ["directories": JSONSchema.integer("How many directories (default 5, max 20)."),
@@ -606,6 +660,82 @@ final class KnowledgeExtension: DashExtension {
                 return ["studied": .number(Double(studied))]
             },
         ]
+    }
+
+    // MARK: Impact and context
+
+    func impact(of id: String, store: KnowledgeStore) async throws -> JSONValue {
+        guard let node = try await store.node(id) else { throw ToolError("No node \(id). Use knowledge_search.") }
+        guard node.kind == "symbol" || node.kind == "file" else { throw ToolError("Impact works on a symbol or a file; this is a \(node.kind).") }
+        let fileID = node.kind == "file" ? node.id : (try await store.neighbors(node.id, kinds: ["defines"], limit: 5).first { $0.incoming }?.node.id ?? "")
+        var callers: [JSONValue] = []
+        var callerFiles = Set<String>()
+        if node.kind == "symbol" {
+            for step in try await store.trace(node.id, kinds: ["calls"], reverse: true, depth: 3).prefix(60) {
+                var object = Self.json(step.node).object ?? [:]
+                object["depth"] = .number(Double(step.depth))
+                callers.append(.object(object))
+                if !step.node.path.isEmpty { callerFiles.insert(step.node.repo + "|" + step.node.path) }
+            }
+        }
+        var importers: [JSONValue] = [], coChanging: [JSONValue] = [], tests: [JSONValue] = []
+        if !fileID.isEmpty {
+            for neighbor in try await store.neighbors(fileID, kinds: ["imports", "changes_with", "tests"], limit: 120) {
+                switch (neighbor.edge.kind, neighbor.incoming) {
+                case ("imports", true): importers.append(Self.json(neighbor.node))
+                case ("changes_with", _): coChanging.append(["file": .string(neighbor.node.path), "times": .number(neighbor.edge.weight)])
+                case ("tests", true): tests.append(.string(neighbor.node.path))
+                default: break
+                }
+            }
+        }
+        // Tests of the callers' files too: they exercise this code indirectly.
+        var indirectTests = Set<String>()
+        for entry in callerFiles.prefix(25) {
+            let parts = entry.split(separator: "|", maxSplits: 1).map(String.init)
+            let callerFile = "file:" + String(parts[0].dropFirst(5)) + "/" + (parts.count > 1 ? parts[1] : "")
+            for neighbor in try await store.neighbors(callerFile, kinds: ["tests"], limit: 10) where neighbor.incoming {
+                indirectTests.insert(neighbor.node.path)
+            }
+        }
+        let experts = node.repo.isEmpty ? [] : try await store.experts(repo: node.repo, path: node.path, limit: 5)
+        return ["target": Self.json(node), "callers": .array(callers), "importers": .array(Array(importers.prefix(40))),
+                "tests": .array(tests), "tests_of_callers": .array(indirectTests.sorted().prefix(30).map { .string($0) }),
+                "changes_with": .array(Array(coChanging.sorted { ($0["times"]?.double ?? 0) > ($1["times"]?.double ?? 0) }.prefix(15))),
+                "experts": .array(experts.map { ["name": .string($0.person.name), "commits": .number(Double($0.commits))] })]
+    }
+
+    func context(for question: String, limit: Int, store: KnowledgeStore) async throws -> JSONValue {
+        // Studied things first (concepts, directories with notes), then code.
+        var seen = Set<String>()
+        var picked: [KnowledgeNode] = []
+        for kinds in [["concept"], ["directory", "repo"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
+            for node in try await store.search(question, kinds: kinds, limit: limit) where seen.insert(node.id).inserted {
+                picked.append(node)
+            }
+        }
+        // Prefer what Claude has summarized, keep the order otherwise.
+        let ranked = picked.enumerated().sorted { a, b in
+            let (sa, sb) = (a.element.summary.isEmpty ? 1 : 0, b.element.summary.isEmpty ? 1 : 0)
+            return sa != sb ? sa < sb : a.offset < b.offset
+        }.map(\.element).prefix(limit)
+        var results: [JSONValue] = []
+        var directorySummaries: [String: String] = [:]
+        for node in ranked {
+            var object = Self.json(node).object ?? [:]
+            if node.kind == "file" || node.kind == "symbol", !node.repo.isEmpty {
+                let folder = (node.path as NSString).deletingLastPathComponent
+                let key = node.repo + "/" + folder
+                if directorySummaries[key] == nil {
+                    directorySummaries[key] = (try await store.node("dir:" + String(node.repo.dropFirst(5)) + "/" + folder))?.summary ?? ""
+                }
+                if let summary = directorySummaries[key], !summary.isEmpty { object["directory_summary"] = .string(String(summary.prefix(400))) }
+            }
+            results.append(.object(object))
+        }
+        let unstudied = ranked.contains { ($0.kind == "file" || $0.kind == "symbol") && $0.summary.isEmpty }
+        return ["question": .string(question), "matches": .array(results),
+                "note": unstudied ? "Some matches are in code Claude hasn't studied yet; knowledge_learn on that repository improves answers." : .null]
     }
 
     /// The relation read from the other end: "calls" seen from the callee is "called_by".

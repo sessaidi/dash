@@ -404,6 +404,38 @@ actor KnowledgeStore {
         return result
     }
 
+    /// Who changed a file or a directory's files most (commits in the history window), most first.
+    func experts(repo: String, path: String, limit: Int = 8) throws -> [(person: KnowledgeNode, commits: Int)] {
+        let statement = try prepare("""
+            SELECT e.src, SUM(e.weight) AS total FROM edges e JOIN nodes f ON f.id = e.dst
+            WHERE e.kind = 'authored' AND f.repo = ?1 AND (?2 = '' OR f.path = ?2 OR f.path LIKE ?2 || '/%')
+            GROUP BY e.src ORDER BY total DESC LIMIT ?3
+            """)
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo, path, limit])
+        var rows: [(String, Int)] = []
+        while sqlite3_step(statement) == SQLITE_ROW { rows.append((text(statement, 0), Int(sqlite3_column_double(statement, 1)))) }
+        let people = Dictionary(uniqueKeysWithValues: try nodes(ids: rows.map(\.0)).map { ($0.id, $0) })
+        return rows.compactMap { id, total in people[id].map { ($0, total) } }
+    }
+
+    /// How much of a repository Claude has studied: directories with a summary, of all.
+    func coverage(repo: String) throws -> (studied: Int, directories: Int) {
+        let statement = try prepare("SELECT COUNT(*), SUM(summary != '') FROM nodes WHERE repo = ?1 AND kind = 'directory'")
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo])
+        guard sqlite3_step(statement) == SQLITE_ROW else { return (0, 0) }
+        return (Int(sqlite3_column_int64(statement, 1)), Int(sqlite3_column_int64(statement, 0)))
+    }
+
+    /// Edges of one kind leaving or reaching nodes of a repository (e.g. its git history links).
+    func edgeCount(kind: String, repo: String) throws -> Int {
+        let statement = try prepare("SELECT COUNT(*) FROM edges e JOIN nodes n ON n.id = e.dst WHERE e.kind = ?1 AND n.repo = ?2")
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [kind, repo])
+        return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
+    }
+
     func counts() throws -> [String: Int] {
         var result: [String: Int] = [:]
         let statement = try prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
