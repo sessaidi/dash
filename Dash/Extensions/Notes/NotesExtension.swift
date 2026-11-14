@@ -122,6 +122,8 @@ final class NotesExtension: DashExtension {
     private struct TitleInput: Decodable { let title: String }
     private struct CreateInput: Decodable { let title: String; let markdown: String; let folder: String? }
     private struct AppendInput: Decodable { let title: String; let markdown: String }
+    private struct RenameInput: Decodable { let title: String; let new_title: String }
+    private struct MoveInput: Decodable { let title: String; let parent: String?; let before: String?; let after: String? }
 
     /// How to write a Dash note, put into the writing tools' descriptions so Claude uses the
     /// components without being asked (and without an extra notes_components call).
@@ -188,6 +190,47 @@ final class NotesExtension: DashExtension {
                 guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”. Use notes_create.") }
                 try store.write(request.markdown.hasSuffix("\n") ? request.markdown : request.markdown + "\n", to: note)
                 return .string("updated")
+            },
+            ClaudeTool(name: "notes_delete", description: "Move a note, and its sub-notes, to the macOS Trash (the user can restore it from there). Use after merging notes, or when asked to remove one.",
+                       properties: ["title": JSONSchema.string("Note title.")], required: ["title"], requiresApproval: true) { [weak self] input in
+                guard let self else { return nil }
+                let title = try input.toolInput(TitleInput.self).title
+                guard let note = store.note(titled: title) else { throw ToolError("No note titled “\(title)”.") }
+                let children = store.subtreeHeight(note) > 1
+                try store.delete(note)
+                return .string("moved to the Trash" + (children ? " with its sub-notes" : ""))
+            },
+            ClaudeTool(name: "notes_rename", description: "Rename a note (its sub-notes follow). [[Links]] to the old title are not rewritten; mention that to the user.",
+                       properties: ["title": JSONSchema.string("Current title."), "new_title": JSONSchema.string("New title.")],
+                       required: ["title", "new_title"], requiresApproval: true) { [weak self] input in
+                guard let self else { return nil }
+                let request = try input.toolInput(RenameInput.self)
+                guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”.") }
+                return .string(try store.rename(note, to: request.new_title).title)
+            },
+            ClaudeTool(name: "notes_move", description: "Move a note (with its sub-notes) in the sidebar: under another note as a sub-note, to the top level, and/or before or after a sibling. Notes nest at most \(NotesStore.maxDepth) levels.",
+                       properties: ["title": JSONSchema.string("The note to move."),
+                                    "parent": JSONSchema.string("Note to put it under; \"\" for the top level. Omit to keep its parent."),
+                                    "before": JSONSchema.string("Place it just before this sibling."),
+                                    "after": JSONSchema.string("Place it just after this sibling.")],
+                       required: ["title"], requiresApproval: true) { [weak self] input in
+                guard let self else { return nil }
+                let request = try input.toolInput(MoveInput.self)
+                guard var note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”.") }
+                if let parent = request.parent {
+                    if parent.isEmpty {
+                        note = try store.move(note, toFolder: "", at: Int.max)
+                    } else {
+                        guard let target = store.note(titled: parent) else { throw ToolError("No note titled “\(parent)”.") }
+                        note = try store.move(note, .inside, target)
+                    }
+                }
+                if let sibling = request.before ?? request.after {
+                    guard let target = store.note(titled: sibling) else { throw ToolError("No note titled “\(sibling)”.") }
+                    note = try store.move(note, request.before != nil ? .before : .after, target)
+                }
+                return ["title": .string(note.title), "parent": store.parent(of: note).map { .string($0.title) } ?? .null,
+                        "position": .number(Double((store.siblingTitles(in: note.folder).firstIndex(of: note.title) ?? 0) + 1))]
             },
             ClaudeTool(name: "notes_append", description: "Append to the end of an existing note, using the same note syntax:\n\n" + guide,
                        properties: ["title": JSONSchema.string("Note title."), "markdown": JSONSchema.string("Text to add.")],

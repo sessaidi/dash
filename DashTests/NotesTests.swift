@@ -35,11 +35,17 @@ struct NotesTests {
         _ = try await host.runTool("notes_append", ["title": "Standup", "markdown": "- next: rollout"])
         #expect(try await host.runTool("notes_read", ["title": "Standup"])?.string?.contains("next: rollout") == true)
         #expect(try await host.runTool("notes_search", ["query": "retries"])?.array?.count == 1)
-        #expect(notes.tools.filter(\.requiresApproval).map(\.name) == ["notes_create", "notes_update", "notes_append"])
+        #expect(notes.tools.filter(\.requiresApproval).map(\.name) == ["notes_create", "notes_update", "notes_delete", "notes_rename", "notes_move", "notes_append"])
         // A second create with the same title is refused; update rewrites instead.
         await #expect(throws: (any Error).self) { try await host.runTool("notes_create", ["title": "Standup", "markdown": "again"]) }
         #expect(try await host.runTool("notes_update", ["title": "Standup", "markdown": "@TOC\n\n# Standup"]) == "updated")
         #expect(try await host.runTool("notes_read", ["title": "Standup"])?.string == "@TOC\n\n# Standup\n")
+        _ = try await host.runTool("notes_create", ["title": "Copy", "markdown": "dup"])
+        _ = try await host.runTool("notes_move", ["title": "Copy", "parent": "Standup"])
+        #expect(notes.store.parent(of: notes.store.note(titled: "Copy")!)?.title == "Standup")
+        #expect(try await host.runTool("notes_rename", ["title": "Copy", "new_title": "Old copy"]) == "Old copy")
+        #expect(try await host.runTool("notes_delete", ["title": "Old copy"]) == "moved to the Trash")
+        #expect(notes.store.note(titled: "Old copy") == nil)
         // The writing tools teach the component syntax up front.
         let create = try #require(notes.tools.first { $0.name == "notes_create" })
         #expect(create.description.contains("@TOC") && create.description.contains("@Callout(style:") && create.description.contains("@Tabs"))
