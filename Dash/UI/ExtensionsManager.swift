@@ -4,7 +4,7 @@ import SwiftUI
 
 extension DashExtension {
     var sourceLabel: String {
-        ["basics", "marketplace"].contains(id) ? "Built in" : "Plugin"
+        ExtensionHost.builtInIDs.contains(id) ? "Built in" : "Plugin"
     }
 }
 

@@ -121,10 +121,14 @@ final class ExtensionHost: ExtensionContext {
         return try ModelContainer(for: schema, configurations: configuration)
     }
 
+    /// Ids of the extensions that ship inside Dash (not plugins).
+    static let builtInIDs: Set<String> = ["basics", "home", "notes", "knowledge", "agents-studio", "marketplace", "git", "jj"]
+
     static func builtInExtensions() -> [any DashExtension] {
         // Everything else (integrations and features) is a plugin installed from the Marketplace;
         // features find integrations by id.
-        [BasicsExtension(), HomeExtension(), NotesExtension(), KnowledgeExtension(), AgentsStudio(), MarketplaceFeature()]
+        [BasicsExtension(), HomeExtension(), NotesExtension(), KnowledgeExtension(), AgentsStudio(), MarketplaceFeature(),
+         GitIntegration(), JujutsuIntegration()]
     }
 
     /// ~/Library/Application Support/Dash/Dash.store
