@@ -20,6 +20,8 @@ struct NotesView: View {
     @State private var error: String?
     @State private var exporting = false
     @State private var exportTarget: NoteFile?
+    /// The row a page is being dragged over, and where it would land.
+    @State private var dropTarget: (path: String, placement: NotesStore.Placement)?
 
     private var store: NotesStore { notes.store }
 
@@ -83,6 +85,16 @@ struct NotesView: View {
                 }
             }
             .listStyle(.sidebar)
+            // A drag that ends anywhere (or changes the tree) leaves no stale drop marker.
+            .onChange(of: store.notes) { dropTarget = nil }
+            .onDrop(of: [.text], isTargeted: Binding(get: { false }, set: { if !$0 { dropTarget = nil } })) { providers in
+                dropTarget = nil
+                // Dropped on empty space: to the end of the top level.
+                guard search.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+                return NoteDropDelegate.load(providers, store: store) { note in
+                    attempt { open(try store.move(note, toFolder: "", at: Int.max)) }
+                }
+            }
             .contextMenu {
                 Button("New Note", systemImage: "square.and.pencil") { newNote() }
                 Button("Export All as PDF…", systemImage: "doc.richtext") { exportPDF(nil) }
@@ -98,9 +110,27 @@ struct NotesView: View {
                 Text(note.title).lineLimit(1)
                 Text(note.modified.formatted(.relative(presentation: .named))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
             .tag(note.url.path)
             .help(note.title)
             .contextMenu { noteMenu(note) }
+            .draggable(note.url.path) {
+                Label(note.title, systemImage: "doc.text").padding(6).background(.background.secondary, in: .rect(cornerRadius: 6))
+            }
+            .onDrop(of: [.text], delegate: NoteDropDelegate(target: note, store: store, dropTarget: $dropTarget) { dragged, placement in
+                attempt { open(try store.move(dragged, placement, note)) }
+            })
+            .overlay(alignment: dropTarget?.placement == .after ? .bottom : .top) {
+                if let dropTarget, dropTarget.path == note.url.path, dropTarget.placement != .inside {
+                    Rectangle().fill(.tint).frame(height: 2).offset(y: dropTarget.placement == .after ? 4 : -4)
+                }
+            }
+            .background {
+                if let dropTarget, dropTarget.path == note.url.path, dropTarget.placement == .inside {
+                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.2)).padding(-3)
+                }
+            }
         } else {
             Label(node.title, systemImage: "folder")
                 .foregroundStyle(.secondary)
@@ -113,6 +143,29 @@ struct NotesView: View {
         Button("New Sub-note", systemImage: "plus.rectangle.on.rectangle") { newSubNote(of: note) }
             .disabled(!store.canHaveChildren(note))
         Button("Duplicate", systemImage: "plus.square.on.square") { attempt { open(try store.duplicate(note)) } }
+        Menu("Move", systemImage: "arrow.up.and.down.and.arrow.left.and.right") {
+            let siblings = store.siblingTitles(in: note.folder)
+            let index = siblings.firstIndex(of: note.title) ?? 0
+            Button("Move Up", systemImage: "arrow.up") { attempt { open(try store.move(note, toFolder: note.folder, at: index - 1)) } }
+                .disabled(index == 0)
+            Button("Move Down", systemImage: "arrow.down") { attempt { open(try store.move(note, toFolder: note.folder, at: index + 1)) } }
+                .disabled(index >= siblings.count - 1)
+            if let parent = store.parent(of: note) {
+                Button("Move Out of “\(parent.title)”", systemImage: "arrow.up.left") { attempt { open(try store.move(note, .after, parent)) } }
+            } else if !note.folder.isEmpty {
+                Button("Move to Top Level", systemImage: "arrow.up.left") { attempt { open(try store.move(note, toFolder: "", at: Int.max)) } }
+            }
+            let targets = store.notes.filter { $0.folder == note.folder && $0 != note && store.canHaveChildren($0) }
+            if !targets.isEmpty {
+                Menu("Make Sub-page of") {
+                    ForEach(store.arranged(targets, in: note.folder) { $0.title }) { target in
+                        Button(target.title) { attempt { open(try store.move(note, .inside, target)) } }
+                    }
+                }
+            }
+            Divider()
+            Button("Sort This Level A–Z") { store.resetOrder(of: note.folder) }
+        }
         Button("Copy Link", systemImage: "link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString("[[\(note.title)]]", forType: .string)
@@ -392,5 +445,54 @@ struct NotesView: View {
         flush()
         chat.isPanelVisible = true
         chat.send("Read my note “\(note.title)” (notes_read) and tell me what stands out, what's missing, and what I should do next.")
+    }
+}
+
+/// Drop on a page row: the top quarter places before it, the bottom quarter after it,
+/// the middle makes the dragged page its sub-page.
+private struct NoteDropDelegate: DropDelegate {
+    let target: NoteFile
+    let store: NotesStore
+    @Binding var dropTarget: (path: String, placement: NotesStore.Placement)?
+    let perform: (NoteFile, NotesStore.Placement) -> Void
+
+    /// Row height used to split it into zones; sidebar rows here are about this tall.
+    static let rowHeight: CGFloat = 36
+
+    static func placement(y: CGFloat, height: CGFloat = rowHeight, canNest: Bool) -> NotesStore.Placement {
+        if !canNest { return y < height / 2 ? .before : .after }
+        if y < height * 0.25 { return .before }
+        if y > height * 0.75 { return .after }
+        return .inside
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        dropTarget = (target.url.path, Self.placement(y: info.location.y, canNest: store.canHaveChildren(target)))
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTarget?.path == target.url.path { dropTarget = nil }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let placement = Self.placement(y: info.location.y, canNest: store.canHaveChildren(target))
+        dropTarget = nil
+        return Self.load(info.itemProviders(for: [.text]), store: store) { note in
+            guard note != target else { return }
+            perform(note, placement)
+        }
+    }
+
+    /// Reads the dragged page's path and finds the note.
+    static func load(_ providers: [NSItemProvider], store: NotesStore, then action: @escaping @MainActor (NoteFile) -> Void) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let path = object as? String else { return }
+            Task { @MainActor in
+                if let note = store.notes.first(where: { $0.url.path == path }) { action(note) }
+            }
+        }
+        return true
     }
 }

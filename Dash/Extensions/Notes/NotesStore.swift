@@ -28,6 +28,9 @@ struct NoteFile: Identifiable, Hashable {
 final class NotesStore {
     private(set) var vault: URL
     private(set) var notes: [NoteFile] = []
+    /// Hand-arranged order of each folder's pages (folder → titles), from `.dash/order.json`.
+    /// Pages not listed come after, alphabetically.
+    private(set) var order: [String: [String]] = [:]
 
     init(vault: URL) {
         self.vault = vault
@@ -62,6 +65,141 @@ final class NotesStore {
             found.append(NoteFile(url: url, modified: values.contentModificationDate ?? .distantPast, folder: folder))
         }
         notes = found.sorted { $0.modified > $1.modified }
+        order = (try? JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: orderURL))) ?? [:]
+    }
+
+    // MARK: Order
+
+    /// Hidden, so the vault's notes stay plain Markdown (the enumerator skips it).
+    private var orderURL: URL { vault.appending(path: ".dash/order.json") }
+
+    private func saveOrder() {
+        // Drop entries for pages that no longer exist.
+        var cleaned: [String: [String]] = [:]
+        for (folder, titles) in order {
+            let present = Set(notes.filter { $0.folder == folder }.map(\.title)).union(plainFolders(in: folder))
+            let kept = titles.filter(present.contains)
+            if !kept.isEmpty { cleaned[folder] = kept }
+        }
+        order = cleaned
+        do {
+            try FileManager.default.createDirectory(at: orderURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(cleaned).write(to: orderURL, options: .atomic)
+        } catch {}
+    }
+
+    /// Sorts a folder's rows: arranged ones first in their order, then the rest by title.
+    func arranged<T>(_ items: [T], in folder: String, title: (T) -> String) -> [T] {
+        let ranks = Dictionary((order[folder] ?? []).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return items.sorted {
+            let (a, b) = (ranks[title($0)] ?? Int.max, ranks[title($1)] ?? Int.max)
+            return a != b ? a < b : title($0).localizedStandardCompare(title($1)) == .orderedAscending
+        }
+    }
+
+    /// The titles of a folder's rows in display order (notes and plain folders).
+    func siblingTitles(in folder: String) -> [String] {
+        let titles = Set(notes.filter { $0.folder == folder }.map(\.title)).union(plainFolders(in: folder))
+        return arranged(Array(titles), in: folder) { $0 }
+    }
+
+    /// Folders under `folder` that aren't a note's sub-notes (e.g. "Meetings").
+    private func plainFolders(in folder: String) -> Set<String> {
+        let prefix = folder.isEmpty ? "" : folder + "/"
+        let titles = Set(notes.filter { $0.folder == folder }.map(\.title))
+        return Set(notes.compactMap { note -> String? in
+            guard note.folder.hasPrefix(prefix), note.folder != folder else { return nil }
+            return note.folder.dropFirst(prefix.count).split(separator: "/").first.map(String.init)
+        }).subtracting(titles)
+    }
+
+    /// Puts `title` at `index` in its folder's order (clamped), writing the whole order down.
+    private func arrange(_ title: String, in folder: String, at index: Int) {
+        var titles = siblingTitles(in: folder).filter { $0 != title }
+        titles.insert(title, at: min(max(index, 0), titles.count))
+        order[folder] = titles
+    }
+
+    /// Where a drop lands relative to another row.
+    enum Placement: Equatable {
+        case before, after, inside
+    }
+
+    /// Moves `note` next to `target` (same folder as it) or inside it as a sub-page.
+    @discardableResult
+    func move(_ note: NoteFile, _ placement: Placement, _ target: NoteFile) throws -> NoteFile {
+        guard note != target else { return note }
+        switch placement {
+        case .inside:
+            guard canHaveChildren(target) else {
+                throw ToolError("Notes nest at most \(Self.maxDepth) levels deep; “\(target.title)” is already at level \(depth(target)).")
+            }
+            let folder = childFolder(target)
+            return try move(note, toFolder: folder, at: siblingTitles(in: folder).count)
+        case .before, .after:
+            var titles = siblingTitles(in: target.folder)
+            if note.folder == target.folder { titles.removeAll { $0 == note.title } }
+            let index = (titles.firstIndex(of: target.title) ?? titles.count) + (placement == .after ? 1 : 0)
+            return try move(note, toFolder: target.folder, at: index)
+        }
+    }
+
+    /// Moves `note` (with its sub-pages) into `folder` ("" is the top level) at position `index`.
+    @discardableResult
+    func move(_ note: NoteFile, toFolder folder: String, at index: Int) throws -> NoteFile {
+        if folder == note.folder {
+            arrange(note.title, in: folder, at: index)
+            saveOrder()
+            return note
+        }
+        let own = childFolder(note)
+        guard folder != own, !folder.hasPrefix(own + "/") else { throw ToolError("A page can't go inside one of its own sub-pages.") }
+        let newDepth = folder.isEmpty ? 1 : folder.split(separator: "/").count + 1
+        guard newDepth + subtreeHeight(note) - 1 <= Self.maxDepth else {
+            throw ToolError("That would nest “\(note.title)” or its sub-pages more than \(Self.maxDepth) levels deep.")
+        }
+        let directory = folder.isEmpty ? vault : vault.appending(path: folder, directoryHint: .isDirectory)
+        let destination = directory.appending(path: "\(note.title).md")
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw ToolError("“\(folder.isEmpty ? "The top level" : folder)” already has a page named “\(note.title)”.")
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: note.url, to: destination)
+        let children = childFolderURL(note)
+        let newOwn = folder.isEmpty ? note.title : "\(folder)/\(note.title)"
+        if FileManager.default.fileExists(atPath: children.path) {
+            try FileManager.default.moveItem(at: children, to: directory.appending(path: note.title, directoryHint: .isDirectory))
+        }
+        // The sub-pages' arrangement moves with them.
+        for key in order.keys where key == own || key.hasPrefix(own + "/") {
+            order[newOwn + key.dropFirst(own.count)] = order.removeValue(forKey: key)
+        }
+        order[note.folder]?.removeAll { $0 == note.title }
+        reload(keepingOrder: true)
+        arrange(note.title, in: folder, at: index)
+        saveOrder()
+        return notes.first { $0.url.standardizedFileURL == destination.standardizedFileURL } ?? note
+    }
+
+    /// Levels in a note's subtree, counting itself (1 when it has no sub-pages).
+    func subtreeHeight(_ note: NoteFile) -> Int {
+        let own = childFolder(note)
+        let deepest = notes.filter { $0.folder == own || $0.folder.hasPrefix(own + "/") }.map { depth($0) }.max()
+        return deepest.map { $0 - depth(note) + 1 } ?? 1
+    }
+
+    /// Sorts a folder alphabetically again (forgets its hand-arranged order).
+    func resetOrder(of folder: String) {
+        order[folder] = nil
+        saveOrder()
+    }
+
+    private func reload(keepingOrder: Bool) {
+        let kept = order
+        reload()
+        if keepingOrder { order = kept }
     }
 
     func read(_ note: NoteFile) -> String {
@@ -102,7 +240,15 @@ final class NotesStore {
         if FileManager.default.fileExists(atPath: children.path) {
             try FileManager.default.moveItem(at: children, to: url.deletingLastPathComponent().appending(path: name, directoryHint: .isDirectory))
         }
-        reload()
+        // Keep its place, and its sub-pages' arrangement.
+        let own = childFolder(note)
+        let renamed = note.folder.isEmpty ? name : "\(note.folder)/\(name)"
+        for key in order.keys where key == own || key.hasPrefix(own + "/") {
+            order[renamed + key.dropFirst(own.count)] = order.removeValue(forKey: key)
+        }
+        order[note.folder] = order[note.folder]?.map { $0 == note.title ? name : $0 }
+        reload(keepingOrder: true)
+        saveOrder()
         return notes.first { $0.url.standardizedFileURL == url.standardizedFileURL } ?? note
     }
 
@@ -150,7 +296,7 @@ final class NotesStore {
 
     func children(of note: NoteFile) -> [NoteFile] {
         let folder = childFolder(note)
-        return notes.filter { $0.folder == folder }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        return arranged(notes.filter { $0.folder == folder }, in: folder) { $0.title }
     }
 
     func parent(of note: NoteFile) -> NoteFile? {
@@ -181,7 +327,13 @@ final class NotesStore {
             let children = nodes(in: prefix + name)
             result.append(NoteNode(id: "folder:" + prefix + name, title: name, note: nil, children: children))
         }
-        return result.sorted { ($0.note == nil ? 1 : 0, $0.title.lowercased()) < ($1.note == nil ? 1 : 0, $1.title.lowercased()) }
+        // Hand-arranged rows first, then notes before plain folders, by title.
+        let ranks = Dictionary((order[folder] ?? []).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return result.sorted {
+            let a = (ranks[$0.title] ?? Int.max, $0.note == nil ? 1 : 0, $0.title.lowercased())
+            let b = (ranks[$1.title] ?? Int.max, $1.note == nil ? 1 : 0, $1.title.lowercased())
+            return a < b
+        }
     }
 
     /// Notes whose title or text contains `query` (case-insensitive), newest first.
