@@ -123,8 +123,25 @@ final class NotesExtension: DashExtension {
     private struct CreateInput: Decodable { let title: String; let markdown: String; let folder: String? }
     private struct AppendInput: Decodable { let title: String; let markdown: String }
 
+    /// How to write a Dash note, put into the writing tools' descriptions so Claude uses the
+    /// components without being asked (and without an extra notes_components call).
+    static func writingGuide(_ components: [MarkdownComponentType]) -> String {
+        let examples = components.map { "- \($0.name): \($0.summary) e.g. `\($0.example.replacingOccurrences(of: "\n", with: " "))`" }
+        return """
+            Write a rich Dash note, not plain Markdown: Markdown plus component directives, used where they help the reader. \
+            Typically: @TOC right under the title when the note has 3 or more sections; @Callout(style: tip|note|warning|danger, title: "…") { … } \
+            for tips, warnings and gotchas; @Tabs with @Tab(title: …) for alternatives (per OS, per environment); @Columns for side-by-side \
+            comparisons; @Toggle for checklists; @Ask(label:, prompt:) for a follow-up the reader may want; [[Other note]] to link notes. \
+            Code goes in fenced blocks with a language. A directive with a body uses braces on its own lines.
+            Components:
+            \(examples.joined(separator: "\n"))
+            """
+    }
+
     var tools: [ClaudeTool] {
-        [
+        let components = host.map { host in host.extensions.filter { host.isEnabled($0) }.flatMap(\.components) } ?? CoreComponents.all
+        let guide = Self.writingGuide(components)
+        return [
             ClaudeTool(name: "notes_search", description: "Search the user's notes by title and text; returns titles, folders and dates (newest first).",
                        properties: ["query": JSONSchema.string("Words to look for; empty lists recent notes.")]) { [weak self] input in
                 guard let self else { return nil }
@@ -152,15 +169,27 @@ final class NotesExtension: DashExtension {
                      })]
                 })
             },
-            ClaudeTool(name: "notes_create", description: "Create a note in the user's vault. Markdown, with optional components (see notes_components).",
+            ClaudeTool(name: "notes_create", description: "Create a new note in the user's vault. To change a note that exists, use notes_update instead of creating another.\n\n" + guide,
                        properties: ["title": JSONSchema.string("Title (becomes the file name)."), "markdown": JSONSchema.string("Content."),
                                     "folder": JSONSchema.string("Optional sub-folder, e.g. Meetings.")],
                        required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
                 let request = try input.toolInput(CreateInput.self)
+                if store.note(titled: request.title) != nil {
+                    throw ToolError("A note titled “\(request.title)” already exists. Use notes_update to rewrite it, or pick another title.")
+                }
                 return .string(try store.create(title: request.title, markdown: request.markdown, folder: request.folder).title)
             },
-            ClaudeTool(name: "notes_append", description: "Append Markdown to the end of an existing note.",
+            ClaudeTool(name: "notes_update", description: "Replace an existing note's whole content (read it first with notes_read). Use this to rewrite or restructure a note.\n\n" + guide,
+                       properties: ["title": JSONSchema.string("Note title."), "markdown": JSONSchema.string("The note's new full content.")],
+                       required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
+                guard let self else { return nil }
+                let request = try input.toolInput(AppendInput.self)
+                guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”. Use notes_create.") }
+                try store.write(request.markdown.hasSuffix("\n") ? request.markdown : request.markdown + "\n", to: note)
+                return .string("updated")
+            },
+            ClaudeTool(name: "notes_append", description: "Append to the end of an existing note, using the same note syntax:\n\n" + guide,
                        properties: ["title": JSONSchema.string("Note title."), "markdown": JSONSchema.string("Text to add.")],
                        required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
