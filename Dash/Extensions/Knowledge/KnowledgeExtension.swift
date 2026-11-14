@@ -121,11 +121,18 @@ final class KnowledgeExtension: DashExtension {
         }.value
     }
 
+    /// The source an extension's entities are filed under. Knowledge's own writers are "code",
+    /// "code-tests", "git" and "claude": an extension with one of those ids (the built-in Git
+    /// integration is "git") must not replace their links when its entities are re-read.
+    nonisolated static func entitySource(_ extensionID: String) -> String {
+        ["code", "code-tests", "git", "claude"].contains(extensionID) ? "ext:" + extensionID : extensionID
+    }
+
     func ingestEntities() async {
         guard let host, let store else { return }
         for item in host.extensions where item.id != id && host.isEnabled(item) {
             let entities = item.knowledge
-            do { try await KnowledgeLinker.ingest(entities, source: item.id, into: store) }
+            do { try await KnowledgeLinker.ingest(entities, source: Self.entitySource(item.id), into: store) }
             catch { lastError = "\(item.name): \(error.localizedDescription)" }
         }
         if let notes = host.ext(NotesExtension.self) {
