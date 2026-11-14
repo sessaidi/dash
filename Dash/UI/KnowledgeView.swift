@@ -72,12 +72,9 @@ struct KnowledgeView: View {
             } else {
                 Text("Repositories").font(.caption.bold()).foregroundStyle(.secondary)
                 ForEach(knowledge.repositories, id: \.self) { path in
-                    Button {
+                    RepositoryRow(path: path, knowledge: knowledge) {
                         Task { if let node = try? await knowledge.store?.node("repo:" + path) { select(node) } }
-                    } label: {
-                        Label((path as NSString).lastPathComponent, systemImage: "shippingbox")
                     }
-                    .buttonStyle(.plain)
                 }
                 let counts = knowledge.counts
                 if !counts.isEmpty {
@@ -312,5 +309,57 @@ struct KnowledgeSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A repository in the Knowledge overview: how much is known about it, and a way to learn more.
+private struct RepositoryRow: View {
+    let path: String
+    let knowledge: KnowledgeExtension
+    let open: () -> Void
+    @State private var coverage: (studied: Int, directories: Int)?
+    @State private var history = 0
+    @State private var studying = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: open) {
+                Label((path as NSString).lastPathComponent, systemImage: "shippingbox")
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            if let coverage, coverage.directories > 0 {
+                ProgressView(value: Double(coverage.studied), total: Double(coverage.directories))
+                    .frame(width: 70)
+                    .help("Claude has studied \(coverage.studied) of \(coverage.directories) directories")
+                Text("\(Int((Double(coverage.studied) / Double(coverage.directories) * 100).rounded()))% studied")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if history == 0 {
+                Image(systemName: "clock.badge.exclamationmark").foregroundStyle(.orange)
+                    .help("No git history linked yet (authors, files that change together, tickets). It comes back at the next refresh.")
+            }
+            if studying {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Study More") {
+                    studying = true
+                    Task {
+                        _ = await knowledge.learn(budget: 10, repo: "repo:" + path)
+                        await load()
+                        studying = false
+                    }
+                }
+                .controlSize(.small)
+                .help("Have Claude study the next 10 directories (uses Claude usage)")
+            }
+        }
+        .task(id: knowledge.revision) { await load() }
+    }
+
+    private func load() async {
+        guard let store = knowledge.store else { return }
+        coverage = try? await store.coverage(repo: "repo:" + path)
+        history = (try? await store.edgeCount(kind: "authored", repo: "repo:" + path)) ?? 0
     }
 }
