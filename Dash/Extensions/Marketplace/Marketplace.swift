@@ -820,6 +820,8 @@ struct PluginDetailSheet: View {
                 }
             }
             .padding(20)
+            .background(.background)
+            .zIndex(1)
             Divider()
             ScrollView {
                 Group {
@@ -834,6 +836,8 @@ struct PluginDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
+            // Keep the README from scrolling up under the header.
+            .clipped()
         }
         .frame(width: 760, height: 680)
         .task {
