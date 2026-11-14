@@ -105,6 +105,7 @@ struct CodeIndexer: Sendable {
         }
         try await store.upsert(callEdges)
 
+        try await indexTests(files)
         if readHistory { try await indexHistory() }
         try await store.setMeta("indexed:" + repoID, ISO8601DateFormatter().string(from: .now))
         return report
@@ -171,6 +172,63 @@ struct CodeIndexer: Sendable {
             if let match = candidates.first(where: known.contains) { return fileID(match) }
         }
         return nil
+    }
+
+    // MARK: Tests
+
+    /// Links each test file to the file it tests, by naming convention: Go `x_test.go`, Swift and
+    /// Kotlin/Java `FooTests`/`FooTest`, TypeScript/JavaScript `x.test.ts`/`x.spec.ts` (also under
+    /// `__tests__`), Python `test_x.py`/`x_test.py`.
+    func indexTests(_ files: [String]) async throws {
+        let edges = Self.testLinks(files).map { KnowledgeEdge(src: fileID($0.test), dst: fileID($0.subject), kind: "tests", source: "code-tests") }
+        try await store.removeEdges(source: "code-tests", repo: repoID)
+        try await store.upsert(edges)
+    }
+
+    nonisolated static func testLinks(_ files: [String]) -> [(test: String, subject: String)] {
+        let present = Set(files)
+        // Basename (without extension) → paths, for languages that name tests after a type.
+        var byBase: [String: [String]] = [:]
+        for path in files { byBase[((path as NSString).lastPathComponent as NSString).deletingPathExtension, default: []].append(path) }
+        func sameFolder(_ path: String, _ name: String) -> String {
+            let folder = (path as NSString).deletingLastPathComponent
+            return folder.isEmpty ? name : folder + "/" + name
+        }
+        var links: [(String, String)] = []
+        for path in files {
+            let file = (path as NSString).lastPathComponent
+            let ext = (file as NSString).pathExtension
+            let base = (file as NSString).deletingPathExtension
+            var candidates: [String] = []
+            switch ext {
+            case "go" where base.hasSuffix("_test"):
+                candidates = [sameFolder(path, String(base.dropLast(5)) + ".go")]
+            case "py" where base.hasPrefix("test_") || base.hasSuffix("_test"):
+                let subject = base.hasPrefix("test_") ? String(base.dropFirst(5)) : String(base.dropLast(5))
+                candidates = [sameFolder(path, subject + ".py")] + (byBase[subject] ?? []).filter { $0.hasSuffix(".py") }
+            case "ts", "tsx", "js", "jsx", "mts", "mjs":
+                for marker in [".test", ".spec"] where base.hasSuffix(marker) {
+                    let subject = String(base.dropLast(marker.count))
+                    let folder = (path as NSString).deletingLastPathComponent
+                    let parent = (folder as NSString).lastPathComponent == "__tests__" ? (folder as NSString).deletingLastPathComponent : folder
+                    for subjectExt in [ext, "ts", "tsx", "js", "jsx"] {
+                        candidates.append(sameFolder(path, subject + "." + subjectExt))
+                        candidates.append(parent.isEmpty ? subject + "." + subjectExt : parent + "/" + subject + "." + subjectExt)
+                    }
+                }
+            case "swift", "kt", "java":
+                for suffix in ["Tests", "Test", "Spec"] where base.hasSuffix(suffix) && base.count > suffix.count {
+                    let subject = String(base.dropLast(suffix.count))
+                    let matches = (byBase[subject] ?? []).filter { ($0 as NSString).pathExtension == ext }
+                    // Only an unambiguous match: one file of that name.
+                    if matches.count == 1 { candidates.append(matches[0]) }
+                }
+            default:
+                break
+            }
+            if let subject = candidates.first(where: { present.contains($0) && $0 != path }) { links.append((path, subject)) }
+        }
+        return links
     }
 
     // MARK: Git history
