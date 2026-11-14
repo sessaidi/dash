@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 enum CoreComponents {
     static var all: [MarkdownComponentType] {
-        [toc, children, callout, columns, column, tabs, tab, badge, stat, progress, toggle, ask, embed, widget]
+        [toc, children, callout, columns, column, tabs, tab, badge, stat, progress, toggle, ask, dashii, embed, widget]
     }
 
     static let toc = MarkdownComponentType(
@@ -144,6 +144,15 @@ enum CoreComponents {
         .buttonStyle(.bordered))
     }
 
+    static let dashii = MarkdownComponentType(
+        name: "Dashii",
+        summary: "A request to Dashii inside the note: Dashii does it with all its tools (workspaces, PRs, Jira, clusters…) and writes the answer into the block. Also written as a line starting with @Dashii. Interactive.",
+        parameters: [.init("ask", "string", "What to do or answer.", required: true), .init("id", "string", "Set by Dashii when it answers.")],
+        acceptsChildren: true,
+        example: "@Dashii(ask: \"Look at the workspaces for LAF-1234 and give me a report\")") { context in
+        AnyView(DashiiBlockView(context: context))
+    }
+
     static let embed = MarkdownComponentType(
         name: "Embed", summary: "Shows another note inline.",
         parameters: [.init("note", "string", "The note's title.", required: true)],
@@ -267,5 +276,56 @@ private struct ChildrenComponent: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 10))
+    }
+}
+
+/// A @Dashii block: the question, an Ask button that hands it to Dashii in the chat, and the
+/// answer Dashii wrote back (the block's body).
+private struct DashiiBlockView: View {
+    let context: MarkdownComponentContext
+    @State private var asked = false
+
+    private var ask: String { context.string("ask") ?? "" }
+    private var answered: Bool { !context.childSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "sparkles").foregroundStyle(.tint)
+                Text(ask).font(.callout.weight(.semibold)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if !context.isPrinting {
+                    if asked {
+                        Label("Dashii is on it", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button(answered ? "Ask Again" : "Ask Dashii") { run() }
+                        .controlSize(.small)
+                        .disabled(ask.isEmpty || context.noteTitle == nil)
+                }
+            }
+            if answered {
+                context.children
+            } else if !context.isPrinting {
+                Text("Not answered yet. Dashii will write its answer here.").font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.06), in: .rect(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.tint.opacity(0.25)))
+        .onChange(of: context.childSource) { asked = false }
+    }
+
+    private func run() {
+        guard let title = context.noteTitle else { return }
+        asked = true
+        let reference = context.string("id") ?? ask
+        context.host.askClaude("""
+            In my note “\(title)”, a @Dashii block asks: \(ask)
+
+            Do it with your tools, then write your answer into that block with notes_answer \
+            (title: “\(title)”, block: “\(reference)”), as a rich note section (components welcome, no # title). \
+            Here in the chat, just say in one line that it's done.
+            """)
     }
 }

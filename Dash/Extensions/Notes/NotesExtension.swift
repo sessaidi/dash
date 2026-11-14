@@ -123,6 +123,7 @@ final class NotesExtension: DashExtension {
     private struct CreateInput: Decodable { let title: String; let markdown: String; let folder: String? }
     private struct AppendInput: Decodable { let title: String; let markdown: String }
     private struct RenameInput: Decodable { let title: String; let new_title: String }
+    private struct AnswerInput: Decodable { let title: String; let block: String; let markdown: String }
     private struct MoveInput: Decodable { let title: String; let parent: String?; let before: String?; let after: String? }
 
     /// How to write a Dash note, put into the writing tools' descriptions so Claude uses the
@@ -134,6 +135,7 @@ final class NotesExtension: DashExtension {
             Typically: @TOC right under the title when the note has 3 or more sections; @Callout(style: tip|note|warning|danger, title: "…") { … } \
             for tips, warnings and gotchas; @Tabs with @Tab(title: …) for alternatives (per OS, per environment); @Columns for side-by-side \
             comparisons; @Toggle for checklists; @Ask(label:, prompt:) for a follow-up the reader may want; [[Other note]] to link notes. \
+            @Dashii(ask: …) blocks are requests the user leaves for you in a note; answer them with notes_answer, never by rewriting the note. \
             Code goes in fenced blocks with a language. A directive with a body uses braces on its own lines.
             Components:
             \(examples.joined(separator: "\n"))
@@ -190,6 +192,16 @@ final class NotesExtension: DashExtension {
                 guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”. Use notes_create.") }
                 try store.write(request.markdown.hasSuffix("\n") ? request.markdown : request.markdown + "\n", to: note)
                 return .string("updated")
+            },
+            ClaudeTool(name: "notes_answer", description: "Write your answer into a @Dashii block of a note (the user asked you something there). Replaces that block's previous answer; the rest of the note is untouched.\n\n" + guide,
+                       properties: ["title": JSONSchema.string("Note title."), "block": JSONSchema.string("The block's id, or its question if it has no id."),
+                                    "markdown": JSONSchema.string("The answer.")],
+                       required: ["title", "block", "markdown"]) { [weak self] input in
+                guard let self else { return nil }
+                let request = try input.toolInput(AnswerInput.self)
+                guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”.") }
+                try store.write(try DashiiBlocks.answering(request.block, with: request.markdown, in: store.read(note)), to: note)
+                return .string("answered")
             },
             ClaudeTool(name: "notes_delete", description: "Move a note, and its sub-notes, to the macOS Trash (the user can restore it from there). Use after merging notes, or when asked to remove one.",
                        properties: ["title": JSONSchema.string("Note title.")], required: ["title"], requiresApproval: true) { [weak self] input in

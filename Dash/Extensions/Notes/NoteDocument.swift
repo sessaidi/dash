@@ -14,7 +14,7 @@ struct NoteDocument: Equatable {
         let (values, body, offset) = Self.splitFrontmatter(source)
         self.values = values
         bodyLineOffset = offset
-        let document = Document(parsing: NotesStore.linkified(body), options: [.parseBlockDirectives])
+        let document = Document(parsing: DashiiBlocks.normalized(NotesStore.linkified(body)), options: [.parseBlockDirectives])
         blocks = document.children.compactMap { NoteBlock($0, values: values, source: body) }
     }
 
