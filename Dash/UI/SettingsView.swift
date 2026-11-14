@@ -96,10 +96,32 @@ private struct ClaudeSettings: View {
 /// settings, AI, rules, storage). Plugin bundles (signatures, approvals) are one level deeper.
 private struct ExtensionList: View {
     @Environment(ExtensionHost.self) private var host
-    @State private var path: [String] = []
+    /// The page shown instead of the list (an extension id, or "__bundles"). Not a NavigationStack:
+    /// its back button would join the Settings window's tab bar and shift the tabs by one.
+    @State private var shown: String?
 
     var body: some View {
-        NavigationStack(path: $path) {
+        if let shown {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { self.shown = nil } label: { Label("Plugins", systemImage: "chevron.left") }
+                    .buttonStyle(.borderless)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                Divider()
+                if shown == "__bundles" {
+                    PluginsSettings()
+                } else if let item = host.extensions.first(where: { $0.id == shown }) {
+                    ExtensionDetail(item: item)
+                } else {
+                    ContentUnavailableView("Not installed", systemImage: "puzzlepiece.extension")
+                }
+            }
+            .onChange(of: host.managerSelection) { openRequested() }
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
             Form {
                 section(.integration, "Integrations", footer: "Connect an account. Turning one off hides its tools and pauses the features that require it.")
                 section(.feature, "Features", footer: "Build on integrations: widgets, Claude tools, agents. Turning one off keeps its data and settings.")
@@ -109,7 +131,7 @@ private struct ExtensionList: View {
                     }
                 }
                 Section {
-                    NavigationLink(value: "__bundles") { Label("Plugin Files and Approvals", systemImage: "shippingbox") }
+                    row { Label("Plugin Files and Approvals", systemImage: "shippingbox") } open: { shown = "__bundles" }
                     HStack {
                         Button("Get More in the Marketplace…") { host.openManager("marketplace") }
                         Spacer()
@@ -120,20 +142,25 @@ private struct ExtensionList: View {
             // "Open settings of X" (from widgets, Home, the chat): straight to its page.
             .onAppear { openRequested() }
             .onChange(of: host.managerSelection) { openRequested() }
-            .navigationDestination(for: String.self) { id in
-                if id == "__bundles" {
-                    PluginsSettings()
-                } else if let item = host.extensions.first(where: { $0.id == id }) {
-                    ExtensionDetail(item: item)
-                }
-            }
-        }
     }
 
     private func openRequested() {
         guard let id = host.managerSelection, host.extensions.contains(where: { $0.id == id }) else { return }
-        path = [id]
+        shown = id
         host.managerSelection = nil
+    }
+
+    /// A list row that opens a page: the whole row is clickable, with a chevron like a navigation link.
+    private func row<Label: View>(@ViewBuilder _ label: () -> Label, open: @escaping () -> Void) -> some View {
+        Button(action: open) {
+            HStack {
+                label()
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -143,13 +170,13 @@ private struct ExtensionList: View {
             if items.isEmpty { Text("None installed.").foregroundStyle(.secondary) }
             ForEach(items, id: \.id) { item in
                 HStack {
-                    NavigationLink(value: item.id) {
+                    row {
                         VStack(alignment: .leading, spacing: 2) {
                             SidebarRow(item: item)
                             Text("by \(item.author.name)\(item.summary.isEmpty ? "" : " · \(item.summary)")")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
-                    }
+                    } open: { shown = item.id }
                     Toggle("Enabled", isOn: Binding(get: { host.isEnabled(item) }, set: { host.setEnabled(item, $0) }))
                         .toggleStyle(.switch)
                         .labelsHidden()
