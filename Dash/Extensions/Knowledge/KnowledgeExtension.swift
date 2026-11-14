@@ -147,6 +147,112 @@ final class KnowledgeExtension: DashExtension {
         Task { await refresh() }
     }
 
+    /// Folders where people keep checkouts, searched three levels deep (the Agents code folder first).
+    static var searchRoots: [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var seen = Set<String>()
+        return ([codeRoot] + ["code", "Code", "Codes", "Developer", "dev", "src", "projects", "Projects", "workspace", "repos", "git", "GitHub"].map { home.appending(path: $0) })
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            // ~/code and ~/Code are one folder on a case-insensitive disk.
+            .filter { seen.insert($0.resolvingSymlinksInPath().path.lowercased()).inserted }
+    }
+
+    /// Git checkouts under the search roots whose folder name contains `query` (all when empty).
+    nonisolated static func findCheckouts(matching query: String, roots: [URL], depth: Int = 3) -> [URL] {
+        let wanted = query.lowercased()
+        var found: [URL] = []
+        func walk(_ folder: URL, _ level: Int) {
+            guard level <= depth, found.count < 200,
+                  let children = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+            else { return }
+            for child in children where (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                if FileManager.default.fileExists(atPath: child.appending(path: ".git").path) {
+                    if wanted.isEmpty || child.lastPathComponent.lowercased().contains(wanted) { found.append(child) }
+                } else if !["node_modules", "build", "vendor", "Pods", "DerivedData"].contains(child.lastPathComponent) {
+                    walk(child, level + 1)
+                }
+            }
+        }
+        for root in roots { walk(root, 1) }
+        return found.sorted { $0.path < $1.path }
+    }
+
+    /// `origin`'s URL of a checkout, from .git/config.
+    nonisolated static func originURL(_ checkout: URL) -> String? {
+        guard let config = try? String(contentsOf: checkout.appending(path: ".git/config"), encoding: .utf8) else { return nil }
+        var inOrigin = false
+        for line in config.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") { inOrigin = trimmed == "[remote \"origin\"]" }
+            else if inOrigin, trimmed.hasPrefix("url") { return trimmed.split(separator: "=", maxSplits: 1).last.map { $0.trimmingCharacters(in: .whitespaces) } }
+        }
+        return nil
+    }
+
+    /// Resolves what the user named: a path, a folder name found under the search roots, or
+    /// "owner/name" (a local checkout of it, else a fresh clone into the code folder).
+    func resolveRepository(_ text: String) async throws -> (url: URL, cloned: Bool) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            guard FileManager.default.fileExists(atPath: (expanded as NSString).appendingPathComponent(".git")) else {
+                throw ToolError("\(expanded) isn't a git checkout.")
+            }
+            return (URL(fileURLWithPath: expanded), false)
+        }
+        let parts = trimmed.split(separator: "/").map(String.init)
+        let name = parts.last ?? trimmed
+        let roots = Self.searchRoots
+        let local = await Task.detached { Self.findCheckouts(matching: name, roots: roots) }.value
+        let exact = local.filter { $0.lastPathComponent.lowercased() == name.lowercased() }
+        if parts.count == 2, let match = exact.first(where: { (Self.originURL($0) ?? "").lowercased().contains(trimmed.lowercased()) }) ?? exact.first {
+            return (match, false)
+        }
+        if parts.count == 1 {
+            if exact.count == 1 { return (exact[0], false) }
+            if exact.count > 1 { throw ToolError("Several checkouts are named \(name): \(exact.map(\.path).joined(separator: ", ")). Give the path.") }
+            throw ToolError("No checkout named \(name) under \(roots.map(\.path).joined(separator: ", ")). Give its path, or owner/name to clone it.")
+        }
+        guard parts.count == 2, parts.allSatisfy({ $0.allSatisfy { $0.isLetter || $0.isNumber || "-_.".contains($0) } }) else {
+            throw ToolError("Give a path, a folder name or owner/name.")
+        }
+        return (try await Self.clone(owner: parts[0], name: parts[1], into: Self.codeRoot), true)
+    }
+
+    /// Clones github.com/owner/name with the user's git setup (SSH first, then HTTPS), into `<folder>/<name>`.
+    nonisolated static func clone(owner: String, name: String, into folder: URL) async throws -> URL {
+        let target = folder.appending(path: name)
+        guard !FileManager.default.fileExists(atPath: target.path) else { throw ToolError("\(target.path) already exists and isn't a git checkout.") }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var failure = ""
+        for url in ["git@github.com:\(owner)/\(name).git", "https://github.com/\(owner)/\(name).git"] {
+            let (status, output) = await run(["/usr/bin/git", "clone", "--quiet", url, target.path], timeout: 600)
+            if status == 0 { return target }
+            failure = output
+            try? FileManager.default.removeItem(at: target)
+        }
+        throw ToolError("Couldn't clone \(owner)/\(name): \(failure.suffix(400))")
+    }
+
+    nonisolated static func run(_ arguments: [String], timeout: TimeInterval) async -> (Int32, String) {
+        await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: arguments[0])
+            process.arguments = Array(arguments.dropFirst())
+            // The login shell's environment: ssh-agent socket, credential helpers, proxies.
+            process.environment = ShellEnvironment.current.merging(["GIT_TERMINAL_PROMPT": "0"]) { $1 }
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            do { try process.run() } catch { return (-1, error.localizedDescription) }
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning, Date() < deadline { try? await Task.sleep(for: .milliseconds(200)) }
+            if process.isRunning { process.terminate() }
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            return (process.terminationStatus, output)
+        }.value
+    }
+
     func removeRepository(_ path: String) {
         repositories.removeAll { $0 == path }
         Task {
@@ -313,6 +419,8 @@ final class KnowledgeExtension: DashExtension {
     private struct TraceInput: Decodable { let id: String; let direction: String?; let depth: Int? }
     private struct PathInput: Decodable { let from: String; let to: String }
     private struct LearnInput: Decodable { let directories: Int?; let repo: String? }
+    private struct FindInput: Decodable { let query: String? }
+    private struct RepositoryInput: Decodable { let repository: String }
 
     static func json(_ node: KnowledgeNode, full: Bool = false) -> JSONValue {
         var object: [String: JSONValue] = ["id": .string(node.id), "kind": .string(node.kind), "name": .string(node.name)]
@@ -419,6 +527,53 @@ final class KnowledgeExtension: DashExtension {
                 let end = node.kind == "symbol" ? min(max(node.endLine, start), start + 300) : min(lines.count, 200)
                 return ["file": .string(url.path), "from": .number(Double(start)),
                         "code": .string(lines[(start - 1)..<min(end, lines.count)].joined(separator: "\n"))]
+            },
+            ClaudeTool(
+                name: "knowledge_find_repos",
+                description: "Find git checkouts on this Mac (under ~/code, ~/Codes, ~/Developer, ~/src and similar, three levels deep) whose folder name contains some text, with their origin and whether Knowledge already indexes them. Read-only.",
+                properties: ["query": JSONSchema.string("Part of the repository's folder name; empty lists them all.")]
+            ) { [weak self] input in
+                guard let self else { return nil }
+                let query = try input.toolInput(FindInput.self).query ?? ""
+                let roots = Self.searchRoots
+                let found = await Task.detached { Self.findCheckouts(matching: query, roots: roots) }.value
+                return ["searched": .array(roots.map { .string($0.path) }),
+                        "checkouts": .array(found.prefix(60).map { url in
+                            ["path": .string(url.path), "origin": Self.originURL(url).map(JSONValue.string) ?? .null,
+                             "indexed": .bool(repositories.contains(url.standardizedFileURL.path))]
+                        })]
+            },
+            ClaudeTool(
+                name: "knowledge_add_repository",
+                description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Claude usage). Give a local path, a folder name found by knowledge_find_repos, or GitHub owner/name: a local checkout is used if there is one, otherwise it's cloned into the code folder with the user's git credentials. Then knowledge_learn can study it.",
+                properties: ["repository": JSONSchema.string("A path, a folder name, or owner/name.")],
+                required: ["repository"], requiresApproval: true
+            ) { [weak self] input in
+                guard let self else { return nil }
+                let (url, cloned) = try await resolveRepository(try input.toolInput(RepositoryInput.self).repository)
+                let path = url.standardizedFileURL.path
+                if repositories.contains(path) { return ["path": .string(path), "note": "Already indexed."] }
+                repositories.append(path)
+                guard let store else { throw ToolError("The knowledge graph couldn't be opened.") }
+                status = "Indexing \(url.lastPathComponent)…"
+                defer { status = "" }
+                let report = try await Self.index(path, store: store, history: readHistory)
+                counts = (try? await store.counts()) ?? [:]
+                revision += 1
+                return ["path": .string(path), "cloned": .bool(cloned), "indexed": .string(String(describing: report))]
+            },
+            ClaudeTool(
+                name: "knowledge_remove_repository",
+                description: "Stop indexing a repository and drop it from the knowledge graph (the checkout on disk is left alone).",
+                properties: ["repository": JSONSchema.string("Its path or folder name.")], required: ["repository"], requiresApproval: true
+            ) { [weak self] input in
+                guard let self else { return nil }
+                let wanted = try input.toolInput(RepositoryInput.self).repository
+                guard let path = repositories.first(where: { $0 == (wanted as NSString).expandingTildeInPath || ($0 as NSString).lastPathComponent == wanted }) else {
+                    throw ToolError("Knowledge doesn't index “\(wanted)”. Indexed: \(repositories.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).")
+                }
+                removeRepository(path)
+                return ["removed": .string(path)]
             },
             ClaudeTool(
                 name: "knowledge_learn",
