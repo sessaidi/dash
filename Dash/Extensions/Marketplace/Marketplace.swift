@@ -539,6 +539,15 @@ private struct MarketplaceView: View {
         }
     }
 
+    private func iconButton(_ title: String, _ symbol: String, tint: Color = .secondary, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.title3).foregroundStyle(tint).frame(width: 28, height: 28).contentShape(.rect)
+        }
+        .buttonStyle(.borderless)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+
     private func row(_ entry: RegistryIndex.Entry, label: String) -> some View {
         let installed = marketplace.installed(entry.id)
         return HStack(alignment: .top) {
@@ -562,19 +571,16 @@ private struct MarketplaceView: View {
             .onTapGesture { details = PendingInstall(entry: entry, registry: label) }
             .help("Show details")
             Spacer()
-            if entry.builtIn == true {
-                Text("Built in").foregroundStyle(.secondary)
-            } else if working == entry.id {
-                ProgressView().controlSize(.small)
-            } else {
-                if installed != nil {
-                    Button("Remove") {
-                        do { try marketplace.uninstall(entry.id) } catch { self.error = error.localizedDescription }
-                    }
-                }
-                Button("Details") { details = PendingInstall(entry: entry, registry: label) }
-                if installed?.version != entry.version {
-                    Button(installed == nil ? "Install" : "Update") {
+            // Three fixed slots (details, install or update, remove) so the icons line up row to row.
+            HStack(spacing: 4) {
+                iconButton("Details", "info.circle") { details = PendingInstall(entry: entry, registry: label) }
+                if entry.builtIn == true {
+                    Image(systemName: "checkmark.seal").foregroundStyle(.secondary).frame(width: 28, height: 28).help("Built into Dash")
+                } else if working == entry.id {
+                    ProgressView().controlSize(.small).frame(width: 28, height: 28)
+                } else if installed?.version != entry.version {
+                    iconButton(installed == nil ? "Install" : "Update to \(entry.version)",
+                               installed == nil ? "arrow.down.circle" : "arrow.triangle.2.circlepath.circle", tint: .accentColor) {
                         working = entry.id
                         error = nil
                         Task {
@@ -591,6 +597,15 @@ private struct MarketplaceView: View {
                             working = nil
                         }
                     }
+                } else {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).frame(width: 28, height: 28).help("Installed, up to date")
+                }
+                if installed != nil, entry.builtIn != true {
+                    iconButton("Remove", "trash", tint: .red) {
+                        do { try marketplace.uninstall(entry.id) } catch { self.error = error.localizedDescription }
+                    }
+                } else {
+                    Color.clear.frame(width: 28, height: 28)
                 }
             }
         }
