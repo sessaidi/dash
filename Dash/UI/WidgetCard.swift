@@ -50,6 +50,8 @@ struct WidgetCard: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Widgets read their size and size family (narrow, medium, wide, large) from here.
+            .measuresWidgetLayout()
             // While editing, the whole card is a drag handle and its content doesn't take clicks.
             .allowsHitTesting(!editing)
         }

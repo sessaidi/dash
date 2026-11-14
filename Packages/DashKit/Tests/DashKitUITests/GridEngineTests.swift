@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import DashKitUI
 
@@ -101,5 +102,14 @@ struct GridEngineTests {
         let four = engine.reflow(saved, columns: 4, limits: ["pods": GridLimits(minW: 3, maxW: 12), "chart": GridLimits(minW: 6, maxW: 12)])
         #expect(four["pods"]?.w == 4 && four["chart"]?.w == 4)
         #expect(sideBySide["a"] == GridFrame(x: 0, y: 0, w: 3, h: 2) && sideBySide["b"] == GridFrame(x: 3, y: 0, w: 3, h: 4))
+    }
+}
+
+struct WidgetLayoutTests {
+    @Test func familiesBySize() {
+        #expect(WidgetLayout.family(for: CGSize(width: 260, height: 600)) == .narrow)
+        #expect(WidgetLayout.family(for: CGSize(width: 480, height: 300)) == .medium)
+        #expect(WidgetLayout.family(for: CGSize(width: 900, height: 240)) == .wide)
+        #expect(WidgetLayout.family(for: CGSize(width: 900, height: 500)) == .large)
     }
 }

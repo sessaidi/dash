@@ -2,7 +2,7 @@ import Foundation
 
 /// The SDK version plugins are built against. Plugins declare the minimum they need.
 public enum DashKitInfo {
-    public static let version = "1.3.0"
+    public static let version = "1.4.0"
 }
 
 /// Extensions come in two layers:
