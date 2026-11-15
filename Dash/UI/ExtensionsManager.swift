@@ -177,16 +177,30 @@ private struct Overview: View {
         if !ids.isEmpty {
             Section(title) {
                 ForEach(ids, id: \.self) { id in
+                    // An integration or a feature: either can be required.
+                    let installed = host.extensions.first { $0.id == id }
                     let integration = host.integration(id)
                     Button { host.managerSelection = id } label: {
-                        ItemRow(integration?.name ?? id,
-                                leading: { Image(systemName: integration?.systemImage ?? "questionmark.square").frame(width: 20) },
+                        ItemRow(installed?.name ?? id,
+                                leading: { Image(systemName: installed?.systemImage ?? "questionmark.square").frame(width: 20) },
                                 trailing: {
-                                    if let integration { ConnectionStatusLabel(integration.connectionState).font(.caption) } else { Badge("not installed", tone: .danger) }
+                                    if let integration {
+                                        ConnectionStatusLabel(integration.connectionState).font(.caption)
+                                    } else if let installed {
+                                        if !host.isEnabled(installed) {
+                                            Badge("turned off", tone: .warning)
+                                        } else if !host.unmetRequirements(of: installed).isEmpty {
+                                            Badge("needs setup", tone: .warning)
+                                        } else {
+                                            Badge("installed", tone: .success)
+                                        }
+                                    } else {
+                                        Badge("not installed", tone: .danger)
+                                    }
                                 })
                     }
                     .buttonStyle(.plain)
-                    .disabled(integration == nil)
+                    .disabled(installed == nil)
                 }
             }
         }
