@@ -132,7 +132,7 @@ enum HookAction: Codable, Hashable {
 
     var summary: String {
         switch self {
-        case .prompt: "Ask Claude"
+        case .prompt: "Ask Dashii"
         case .command(let name, _, _, _): "Run /\(name)"
         case .note(let title, _, _): "Create note “\(title)”"
         case .notify: "Notify me"

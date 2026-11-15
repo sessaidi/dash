@@ -458,7 +458,7 @@ private struct HookForm: View {
     @ViewBuilder
     private var actionEditor: some View {
         Picker("Action", selection: actionKind) {
-            Text("Ask Claude").tag(ActionKind.prompt)
+            Text("Ask Dashii").tag(ActionKind.prompt)
             Text("Run a /command").tag(ActionKind.command)
             Text("Create a note").tag(ActionKind.note)
             Text("Notify me").tag(ActionKind.notify)

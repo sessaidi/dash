@@ -106,7 +106,7 @@ struct WidgetCard: View {
     @ViewBuilder
     private var menuItems: some View {
             Button("Settings…", systemImage: "slider.horizontal.3") { showSettings = true }
-            Button("Ask Claude About This", systemImage: "sparkles") {
+            Button("Ask Dashii", systemImage: "bubble.left") {
                 host.askClaude("Read widget \"\(widget.title)\" (id \(widget.id.uuidString)) and tell me what stands out.")
             }
             Picker("Size Preset", selection: Binding(get: { widget.size }, set: { try? host.dashboard.update(widget.id, size: $0) })) {
