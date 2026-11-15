@@ -74,7 +74,7 @@ final class ChatSession {
     /// The conversation on screen, saved after every turn.
     private(set) var conversationID: UUID?
 
-    @ObservationIgnored private let host: ExtensionHost
+    @ObservationIgnored let host: ExtensionHost
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The last activity event Claude has been told about.
     @ObservationIgnored private var lastActivityID = 0
@@ -250,7 +250,7 @@ final class ChatSession {
         transcript[index].kind = .tool(name: name, input: input, result: content, isError: isError)
     }
 
-    private func notice(_ text: String, isError: Bool) {
+    func notice(_ text: String, isError: Bool) {
         transcript.append(ChatEntry(id: UUID().uuidString, kind: .notice(text, isError: isError)))
     }
 

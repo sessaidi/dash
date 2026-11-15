@@ -45,6 +45,8 @@ struct DashApp: App {
         _chat = State(initialValue: ChatSession(host: host))
         self.testing = testing
         if !testing, host.persona.hotKey { GlobalHotKey.shared.register() }
+        // The token trusted dash://ask links carry (created once, readable by the user only).
+        if !testing { _ = AskLink.token() }
         if !testing { Notifier.shared.start(activity: host.activity, persona: host.persona) }
     }
 
@@ -69,7 +71,18 @@ struct DashApp: App {
                 .environment(host.settings)
                 .environment(chat)
                 .modelContainer(host.container)
+                // dash://ask?q=… links: sent to Dashii once Dash has booted.
+                .onOpenURL { url in
+                    guard let link = AskLink(url) else { return }
+                    Task {
+                        while !boot.finished { try? await Task.sleep(for: .milliseconds(200)) }
+                        await chat.open(link)
+                    }
+                }
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
+        // Links reuse the open window instead of opening another.
+        .handlesExternalEvents(matching: ["*"])
         .windowToolbarStyle(.unified)
         .commands {
             // The Debug menu only exists while debug mode is on (Settings › Debug).

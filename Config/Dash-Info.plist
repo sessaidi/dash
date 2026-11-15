@@ -11,5 +11,17 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- dash://ask?q=… sends a request to Dashii (asks first unless it carries the local token). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.sessaidi.Dash</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dash</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
