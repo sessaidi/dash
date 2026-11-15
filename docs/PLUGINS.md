@@ -13,7 +13,7 @@ There are two kinds, and features build on integrations:
   integrations it `requires` (or uses when present, `optional`) and reaches them only through
   DashKit (`host.integration("github")?.connection`), never by importing another plugin. So
   anyone can write a feature on top of anyone's integration. Examples: Pull Requests, Jira
-  Board, Agents, Workspaces, Zoom.
+  Board, Agents, Zoom.
 
 The first-party plugins live in the [dash-registry](https://github.com/sessaidi/dash-registry)
 repository (locally `~/code/dash-registry`), which is also a Marketplace registry.
