@@ -296,10 +296,10 @@ final class ChatSession {
             guard approved else { return ("The user declined this action.", true) }
         }
         do {
-            // Secrets in tool output (tokens, keys, passwords) never reach Claude.
-            let result = Sanitizer.clean(try await tool.run(call.input)).jsonString()
-            HookEngine.shared.afterTool(call.name, input: call.input, result: result)
-            return (result, false)
+            // Secrets in tool output (tokens, keys, passwords) never reach Dashii.
+            let result = Sanitizer.clean(try await tool.run(call.input))
+            HookEngine.shared.afterTool(call.name, input: call.input, result: result.jsonString())
+            return (host.settings.encodeResult(result), false)
         } catch {
             return (Sanitizer.clean(error.localizedDescription), true)
         }
@@ -375,7 +375,7 @@ final class ChatSession {
         if let code, code.isRunning, names == codeToolNames, rules == codeRules { return code }
         code?.endInput()
         let profile = host.ext(HomeExtension.self)?.profilePrompt.map { "\n\n" + $0 } ?? ""
-        var options = ClaudeCodeDefaults.options(settings: host.settings, system: host.persona.prompt + profile + "\n\n" + Self.systemPrompt
+        var options = ClaudeCodeDefaults.options(settings: host.settings, system: host.persona.prompt + profile + "\n\n" + Self.systemPrompt + (host.settings.compactResults ? "\n\n" + CompactFormat.legend : "")
                                                  + (rules.map { "\n\n" + $0 } ?? ""))
         options.noSessionPersistence = false
         options.resume = codeSessionID

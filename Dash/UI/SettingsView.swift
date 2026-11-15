@@ -87,6 +87,10 @@ private struct ClaudeSettings: View {
                     Text("Work through DashQL statements")
                     Text("Dashii gets one `dash` tool instead of every tool: fewer tokens per message, same abilities and approvals.")
                 }
+                Toggle(isOn: $settings.compactResults) {
+                    Text("Compact tool results")
+                    Text("Results reach Dashii in a token-lean form instead of JSON (tables with field names once). Turn off to debug.")
+                }
             }
             ClaudeStatusSection(executable: settings.claudeExecutable)
         }

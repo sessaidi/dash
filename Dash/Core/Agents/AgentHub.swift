@@ -175,7 +175,7 @@ final class AgentHub {
 
             You run unattended as a Dash agent ("\(entry.agent.name)"). Use your tools to check, then answer with the report: \
             a short summary and one finding per real problem (info only for things worth knowing). No findings when all is well.
-            """ + (rules.map { "\n\n" + $0 } ?? ""))
+            """ + (host.settings.compactResults ? "\n\n" + CompactFormat.legend : "") + (rules.map { "\n\n" + $0 } ?? ""))
         options.model = settings.model(entry.agent.task.id).rawValue
         options.effort = settings.effort(entry.agent.task.id)?.rawValue
         options.maxTurns = 30
@@ -242,9 +242,9 @@ final class AgentHub {
             guard approved else { return MCPToolResult("The user declined this action.", isError: true) }
         }
         do {
-            let result = Sanitizer.clean(try await tool.run(arguments)).jsonString()
-            HookEngine.shared.afterTool(name, input: arguments, result: result)
-            return MCPToolResult(result)
+            let result = Sanitizer.clean(try await tool.run(arguments))
+            HookEngine.shared.afterTool(name, input: arguments, result: result.jsonString())
+            return MCPToolResult(host.settings.encodeResult(result))
         } catch {
             return MCPToolResult(Sanitizer.clean(error.localizedDescription), isError: true)
         }

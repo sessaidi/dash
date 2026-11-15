@@ -18,9 +18,14 @@ final class AppSettings {
     /// Dashii gets the `dash` statements tool (and the chat's own) instead of every tool:
     /// far fewer tokens per turn; everything stays reachable through it.
     var compactTools: Bool { didSet { defaults.set(compactTools, forKey: "compactTools") } }
+    /// Tool results go to Dashii in `CompactFormat` instead of JSON: fewer tokens for the same data.
+    var compactResults: Bool { didSet { defaults.set(compactResults, forKey: "compactResults") } }
     /// Path to the `claude` CLI; empty = search PATH and the usual install locations.
     var claudePath: String { didSet { defaults.set(claudePath, forKey: "claudePath") } }
     /// Verbose logging (every HTTP request) and the Debug menu.
+    /// What a tool result becomes for Dashii: compact when that's on, else JSON.
+    func encodeResult(_ value: JSONValue) -> String { compactResults ? CompactFormat.encode(value) : value.jsonString() }
+
     var debugMode: Bool {
         didSet {
             defaults.set(debugMode, forKey: "debugMode")
@@ -34,6 +39,7 @@ final class AppSettings {
         effort = defaults.string(forKey: "effort") ?? "medium"
         confirmWrites = defaults.object(forKey: "confirmWrites") as? Bool ?? true
         compactTools = defaults.object(forKey: "compactTools") as? Bool ?? true
+        compactResults = defaults.object(forKey: "compactResults") as? Bool ?? false
         debugMode = defaults.bool(forKey: "debugMode")
         claudePath = defaults.string(forKey: "claudePath") ?? ""
         DashLog.verbose = debugMode
