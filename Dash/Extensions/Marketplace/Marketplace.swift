@@ -282,6 +282,13 @@ final class MarketplaceFeature: DashExtension {
         return index.label(of: entry) ?? "Local"
     }
 
+    /// "integration" or "feature", each in its own colour.
+    static func kindBadge(_ kind: ExtensionLayer?) -> Badge {
+        let kind = kind ?? .feature
+        return Badge(kind.rawValue, tone: kind == .integration ? .info : .warning,
+                     systemImage: kind == .integration ? "link" : "square.grid.2x2")
+    }
+
     /// A label's colour: the same label always looks the same.
     static func tone(ofLabel label: String) -> Tone {
         switch label.lowercased() {
@@ -590,14 +597,12 @@ private struct MarketplaceView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(entry.name).bold()
-                    Text((entry.kind ?? .feature).rawValue).font(.caption2).padding(.horizontal, 5).background(.quaternary, in: .capsule)
                     Text(entry.version).font(.caption).foregroundStyle(.secondary)
                     if let source = marketplace.catalogs[label]?.index.label(of: entry) {
                         Badge(source, tone: MarketplaceFeature.tone(ofLabel: source))
                     }
-                    if entry.plugin != nil {
-                        Text("plugin").font(.caption2).padding(.horizontal, 5).background(.tint.opacity(0.18), in: .capsule)
-                    }
+                    // Every entry is a plugin; what matters is whether it connects an account or builds on one.
+                    MarketplaceFeature.kindBadge(entry.kind)
                 }
                 if let description = entry.description { Text(description).font(.caption).foregroundStyle(.secondary) }
                 if let author = entry.author { Text("by \(author.name)").font(.caption2).foregroundStyle(.secondary) }
@@ -891,7 +896,7 @@ struct PluginDetailSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(entry.name).font(.title2.bold())
-                        Badge((entry.kind ?? .feature).rawValue, tone: .info)
+                        MarketplaceFeature.kindBadge(entry.kind)
                         if let source = marketplace.catalogs[registry]?.index.label(of: entry) {
                             Badge(source, tone: MarketplaceFeature.tone(ofLabel: source))
                         }
