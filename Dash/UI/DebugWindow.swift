@@ -12,9 +12,11 @@ struct DebugWindow: View {
     @Environment(ChatSession.self) private var chat
     @State private var section = Section.overview
     @State private var tick = 0
+    /// Refresh presses only: the database isn't re-read on the automatic tick (it can be big).
+    @State private var refreshes = 0
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Dashii", extensions = "Extensions"
+        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Dashii", extensions = "Extensions", database = "Database"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -24,6 +26,7 @@ struct DebugWindow: View {
             case .network: "network"
             case .claude: "sparkles"
             case .extensions: "puzzlepiece.extension"
+            case .database: "cylinder.split.1x2"
             }
         }
     }
@@ -41,12 +44,13 @@ struct DebugWindow: View {
                 case .network: NetworkPane(tick: tick)
                 case .claude: ClaudePane()
                 case .extensions: ExtensionsPane()
+                case .database: DatabasePane(refresh: refreshes)
                 }
             }
             .navigationTitle(section.rawValue)
             .toolbar {
                 ToolbarItem {
-                    Button("Refresh", systemImage: "arrow.clockwise") { tick += 1 }
+                    Button("Refresh", systemImage: "arrow.clockwise") { tick += 1; refreshes += 1 }
                 }
                 ToolbarItem {
                     Button("Export Diagnostics…", systemImage: "square.and.arrow.up") { export() }
