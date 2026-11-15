@@ -81,12 +81,7 @@ struct DataWidget: DashboardWidget {
     }
 
     static func preview(config: Config) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(["api-1 · CrashLoopBackOff · 12", "worker-1 · Error · 4", "db-0 · Running · 1"], id: \.self) {
-                Text($0).font(.caption.monospaced())
-            }
-        }
-        .padding(8)
+        DataWidgetPreview(config: config)
     }
 
     @MainActor
@@ -122,7 +117,6 @@ private struct DataWidgetView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var selected: Int?
-    @Environment(\.widgetLayout) private var layout
 
     private var host: ExtensionHost? { context.host as? ExtensionHost }
 
@@ -142,13 +136,7 @@ private struct DataWidgetView: View {
             } else if rows.isEmpty {
                 StateView(.empty(title: "Nothing matches", systemImage: "tablecells"))
             } else {
-                switch config.view {
-                case "number": number
-                case "counts": counts
-                case "bars": bars
-                case "list": list
-                default: table
-                }
+                DataWidgetContent(config: config, rows: rows, total: total, selected: $selected)
             }
         }
         .task(id: trigger) { await load(periodic: true) }
@@ -191,147 +179,5 @@ private struct DataWidgetView: View {
             loaded = true
             try? await Task.sleep(for: .seconds(max(config.refreshSeconds, 15)))
         } while periodic && !Task.isCancelled
-    }
-
-    // MARK: Views
-
-    private var columns: [String] {
-        if !config.columns.isEmpty { return config.columns }
-        guard case .object(let fields)? = rows.first else { return ["value"] }
-        let preferred = ["name", "key", "title", "summary", "status", "namespace", "repo", "restarts", "risk", "updated", "count"]
-        let ordered = preferred.filter { fields[$0] != nil } + fields.keys.sorted().filter { !preferred.contains($0) && !Self.isNested(fields[$0]) }
-        return Array(ordered.prefix(layout.family == .narrow ? 2 : layout.family == .medium ? 4 : 6))
-    }
-
-    private static func isNested(_ value: JSONValue?) -> Bool {
-        if case .object = value { return true }
-        if case .array(let items) = value, items.contains(where: { if case .object = $0 { true } else { false } }) { return true }
-        return false
-    }
-
-    private var table: some View {
-        let columns = self.columns
-        return VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ForEach(columns, id: \.self) { column in
-                    Text(column.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        HStack(spacing: 10) {
-                            ForEach(columns, id: \.self) { column in
-                                Text(Self.display(row.value(at: column)))
-                                    .lineLimit(1).truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .font(.callout)
-                        .padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(selected == index ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 6))
-                        .contentShape(.rect)
-                        .onTapGesture { selected = selected == index ? nil : index }
-                        Divider().opacity(0.4)
-                    }
-                }
-            }
-            footer
-        }
-    }
-
-    private var list: some View {
-        let title = config.titleField ?? columns.first ?? "name"
-        let subtitle = config.subtitleField ?? columns.dropFirst().first
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(Self.display(row.value(at: title))).font(.callout).lineLimit(2)
-                        if let subtitle { Text(Self.display(row.value(at: subtitle))).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(selected == index ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.3)), in: .rect(cornerRadius: 8))
-                    .contentShape(.rect)
-                    .onTapGesture { selected = selected == index ? nil : index }
-                }
-            }
-        }
-    }
-
-    /// Rows from `count by x` (or any rows with a number): label and value.
-    private var pairs: [(label: String, value: Double, index: Int)] {
-        rows.enumerated().compactMap { index, row in
-            guard case .object(let fields) = row else { return nil }
-            let numberKey = fields["count"] != nil ? "count" : fields.first { $0.value.double != nil }?.key
-            guard let numberKey, let value = fields[numberKey]?.double else { return nil }
-            let label = fields.filter { $0.key != numberKey }.sorted { $0.key < $1.key }.map { Self.display($0.value) }.joined(separator: " · ")
-            return (label.isEmpty ? numberKey : label, value, index)
-        }
-    }
-
-    private var counts: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
-            ForEach(pairs, id: \.index) { pair in
-                VStack(spacing: 2) {
-                    Text(Self.number(pair.value)).font(.title2.weight(.semibold).monospacedDigit())
-                    Text(pair.label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background(selected == pair.index ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.35)), in: .rect(cornerRadius: 10))
-                .onTapGesture { selected = selected == pair.index ? nil : pair.index }
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private var number: some View {
-        let value = pairs.first?.value ?? Double(total)
-        return VStack(spacing: 4) {
-            Text(Self.number(value)).font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
-            Text(pairs.first?.label ?? config.dataset).font(.callout).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var bars: some View {
-        Chart(pairs, id: \.index) { pair in
-            BarMark(x: .value("Count", pair.value), y: .value("Group", pair.label))
-                .foregroundStyle(selected == pair.index ? Color.accentColor : Color.accentColor.opacity(0.55))
-        }
-        .chartOverlay { _ in Color.clear }
-        .padding(.trailing, 4)
-    }
-
-    private var footer: some View {
-        HStack {
-            Text(total > rows.count ? "\(rows.count) of \(total)" : "\(rows.count) rows").font(.caption2).foregroundStyle(.tertiary)
-            Spacer()
-            if selected != nil { Text("Selected · linked widgets follow").font(.caption2).foregroundStyle(.tint) }
-        }
-        .padding(.horizontal, 8).padding(.top, 4)
-    }
-
-    static func display(_ value: JSONValue?) -> String {
-        switch value {
-        case .string(let text)?:
-            if let date = QueryEngine.date(.string(text)), text.count >= 10, text.contains("T") { return date.formatted(.relative(presentation: .named)) }
-            return text
-        case .number(let number)?: return Self.number(number)
-        case .bool(let flag)?: return flag ? "yes" : "no"
-        case .array(let items)?: return items.map { display($0) }.joined(separator: ", ")
-        case .object?: return "…"
-        default: return "—"
-        }
-    }
-
-    static func number(_ value: Double) -> String {
-        Int(exactly: value).map { $0.formatted() } ?? value.formatted(.number.precision(.fractionLength(1)))
     }
 }
