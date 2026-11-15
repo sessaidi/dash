@@ -30,6 +30,8 @@ public protocol DashExtension: AnyObject {
     var tools: [ClaudeTool] { get }
     /// What DashQL can read from this extension (pods, tickets, PRs…). Read-only.
     var datasets: [QueryDataset] { get }
+    /// Ready-made hooks for this extension's data: watchers, notifications, agent wake-ups.
+    var hookPresets: [HookPresetSpec] { get }
     /// What its background work asks Claude to do (e.g. automatic PR reviews), configurable in
     /// the extension's AI settings (`host.aiSettings(.extension(id), tasks: aiTasks)`).
     var aiTasks: [AITask] { get }
@@ -82,6 +84,7 @@ extension DashExtension {
     public var storagePrefix: String { id }
     public var widgets: [WidgetType] { [] }
     public var datasets: [QueryDataset] { [] }
+    public var hookPresets: [HookPresetSpec] { [] }
     public var tools: [ClaudeTool] { [] }
     public func settingsView() -> AnyView { AnyView(EmptyView()) }
     public func start(host: any ExtensionContext) {}

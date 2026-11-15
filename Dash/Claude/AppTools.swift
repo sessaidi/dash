@@ -147,16 +147,38 @@ enum AppTools {
                 store.deleteCommand(input["name"]?.string ?? "")
                 return "deleted"
             },
+            ClaudeTool(name: "hook_presets", description: "Ready-made hooks by use case: watchers (Dash runs a DashQL query itself and fires on new rows, no Claude), notifications, and wake-ups that hand what a watcher found to an agent. Create one with hook_create preset=<id>.") { _ in
+                .array(HookPreset.all(host: host).map { ["id": .string($0.id), "category": .string($0.category), "name": .string($0.name),
+                                              "when": .string($0.trigger.summary), "do": .string($0.action.summary)] })
+            },
             ClaudeTool(name: "hook_create", description: """
                 Create a hook: when something happens, do something. trigger is one of {"event": {"kind": "pr.*", "source": null, "contains": null, "criticalOnly": false}}, \
-                {"schedule": {"time": "09:00", "weekdays": [2,3,4,5,6]}}, {"launch": {}}, {"beforeTool": {"name": "…"}}, {"afterTool": {"name": "…"}}. \
+                {"schedule": {"time": "09:00", "weekdays": [2,3,4,5,6]}}, {"launch": {}}, {"beforeTool": {"name": "…"}}, {"afterTool": {"name": "…"}}, \
+                or a watcher {"query": {"query": "from pods where restarts > 5", "everyMinutes": 5, "key": "name"}} (Dash runs the DashQL query itself, \
+                no Claude, and fires for rows not seen before; prefer it over an agent for "tell me when X appears"). \
                 action is one of {"prompt": {"prompt": "…", "noteTitle": null, "notify": true}}, {"command": {"name": "…", "arguments": "", "noteTitle": null, "notify": true}}, \
                 {"note": {"title": "…", "folder": null, "body": "…"}}, {"notify": {"title": "…", "body": "…"}}, {"tool": {"name": "…", "input": "{}"}}, \
-                {"requireApproval": {"message": "…"}}, {"block": {"message": "…"}}. Text takes {{event.title}}, {{date}}, {{tool.input}}. Shell hooks are made by the user only.
+                {"requireApproval": {"message": "…"}}, {"block": {"message": "…"}}, {"agent": {"id": "<agent id>", "context": "{{rows}}"}} (wake a background agent with what was found). Text takes {{event.title}}, {{date}}, {{tool.input}}, and for watchers {{count}}, {{rows}}, {{first.<field>}}. Shell hooks are made by the user only.
                 """,
-                       properties: ["name": JSONSchema.string("Hook name."), "trigger": ["type": "object"], "action": ["type": "object"]],
-                       required: ["name", "trigger", "action"], requiresApproval: true) { input in
-                guard let name = input["name"]?.string, !name.isEmpty else { throw ToolError("Name the hook.") }
+                       properties: ["name": JSONSchema.string("Hook name."), "trigger": ["type": "object"], "action": ["type": "object"],
+                                    "preset": JSONSchema.string("A preset id from hook_presets instead of trigger and action."),
+                                    "agent": JSONSchema.string("For wake-an-agent presets: the agent's id (dash_agents).")],
+                       required: [], requiresApproval: true) { input in
+                if let presetID = input["preset"]?.string {
+                    guard let preset = HookPreset.named(presetID, host: host) else { throw ToolError("No preset \(presetID); hook_presets lists them.") }
+                    var action = preset.action
+                    if case .agent(_, let context) = action {
+                        guard let agent = input["agent"]?.string, AgentHub.shared.entry(agent) != nil else {
+                            throw ToolError("This preset wakes an agent: give agent=<id> (dash_agents lists them).")
+                        }
+                        action = .agent(id: agent, context: context)
+                    }
+                    let hook = AutomationHook(name: input["name"]?.string ?? preset.name, trigger: preset.trigger, action: action)
+                    context.insert(hook)
+                    try context.save()
+                    return ["id": .string(hook.id.uuidString), "when": .string(preset.trigger.summary), "do": .string(action.summary)]
+                }
+                guard let name = input["name"]?.string, !name.isEmpty else { throw ToolError("Name the hook, or give a preset.") }
                 let trigger: HookTrigger, action: HookAction
                 do {
                     trigger = try JSONDecoder().decode(HookTrigger.self, from: Data((input["trigger"] ?? .null).jsonString().utf8))

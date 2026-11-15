@@ -226,23 +226,13 @@ struct HooksEditor: View {
                     Button("Blank Hook") { add(name: "New hook", trigger: .event(kind: "*", source: nil, contains: nil, criticalOnly: true),
                                                action: .notify(title: "{{event.title}}", body: "{{event.detail}}")) }
                     Divider()
-                    Button("Summarize meetings into notes") {
-                        add(name: "Meeting notes", trigger: .event(kind: "meeting.ended", source: nil, contains: nil, criticalOnly: false),
-                            action: .prompt(prompt: "Summarize the meeting “{{event.title}}” with decisions and action items. Use meeting_transcript.",
-                                            noteTitle: "{{date}} {{event.title}}", notify: true))
-                    }
-                    Button("Morning standup at 9:00 on weekdays") {
-                        add(name: "Morning standup", trigger: .schedule(time: "09:00", weekdays: [2, 3, 4, 5, 6]),
-                            action: .prompt(prompt: "Write my standup from my open PRs, my Jira tickets in progress and yesterday's activity.",
-                                            noteTitle: "Standup {{date}}", notify: true))
-                    }
-                    Button("Ask before Claude comments on GitHub") {
-                        add(name: "Approve GitHub comments", trigger: .beforeTool(name: "github_comment"),
-                            action: .requireApproval(message: "Claude wants to comment on GitHub."))
-                    }
-                    Button("Notify me on critical events") {
-                        add(name: "Critical alerts", trigger: .event(kind: "*", source: nil, contains: nil, criticalOnly: true),
-                            action: .notify(title: "{{event.title}}", body: "{{event.detail}}"))
+                    let presets = HookPreset.all(host: host)
+                    ForEach(HookPreset.categories(host: host), id: \.self) { category in
+                        Menu(category) {
+                            ForEach(presets.filter { $0.category == category }) { preset in
+                                Button(preset.name + Self.missingNote(preset, host: host)) { add(name: preset.name, trigger: preset.trigger, action: preset.action) }
+                            }
+                        }
                     }
                 } label: {
                     Label("New Hook", systemImage: "plus")
@@ -261,6 +251,13 @@ struct HooksEditor: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    /// " (needs Datadog)" when a watcher's dataset isn't available (its plugin missing or off).
+    static func missingNote(_ preset: HookPreset, host: ExtensionHost) -> String {
+        guard let dataset = preset.dataset else { return "" }
+        let available = DashQL.engine(host: host).datasets.contains { $0.name == dataset }
+        return available ? "" : " (needs its plugin)"
     }
 
     private func add(name: String, trigger: HookTrigger, action: HookAction) {

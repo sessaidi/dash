@@ -97,6 +97,11 @@ struct DashScript {
                 var input = words.options()
                 if input["name"] == nil, let name { input["name"] = .string(name) }
                 return try await call("hook_create", .object(input))
+            case "presets": return try await call("hook_presets", [:])
+            case "preset":
+                var input = words.options()
+                input["preset"] = .string(try words.require("preset id (hook presets lists them)"))
+                return try await call("hook_create", .object(input))
             case "on": return try await call("hook_set_enabled", ["id": .string(try words.require("hook name or id")), "enabled": true])
             case "off": return try await call("hook_set_enabled", ["id": .string(try words.require("hook name or id")), "enabled": false])
             case "delete": return try await call("hook_delete", ["id": .string(try words.require("hook name or id"))])
@@ -330,7 +335,8 @@ struct DashScript {
           plugins | plugin "jira-board" on|off|settings       open marketplace | open hooks | open gallery | open jira-board
           automation | rules global text="…" | command save standup prompt="…" summary="…" | command delete standup
           hook create name="Morning brief" trigger={"schedule":{"time":"09:00","weekdays":[2,3,4,5,6]}} action={"prompt":{"prompt":"…","noteTitle":null,"notify":true}}
-          hook on|off|delete "Name"
+          hook on|off|delete "Name" | hook presets | hook preset <id> | hook preset <wake-…id> agent=<agent id>
+          (watchers run a query themselves, no Claude, and fire on new rows: prefer them to agents for "tell me when X appears")
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
           skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
