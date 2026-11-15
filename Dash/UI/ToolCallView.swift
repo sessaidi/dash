@@ -224,13 +224,21 @@ struct ValueView: View {
                 }
             }
         case .string(let text):
-            FoldedText(text: text, lines: 6)
+            FoldedText(text: text, lines: 6, code: ValueView.looksLikeCode(text))
         default:
             Text(value.jsonString()).font(.caption).textSelection(.enabled)
         }
     }
 
     static func isScalar(_ value: JSONValue) -> Bool { value.object == nil && value.array == nil }
+
+    /// Aligned columns, indentation, code or Markdown structure: shown monospaced so it lines up.
+    static func looksLikeCode(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n")
+        guard lines.count > 1 else { return false }
+        let aligned = lines.filter { $0.contains("   ") || $0.hasPrefix("  ") || $0.hasPrefix("\t") }.count
+        return Double(aligned) / Double(lines.count) > 0.3 || text.contains("```")
+    }
 
     /// A one-line name for a row: its title, name, key or id, else its first text.
     static func title(of value: JSONValue) -> String {
@@ -270,17 +278,32 @@ private struct RowList: View {
 private struct FoldedText: View {
     let text: String
     let lines: Int
+    var code = false
     @State private var all = false
 
     var body: some View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let count = trimmed.split(separator: "\n", omittingEmptySubsequences: false).count
         VStack(alignment: .leading, spacing: 2) {
-            Text(trimmed.count > 6000 ? String(trimmed.prefix(6000)) + "…" : trimmed)
-                .font(.caption)
-                .lineLimit(all ? nil : lines)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if code {
+                    ScrollView(.horizontal) {
+                        Text(trimmed.count > 6000 ? String(trimmed.prefix(6000)) + "…" : trimmed)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .lineLimit(all ? nil : lines)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .textSelection(.enabled)
+                            .padding(6)
+                    }
+                    .background(.background.opacity(0.5), in: .rect(cornerRadius: 5))
+                } else {
+                    Text(trimmed.count > 6000 ? String(trimmed.prefix(6000)) + "…" : trimmed)
+                        .font(.caption)
+                        .lineLimit(all ? nil : lines)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if count > lines || trimmed.count > lines * 90 {
                 Button(all ? "Show less" : "Show all \(count) lines") { all.toggle() }.buttonStyle(.link).font(.caption2)
             }
