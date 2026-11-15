@@ -336,6 +336,10 @@ public protocol ExtensionContext: AnyObject, Sendable {
     func agentReports(_ id: String, limit: Int) -> [AgentReport]
     /// The mirror of online data that integrations sync and features read.
     var synced: any SyncedStore { get }
+    /// Markdown drawn the way Dash draws notes: headings, lists, task lists, tables, code,
+    /// callouts (`> [!NOTE]`) and Mermaid diagrams, read-only. GitHub's HTML comments are left
+    /// out. Hosts before DashKit 2.2 draw inline Markdown only.
+    func markdown(_ text: String) -> AnyView
 }
 
 extension ExtensionContext {
@@ -356,6 +360,11 @@ extension ExtensionContext {
 
     /// Default for hosts without a persisted mirror (test fakes): one in memory per process.
     public var synced: any SyncedStore { DefaultSynced.store }
+
+    public func markdown(_ text: String) -> AnyView {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return AnyView(Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)).textSelection(.enabled))
+    }
 
     /// Default for hosts without saved choices (test fakes): ignored.
     public func setAIChoice(_ choice: AITaskChoice?, task: String, scope: AIScope) {}
