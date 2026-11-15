@@ -159,7 +159,7 @@ struct AgentsWidget: DashboardWidget {
     }
 
     static let kind = "dash.agents"
-    static let displayName = "Agents"
+    static let displayName = "Background Agents"
     static let summary = "Your background agents: their status, latest findings, and a Run button."
     static let systemImage = "person.2.badge.gearshape"
     static let defaultSize = WidgetSize.medium

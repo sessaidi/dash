@@ -12,15 +12,31 @@ struct WidgetGallery: View {
     /// Widgets added this session, for the brief "Added" confirmation.
     @State private var added: [String: Int] = [:]
 
-    private var sections: [(name: String, types: [WidgetType])] {
+    /// Grouped by what they're about (not by plugin, which mostly gives one widget each), each
+    /// tile naming the plugin it comes from.
+    private var sections: [(name: String, items: [(type: WidgetType, owner: String)])] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return host.extensions.compactMap { item in
-            guard host.isEnabled(item), !item.widgets.isEmpty else { return nil }
-            let types = item.widgets.filter { type in
-                query.isEmpty || type.displayName.lowercased().contains(query) || type.summary.lowercased().contains(query)
-                    || item.name.lowercased().contains(query)
+        var groups: [ExtensionCategory: [(type: WidgetType, owner: String)]] = [:]
+        for item in host.extensions where host.isEnabled(item) {
+            for type in item.widgets where query.isEmpty || type.displayName.lowercased().contains(query)
+                || type.summary.lowercased().contains(query) || item.name.lowercased().contains(query) {
+                groups[item.metadata.category, default: []].append((type, item.name))
             }
-            return types.isEmpty ? nil : (item.name, types)
+        }
+        let order: [ExtensionCategory] = [.productivity, .projectManagement, .sourceControl, .cloud, .monitoring, .ai, .communication, .other]
+        return order.compactMap { category in
+            guard let items = groups[category], !items.isEmpty else { return nil }
+            return (Self.title(category), items.sorted { $0.type.displayName < $1.type.displayName })
+        }
+    }
+
+    static func title(_ category: ExtensionCategory) -> String {
+        switch category {
+        case .productivity: "Basics & productivity"
+        case .ai: "AI & agents"
+        case .cloud: "Cloud & clusters"
+        case .communication: "Meetings & communication"
+        default: category.title
         }
     }
 
@@ -43,8 +59,8 @@ struct WidgetGallery: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(section.name).font(.headline).foregroundStyle(.secondary)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], alignment: .leading, spacing: 16) {
-                                ForEach(section.types) { type in
-                                    tile(type)
+                                ForEach(section.items, id: \.type.kind) { item in
+                                    tile(item.type, owner: item.owner)
                                 }
                             }
                         }
@@ -71,7 +87,7 @@ struct WidgetGallery: View {
         .frame(width: 900, height: 640)
     }
 
-    private func tile(_ type: WidgetType) -> some View {
+    private func tile(_ type: WidgetType, owner: String) -> some View {
         let count = added[type.kind] ?? 0
         return Button {
             if (try? host.dashboard.add(kind: type.kind)) != nil {
@@ -84,7 +100,13 @@ struct WidgetGallery: View {
                     .frame(maxWidth: .infinity)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(type.displayName).font(.headline)
+                        HStack(spacing: 6) {
+                            Text(type.displayName).font(.headline)
+                            if owner != type.displayName {
+                                Text(owner).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: .capsule)
+                            }
+                        }
                         Text(type.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer()
