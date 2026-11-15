@@ -203,10 +203,30 @@ final class AgentHub {
     /// The tools an agent may use: the ones it names and those of its integrations, minus the
     /// ones that change things when it's read-only, and never one that writes remotely.
     static func tools(for agent: AgentDefinition, in host: ExtensionHost) -> [ClaudeTool] {
-        // DashQL is read-only, so every agent can query.
-        DashQL.tools(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
+        // DashQL is read-only, so every agent can query; `dash` reaches the same tools, no more.
+        let allowed = DashQL.tools(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
             owner.tools.filter { !$0.writesRemotely && agent.allows(tool: $0.name, from: owner.id, requiresApproval: $0.requiresApproval) }
         }
+        let dash = ClaudeTool(
+            name: "dash",
+            description: "Read Dash's data and use your tools with DashQL statements (one per line). `help` lists your tools, `schema` the datasets.\n\n" + DashQL.guide,
+            properties: ["script": JSONSchema.string("One or more statements, one per line."),
+                         "plan": JSONSchema.boolean("Only translate: return the actions (tool calls) each statement becomes, without running them.")],
+            required: ["script"]
+        ) { input in
+            guard let script = input["script"]?.string else { throw ToolError("Give a script.") }
+            // Tools that change things ask the user, as when the agent calls them directly.
+            var runner = DashScript(host: host, tools: allowed) { tool, input in
+                guard tool.requiresApproval else { return nil }
+                let approved = await host.permissions.ask(icon: "hammer", title: "\(agent.name) wants to run \(tool.name)",
+                                                          message: ChatSession.summary(of: tool.description),
+                                                          details: [.init(title: "Input", text: input.jsonString(pretty: true))])
+                return approved ? nil : "The user declined this action."
+            }
+            runner.plan = input["plan"]?.bool ?? false
+            return await runner.run(script)
+        }
+        return [dash] + allowed
     }
 
     /// An agent's tool call: hooks may deny it, tools that change things ask the user first.

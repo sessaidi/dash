@@ -83,6 +83,10 @@ private struct ClaudeSettings: View {
                     ForEach(AppSettings.efforts, id: \.self) { Text($0) }
                 }
                 Toggle("Ask before Claude posts to GitHub or Jira, starts agents, or deletes", isOn: $settings.confirmWrites)
+                Toggle(isOn: $settings.compactTools) {
+                    Text("Work through DashQL statements")
+                    Text("Dashii gets one `dash` tool instead of every tool: fewer tokens per message, same abilities and approvals.")
+                }
             }
             ClaudeStatusSection(executable: settings.claudeExecutable)
         }

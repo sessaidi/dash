@@ -103,7 +103,45 @@ final class ChatSession {
         host.chat = self
     }
 
-    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + componentTools + host.availableTools }
+    /// Everything Dashii can do, as tools.
+    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + componentTools + host.availableTools }
+
+    /// What Claude is offered: in compact mode the `dash` statements tool (which reaches all the
+    /// others through the same approvals) plus the chat's question and layout tools; otherwise all.
+    private var tools: [ClaudeTool] {
+        let all = allTools
+        let dash = dashTool(over: all)
+        return host.settings.compactTools ? [dash] + componentTools : [dash] + all
+    }
+
+    /// The `dash` tool: DashQL statements run over `tools`, each gated like a direct call.
+    private func dashTool(over tools: [ClaudeTool]) -> ClaudeTool {
+        ClaudeTool(
+            name: "dash",
+            description: "Read and work in Dash with DashQL statements (one per line): query any data, drive widgets, build pages, notes, memory, and call any other tool. Start with `help` or `schema` when unsure.\n\n" + DashScript.guide + "\n" + DashQL.guide,
+            properties: ["script": JSONSchema.string("One or more statements, one per line."),
+                         "plan": JSONSchema.boolean("Only translate: return the actions (tool calls) each statement becomes, without running them.")],
+            required: ["script"]
+        ) { [weak self] input in
+            guard let self, let script = input["script"]?.string else { throw ToolError("Give a script.") }
+            var runner = DashScript(host: host, tools: tools) { [weak self] tool, input in await self?.approve(tool, input) }
+            runner.plan = input["plan"]?.bool ?? false
+            return await runner.run(script)
+        }
+    }
+
+    /// The checks a tool call passes: hooks, then the user's approval when it changes things.
+    /// nil to go ahead, else why not.
+    private func approve(_ tool: ClaudeTool, _ input: JSONValue) async -> String? {
+        if case .deny(let reason) = await HookEngine.shared.beforeTool(tool.name, input: input) { return reason }
+        if tool.requiresApproval, host.settings.confirmWrites {
+            let approved = await host.permissions.ask(
+                icon: "sparkles", title: "Claude wants to run \(tool.name)", message: Self.summary(of: tool.description),
+                details: [.init(title: "Input", text: input.jsonString(pretty: true))])
+            if !approved { return "The user declined this action." }
+        }
+        return nil
+    }
 
     static let systemPrompt = """
         Dash is a macOS work dashboard. It shows the user's Jira board, \
@@ -136,9 +174,10 @@ final class ChatSession {
         current and mention what matters to the question; don't recite them. Call dashboard_activity to look \
         further back.
 
-        To look things up across sources (pods, tickets, PRs, releases, monitors, activity, widgets, notes, \
-        knowledge), prefer one dashql query over many tool calls: it filters, joins and summarises in one go \
-        (dashql_schema lists the datasets).
+        Work through the dash tool: DashQL statements read anything (`from …`), drive widgets, build pages \
+        and notes, remember facts, and call any other tool; several statements per call, one per line. \
+        Prefer one query that filters, joins and summarises over many calls. `help` lists every tool and \
+        `schema` every dataset.
 
         What you learned in earlier conversations arrives in <what-i-know>: use it, but the user's word and \
         live data win. When the user tells you to remember something or corrects you, call memory_remember \

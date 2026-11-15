@@ -15,6 +15,9 @@ final class AppSettings {
     var effort: String { didSet { defaults.set(effort, forKey: "effort") } }
     /// Ask before Claude runs a tool that writes to GitHub/Jira or deletes something.
     var confirmWrites: Bool { didSet { defaults.set(confirmWrites, forKey: "confirmWrites") } }
+    /// Dashii gets the `dash` statements tool (and the chat's own) instead of every tool:
+    /// far fewer tokens per turn; everything stays reachable through it.
+    var compactTools: Bool { didSet { defaults.set(compactTools, forKey: "compactTools") } }
     /// Path to the `claude` CLI; empty = search PATH and the usual install locations.
     var claudePath: String { didSet { defaults.set(claudePath, forKey: "claudePath") } }
     /// Verbose logging (every HTTP request) and the Debug menu.
@@ -30,6 +33,7 @@ final class AppSettings {
         model = defaults.string(forKey: "model") ?? "claude-opus-5-5"
         effort = defaults.string(forKey: "effort") ?? "medium"
         confirmWrites = defaults.object(forKey: "confirmWrites") as? Bool ?? true
+        compactTools = defaults.object(forKey: "compactTools") as? Bool ?? true
         debugMode = defaults.bool(forKey: "debugMode")
         claudePath = defaults.string(forKey: "claudePath") ?? ""
         DashLog.verbose = debugMode
