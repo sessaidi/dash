@@ -258,13 +258,30 @@ struct MermaidGraph: Equatable {
 /// Scrolls when wider than the note.
 struct MermaidView: View {
     let graph: MermaidGraph
+    /// For print: no scrolling, scaled down to fit this size (a PDF page). nil scrolls on screen.
+    var fit: CGSize? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     private static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     var body: some View {
         let layout = graph.layout(size: Self.size)
-        ScrollView(.horizontal) {
+        if let fit {
+            let scale = min(1, fit.width / max(layout.size.width, 1), fit.height / max(layout.size.height, 1))
+            diagram(layout)
+                .scaleEffect(scale, anchor: .topLeading)
+                .frame(width: layout.size.width * scale, height: layout.size.height * scale, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 6)
+        } else {
+            ScrollView(.horizontal) { diagram(layout) }
+                .scrollIndicators(.automatic)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.25), in: .rect(cornerRadius: 10))
+        }
+    }
+
+    private func diagram(_ layout: MermaidGraph.Layout) -> some View {
             ZStack(alignment: .topLeading) {
                 ForEach(graph.groups) { group in
                     if let frame = layout.groupFrames[group.id] {
@@ -300,10 +317,6 @@ struct MermaidView: View {
                 }
             }
             .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
-        }
-        .scrollIndicators(.automatic)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.25), in: .rect(cornerRadius: 10))
     }
 
     /// Room for a node's label, wrapped at about 26 characters.

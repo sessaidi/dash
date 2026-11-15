@@ -29,6 +29,8 @@ struct NoteRenderContext {
     let depth: Int
     /// Drawing for a PDF: components show their frozen state.
     var printing = false
+    /// The page's content area when printing: diagrams scale to fit it.
+    var printSize: CGSize? = nil
     let onChange: ((String) -> Void)?
 
     @MainActor var components: [String: MarkdownComponentType] {
@@ -102,7 +104,7 @@ struct NoteBlockView: View {
         case .code(let language, let text):
             // Mermaid flowcharts draw natively; other diagrams stay as code.
             if language?.lowercased() == "mermaid", let graph = MermaidGraph.parse(text) {
-                MermaidView(graph: graph)
+                MermaidView(graph: graph, fit: context.printing ? (context.printSize ?? CGSize(width: 500, height: 680)) : nil)
             } else {
                 CodeBlockView(language: language, text: text, printing: context.printing)
             }

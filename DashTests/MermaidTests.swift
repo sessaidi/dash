@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Dash
 
@@ -39,6 +40,14 @@ struct MermaidTests {
         // No two nodes overlap.
         let all = Array(frames.values)
         for i in all.indices { for j in all.indices where i < j { #expect(!all[i].intersects(all[j])) } }
+    }
+
+    /// Printed (PDF): drawn without scrolling, scaled into the page.
+    @Test func printsScaledToThePage() throws {
+        let graph = try #require(MermaidGraph.parse(Self.papi))
+        let renderer = ImageRenderer(content: MermaidView(graph: graph, fit: CGSize(width: 300, height: 400)).frame(width: 300))
+        let image = try #require(renderer.nsImage)
+        #expect(image.size.width <= 300 && image.size.height > 40 && image.size.height <= 420)
     }
 
     @Test func otherDiagramsStayCode() {

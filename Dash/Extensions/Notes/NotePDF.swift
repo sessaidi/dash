@@ -87,7 +87,8 @@ struct NotePDFExporter {
     private func pieces(for note: (title: String, source: String)) -> [Piece] {
         let document = NoteDocument(note.source)
         let context = NoteRenderContext(host: host, source: note.source, lineOffset: document.bodyLineOffset,
-                                        noteTitle: note.title, depth: 0, printing: true, onChange: nil)
+                                        noteTitle: note.title, depth: 0, printing: true,
+                                        printSize: CGSize(width: contentWidth, height: bodyHeight - 40), onChange: nil)
         // The note's title, unless the note already opens with it as a heading.
         var result: [Piece] = []
         if case .heading(_, let text)? = document.blocks.first,
