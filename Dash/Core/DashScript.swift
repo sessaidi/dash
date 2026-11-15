@@ -123,6 +123,18 @@ struct DashScript {
                 }
             }
         case "open": return try await call("open_screen", ["screen": .string(words.rest)])
+        case "skills": return try await call("skills_list", [:])
+        case "skill":
+            switch words.word()?.lowercased() {
+            case "use", "load": return try await call("skill_use", ["name": .string(try words.require("skill name"))])
+            case "save", "create":
+                let name = try words.require("skill name")
+                var input = words.options()
+                input["name"] = .string(name)
+                return try await call("skill_save", .object(input))
+            case "delete": return try await call("skill_delete", ["name": .string(try words.require("skill name"))])
+            default: throw ToolError("skill use <name> | skill save <name> when_to_use=\"…\" instructions=\"…\" template=\"…\" | skill delete <name> | skills")
+            }
         case "tool", "call":
             guard let name = words.word() else { throw ToolError("tool <name> key=value … (help lists them)") }
             return try await call(name, .object(words.options()))
@@ -320,6 +332,7 @@ struct DashScript {
           hook create name="Morning brief" trigger={"schedule":{"time":"09:00","weekdays":[2,3,4,5,6]}} action={"prompt":{"prompt":"…","noteTitle":null,"notify":true}}
           hook on|off|delete "Name"
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
+          skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
         Saved vs temporary: `filter` and `set` are saved with the widget; `do` actions are temporary.
         Linked widgets: widget "PRs" filter tickets ~ $selected("Jira board").key  (follows the ticket picked on the board)

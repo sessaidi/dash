@@ -246,7 +246,7 @@ enum AppTools {
 
     private static func open(host: ExtensionHost) -> ClaudeTool {
         ClaudeTool(name: "open_screen", description: """
-            Open a screen for the user: settings (claude, usage, automation, rules, commands, hooks, agents, persona, plugins, marketplace, debug), \
+            Open a screen for the user: settings (claude, usage, automation, rules, commands, hooks, skills, agents, persona, plugins, marketplace, debug), \
             an extension's settings by id (e.g. jira-board), or the widget gallery (gallery).
             """, properties: ["screen": JSONSchema.string("What to open.")], required: ["screen"]) { input in
             let screen = (input["screen"]?.string ?? "").lowercased()
@@ -254,7 +254,7 @@ enum AppTools {
             case "gallery", "widget gallery", "widgets": host.openWidgetGallery()
             case "claude", "settings": host.openManager("claude")
             case "usage": host.settingsTab = "claude"; host.claudeSection = "usage"; host.openManagerWindow?()
-            case "automation", "rules", "commands", "hooks", "agents":
+            case "automation", "rules", "commands", "hooks", "agents", "skills":
                 host.settingsTab = "automation"
                 host.automationSection = screen == "automation" ? "rules" : screen
                 host.openManagerWindow?()

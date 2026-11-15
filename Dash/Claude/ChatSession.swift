@@ -106,7 +106,7 @@ final class ChatSession {
     }
 
     /// Everything Dashii can do, as tools.
-    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + AppTools.tools(host: host) + componentTools + host.availableTools }
+    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + AppTools.tools(host: host) + Skills.tools(host: host) + componentTools + host.availableTools }
 
     /// What Claude is offered: in compact mode the `dash` statements tool (which reaches all the
     /// others through the same approvals) plus the chat's question and layout tools; otherwise all.
@@ -330,6 +330,7 @@ final class ChatSession {
         let memory = host.ext(KnowledgeExtension.self)?.memory
         var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"
         if let known = await memory?.context(for: text + "\n" + ViewContext.summary(host: host)) { prompt = known + "\n" + prompt }
+        if let skills = Skills.catalog(in: host.context) { prompt = skills + "\n" + prompt }
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
             prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }

@@ -119,7 +119,7 @@ final class ExtensionHost: ExtensionContext {
     /// store is a lightweight migration, so hot-installed plugins can grow the schema.
     static func makeContainer(models: [any PersistentModel.Type], inMemory: Bool) throws -> ModelContainer {
         let schema = Schema([WidgetRecord.self, DashboardPage.self, SidebarSection.self, ClaudeCall.self,
-                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self, SyncedRecordModel.self] + models)
+                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self, SyncedRecordModel.self, DashSkill.self] + models)
         let configuration = inMemory
             ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             : ModelConfiguration(schema: schema, url: try storeURL())
@@ -148,6 +148,7 @@ final class ExtensionHost: ExtensionContext {
     func start() {
         // Who `me` is in widgets' DashQL queries.
         WidgetQuery.me = DashQL.me(host: self)
+        Skills.seed(in: context)
         extensionErrors = dependencyErrors()
         for item in startOrder where isEnabled(item) {
             DashLog.info("Starting \(item.id) \(item.metadata.version)", category: "extensions")

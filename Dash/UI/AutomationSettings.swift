@@ -11,6 +11,7 @@ struct AutomationSettings: View {
         switch section {
         case "commands": CommandsEditor()
         case "hooks": HooksEditor()
+        case "skills": SkillsEditor()
         case "agents": AgentsSettings()
         default: RulesEditor()
         }

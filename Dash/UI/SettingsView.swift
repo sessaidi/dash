@@ -16,7 +16,7 @@ struct SettingsView: View {
                 }
             }
             Tab("Automation", systemImage: "bolt", value: "automation") {
-                SegmentedPane(selection: $host.automationSection, segments: [("rules", "Rules"), ("commands", "Commands"), ("hooks", "Hooks"), ("agents", "Agents")]) { _ in
+                SegmentedPane(selection: $host.automationSection, segments: [("rules", "Rules"), ("commands", "Commands"), ("hooks", "Hooks"), ("skills", "Skills"), ("agents", "Agents")]) { _ in
                     AutomationSettings(section: $host.automationSection)
                 }
             }
