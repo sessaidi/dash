@@ -471,7 +471,8 @@ final class KnowledgeExtension: DashExtension {
             ) { [weak self] input in
                 guard let memory = self?.memory else { throw ToolError("Knowledge isn't available.") }
                 let request = try input.toolInput(RememberInput.self)
-                let id = try await memory.remember(.init(text: request.fact, about: request.about ?? [], confidence: .stated, durability: .stable))
+                let id = try await memory.remember(.init(text: request.fact, about: request.about ?? [], confidence: .stated, durability: .stable,
+                                                         evidence: "the user asked Dashii to remember it", scope: "global"))
                 self?.bump()
                 return ["remembered": .string(id)]
             },
