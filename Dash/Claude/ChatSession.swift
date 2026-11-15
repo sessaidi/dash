@@ -331,6 +331,7 @@ final class ChatSession {
         var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"
         if let known = await memory?.context(for: text + "\n" + ViewContext.summary(host: host)) { prompt = known + "\n" + prompt }
         if let skills = Skills.catalog(in: host.context) { prompt = skills + "\n" + prompt }
+        if let experts = AgentHub.shared.catalog { prompt = experts + "\n" + prompt }
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
             prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }

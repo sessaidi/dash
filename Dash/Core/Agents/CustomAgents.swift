@@ -114,6 +114,7 @@ final class AgentsStudio: DashExtension {
     }
 
     private struct RunInput: Decodable { let id: String; let reason: String? }
+    private struct AskInput: Decodable { let id: String; let question: String }
     private struct ReportsInput: Decodable { let id: String; let limit: Int? }
 
     var tools: [DashiiTool] {
@@ -137,6 +138,13 @@ final class AgentsStudio: DashExtension {
                        required: ["id"]) { input in
                 let request = try input.toolInput(RunInput.self)
                 let report = try await AgentHub.shared.run(request.id, reason: request.reason ?? "asked in chat")
+                return try JSONValue.parse(String(decoding: JSONEncoder().encode(report), as: UTF8.self))
+            },
+            DashiiTool(name: "dash_agent_ask", description: "Hand a question to an expert agent (an on-call SRE, a release manager…; see dash_agents) and get its answer: the report's summary answers it, findings list problems with evidence. Use it for questions in the agent's speciality instead of investigating yourself.",
+                       properties: ["id": JSONSchema.string("Agent id from dash_agents."), "question": JSONSchema.string("The question, with what you already know.")],
+                       required: ["id", "question"]) { input in
+                let request = try input.toolInput(AskInput.self)
+                let report = try await AgentHub.shared.run(request.id, reason: "asked by Dashii", question: request.question)
                 return try JSONValue.parse(String(decoding: JSONEncoder().encode(report), as: UTF8.self))
             },
             DashiiTool(name: "dash_agent_reports", description: "An agent's latest reports, newest first.",

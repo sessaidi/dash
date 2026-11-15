@@ -91,6 +91,18 @@ final class AgentHub {
 
     func entry(_ id: String) -> Entry? { entries.first { $0.id == id } }
 
+    /// The agents Dashii can ask (scheduled or not), one line each, for its prompt; nil when there are none.
+    var catalog: String? {
+        let experts = entries
+        guard !experts.isEmpty else { return nil }
+        return "<agents>\nExperts you can hand a question to (`agent <id> ask \"…\"` in dash, or dash_agent_ask); they answer with evidence:\n"
+            + experts.map { entry in
+                let role = entry.agent.role.isEmpty ? "" : " (\(entry.agent.role))"
+                let specialities = entry.agent.specialities.isEmpty ? "" : ": " + entry.agent.specialities.joined(separator: ", ")
+                return "- \(entry.id) — \(entry.agent.name)\(role)\(specialities). \(entry.agent.summary)"
+            }.joined(separator: "\n") + "\n</agents>"
+    }
+
     func settings(_ entry: Entry) -> AISettings {
         host?.aiSettings(.extension(entry.owner.id), tasks: [entry.agent.task]) ?? AISettings(tasks: [entry.agent.task])
     }
@@ -138,8 +150,9 @@ final class AgentHub {
 
     // MARK: Running
 
-    /// Runs an agent now and stores its report.
-    func run(_ id: String, reason: String) async throws -> AgentReport {
+    /// Runs an agent now and stores its report. With a `question` (Dashii delegating to it), the
+    /// precheck can't skip the run: what it saw becomes context, and the report answers the question.
+    func run(_ id: String, reason: String, question: String? = nil) async throws -> AgentReport {
         guard let host, let entry = entry(id) else { throw ToolError("No agent \(id) (is its extension enabled?).") }
         guard !running.contains(id) else { throw ToolError("\(entry.agent.name) is already running.") }
         running.insert(id)
@@ -149,7 +162,10 @@ final class AgentHub {
         if let precheck = entry.agent.precheck {
             switch await precheck(host) {
             case .skip(let note):
-                return store(AgentReport(agentID: id, startedAt: started, reason: reason, status: .skipped, summary: note))
+                guard question != nil else {
+                    return store(AgentReport(agentID: id, startedAt: started, reason: reason, status: .skipped, summary: note))
+                }
+                context = note
             case .run(let seen):
                 context = seen
             @unknown default:
@@ -158,14 +174,14 @@ final class AgentHub {
         }
         let report: AgentReport
         do {
-            report = try await claude(entry, reason: reason, context: context, started: started)
+            report = try await claude(entry, reason: reason, question: question, context: context, started: started)
         } catch {
             report = AgentReport(agentID: id, startedAt: started, reason: reason, status: .failed, summary: error.localizedDescription)
         }
         return store(report)
     }
 
-    private func claude(_ entry: Entry, reason: String, context: String, started: Date) async throws -> AgentReport {
+    private func claude(_ entry: Entry, reason: String, question: String?, context: String, started: Date) async throws -> AgentReport {
         guard let host else { throw ToolError("Dash is closing.") }
         let tools = Self.tools(for: entry.agent, in: host)
         let settings = settings(entry)
@@ -190,6 +206,10 @@ final class AgentHub {
         }]
         var prompt = "Run now. Reason: \(reason). Time: \(Date.now.formatted(date: .abbreviated, time: .shortened))."
         if !context.isEmpty { prompt += "\n\nWhat the precheck saw:\n\(context)" }
+        if let question {
+            prompt += "\n\nDashii (the user's assistant) asks you, on the user's behalf:\n\(question)\n\n"
+                + "Answer it in the report's summary, plainly and with the evidence; findings are the problems you found while answering."
+        }
         for try await message in query(prompt, options: options) {
             guard case .result(let result) = message else { continue }
             ClaudeUsage.shared.record(source: "agent.\(entry.id)", model: options.model ?? host.settings.model, effort: options.effort, result: result)

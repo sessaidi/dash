@@ -119,6 +119,9 @@ struct DashScript {
             default:
                 switch words.word()?.lowercased() {
                 case "run": return try await call("dash_agent_run", ["id": .string(first), "reason": .string(words.rest.isEmpty ? "asked in chat" : words.rest)])
+                case "ask":
+                    guard let question = words.text() else { throw ToolError("agent <id> ask \"question\"") }
+                    return try await call("dash_agent_ask", ["id": .string(first), "question": .string(question)])
                 case "reports": return try await call("dash_agent_reports", ["id": .string(first)])
                 case "set", "update":
                     var input = words.options()
@@ -374,7 +377,7 @@ struct DashScript {
           hook create name="Morning brief" trigger={"schedule":{"time":"09:00","weekdays":[2,3,4,5,6]}} action={"prompt":{"prompt":"…","noteTitle":null,"notify":true}}
           hook on|off|delete "Name" | hook presets | hook preset <id> | hook preset <wake-…id> agent=<agent id>
           (watchers run a query themselves, no Claude, and fire on new rows: prefer them to agents for "tell me when X appears")
-          agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
+          agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | ask "question" | reports | set k=v | delete
           skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
           <keyword> <action> <args> key=value …   statements plugins add (ticket follow LAF-1); `help` lists them, `help <keyword>` shows one
           functions | function logs.digest lines=[…] context="…"   hand a narrow job to a smaller model (JSON answer)

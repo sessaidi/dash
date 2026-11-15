@@ -65,6 +65,12 @@ struct AgentsTests {
         #expect(skipped.status == .skipped && skipped.summary == "All healthy.")
         #expect(hub.reports("watch.sre", limit: 5).map(\.id) == [skipped.id])
 
+        // Dashii delegating a question: the precheck can't skip it (it reaches Dashii, which fails here without its engine).
+        #expect(hub.catalog?.contains("watch.sre — Watch SRE (SRE): Kubernetes. Watches.") == true)
+        host.settings.claudePath = "/nonexistent/claude"
+        let asked = try await hub.run("watch.sre", reason: "asked by Dashii", question: "Is prod OK?")
+        #expect(asked.status != .skipped)
+
         hub.store(AgentReport(agentID: "watch.sre", startedAt: .now, reason: "schedule", status: .findings, summary: "One pod down.",
                               findings: [AgentFinding(severity: .critical, title: "api crash loop", target: "prod/api")]))
         let finding = try #require(host.activity.events.last)
