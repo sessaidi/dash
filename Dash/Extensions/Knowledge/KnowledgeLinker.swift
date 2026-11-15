@@ -22,7 +22,7 @@ enum KnowledgeLinker {
         var placeholders: [KnowledgeNode] = []
         for entity in entities {
             nodes.append(KnowledgeNode(id: entity.id, kind: entity.kind, name: entity.title, qualified: key(of: entity.id),
-                                       signature: String(entity.text.prefix(4000)), url: entity.url?.absoluteString ?? "",
+                                       signature: String(entity.text.prefix(entity.kind == "doc" ? 20_000 : 4000)), url: entity.url?.absoluteString ?? "",
                                        source: source, updated: entity.updated ?? .now))
             for link in entity.links {
                 guard let target = try await resolve(link.to, store: store) else { continue }
