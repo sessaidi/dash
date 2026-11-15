@@ -66,6 +66,23 @@ enum CoreTools {
                 return store.describe(store.createPage(name: request.name, systemImage: request.icon ?? "square.grid.2x2"))
             },
             ClaudeTool(
+                name: "layout_context",
+                description: "Everything needed to suggest a layout: the widget types you can place (summary, default size, size limits, config schema, actions), which integrations are connected, what's installed, plugins in the Marketplace not installed yet, the current pages and their widgets, and which sources were busiest this week.",
+            ) { _ in layoutContext(host: host) },
+            ClaudeTool(
+                name: "suggest_layout",
+                description: "Start a suggested layout: creates a draft page the user can Keep, Change or Discard. Then add and place widgets on it (add_widget with page_id, place_widget), configured for the user (repos, namespaces, filters), most important top-left. Ask the user about their needs first unless you already know them.",
+                properties: ["name": JSONSchema.string("Page name, e.g. On-call."), "icon": JSONSchema.string("SF Symbol name.", enum: DashboardStore.pageIcons),
+                             "rationale": JSONSchema.string("One or two sentences on why this layout, shown on the draft.")],
+                required: ["name", "rationale"]
+            ) { input in
+                let request = try input.toolInput(DraftInput.self)
+                let page = store.createDraftPage(name: request.name, systemImage: request.icon ?? "sparkles", rationale: request.rationale)
+                host.selectedPageID = page.id
+                host.mainView = "page"
+                return store.describe(page)
+            },
+            ClaudeTool(
                 name: "update_page",
                 description: "Rename a page or change its icon.",
                 properties: ["id": JSONSchema.string("Page id."), "name": JSONSchema.string("New name."),
@@ -173,5 +190,34 @@ enum CoreTools {
                 return "removed"
             },
         ]
+    }
+
+    /// What `layout_context` returns.
+    static func layoutContext(host: ExtensionHost) -> JSONValue {
+        let store = host.dashboard!
+        let types: [JSONValue] = host.widgetTypes.filter { host.isWidgetAvailable($0.kind) }.map { type in
+            ["kind": .string(type.kind), "name": .string(type.displayName), "summary": .string(type.summary),
+             "default_size": .string(type.defaultSize.rawValue),
+             "size_limits": ["min_w": .number(Double(type.sizeLimits.minW)), "min_h": .number(Double(type.sizeLimits.minH)),
+                             "max_w": .number(Double(type.sizeLimits.maxW)), "max_h": .number(Double(type.sizeLimits.maxH))],
+             "config_schema": type.configSchema, "actions": .array(type.actions.map { .string($0.name) })]
+        }
+        let integrations: [JSONValue] = host.extensions.filter { $0.layer == .integration }.map { item in
+            ["id": .string(item.id), "name": .string(item.name), "enabled": .bool(host.isEnabled(item)),
+             "connected": .bool(host.integration(item.id)?.connection != nil)]
+        }
+        let installed = Set(host.extensions.map(\.id))
+        let marketplace: [JSONValue] = (host.ext(MarketplaceFeature.self)?.catalogs.values.flatMap(\.index.extensions) ?? [])
+            .filter { !installed.contains($0.id) && $0.builtIn != true }
+            .map { ["id": .string($0.id), "name": .string($0.name), "description": .string($0.description ?? "")] }
+        let pages: [JSONValue] = store.pages().map { page in
+            store.describe(page).merging(["widget_kinds": .array(store.widgets(on: page.id).map { .string($0.kind) })])
+        }
+        var busiest: [String: Int] = [:]
+        for event in host.activity.events(since: .now.addingTimeInterval(-7 * 86400)) { busiest[event.source, default: 0] += 1 }
+        return ["widget_types": .array(types), "integrations": .array(integrations), "marketplace_not_installed": .array(marketplace),
+                "pages": .array(pages),
+                "busiest_sources_this_week": .object(busiest.mapValues { .number(Double($0)) }),
+                "grid": "12 columns, rows of 40 pt; x, y, w, h in cells. Put what the user checks first top-left and wide."]
     }
 }

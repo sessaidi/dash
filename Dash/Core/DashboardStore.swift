@@ -15,6 +15,10 @@ final class DashboardPage {
     var sectionID: UUID? = nil
     /// Shows the Home header (greeting, ask bar, suggestions, brief) above the widgets.
     var showsHome: Bool = false
+    /// A layout Dashii suggested: shown with Keep / Change / Discard until the user decides.
+    var isDraft: Bool = false
+    /// Why Dashii laid it out this way, shown on the draft.
+    var draftRationale: String = ""
 
     init(name: String, systemImage: String, order: Int, sectionID: UUID? = nil) {
         id = UUID()
@@ -244,6 +248,23 @@ final class DashboardStore {
     }
 
     /// Deletes a page and its widgets. The last page can't be deleted.
+    /// A page for a suggested layout, marked as a draft until the user keeps it.
+    func createDraftPage(name: String, systemImage: String, rationale: String) -> DashboardPage {
+        let page = createPage(name: name, systemImage: systemImage)
+        page.isDraft = true
+        page.draftRationale = rationale
+        try? context.save()
+        return page
+    }
+
+    /// The user keeps a suggested layout: it becomes an ordinary page.
+    func keepDraft(_ id: UUID) throws {
+        let page = try page(id)
+        page.isDraft = false
+        page.draftRationale = ""
+        try context.save()
+    }
+
     func deletePage(_ id: UUID) throws {
         guard pages().count > 1 else { throw ToolError("Keep at least one page.") }
         let page = try page(id)
@@ -399,7 +420,8 @@ final class DashboardStore {
 
     func describe(_ page: DashboardPage) -> JSONValue {
         ["id": .string(page.id.uuidString), "name": .string(page.name), "icon": .string(page.systemImage),
-         "widgets": .number(Double(widgets(on: page.id).count)), "on_screen": .bool(page.id == currentPageID)]
+         "widgets": .number(Double(widgets(on: page.id).count)), "on_screen": .bool(page.id == currentPageID),
+         "draft": .bool(page.isDraft)]
     }
 
     func snapshot(_ id: UUID) async throws -> JSONValue {

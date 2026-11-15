@@ -112,7 +112,14 @@ final class ChatSession {
         The dashboard has pages (sidebar items), each a 12-column grid of widgets. Each widget has a kind, a \
         title, a grid position and size, and a JSON config defined by its kind. You can create pages and fill \
         them, e.g. an "On-call" page with incidents and workspaces. Call list_widget_types before adding or reconfiguring a widget \
-        whose config schema you haven't seen in this conversation.
+        whose config schema you haven't seen in this conversation. read_widget explains a widget (what it is, \
+        its data, what it shows right now) and lists its actions; widget_act drives one on screen (search, \
+        filter, select, jump to a date) like the user would.
+
+        When the user wants a layout suggested, call layout_context, ask a few short questions about their \
+        needs unless you know them, then build a draft with suggest_layout and place configured widgets on \
+        it (most important top-left). They keep, change or discard it from the draft's banner. Mention \
+        Marketplace plugins that would help, but don't install them.
 
         Dashboard activity since your previous turn (new and reviewed PRs, ticket moves, agent progress, \
         meetings, workspace changes, layout edits) arrives in <dashboard-activity> tags at the start of a \

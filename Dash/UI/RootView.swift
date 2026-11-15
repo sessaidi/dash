@@ -43,9 +43,12 @@ struct RootView: View {
                     KnowledgeView(knowledge: knowledge)
                         .navigationTitle("Knowledge")
                 } else if let page = pages.first(where: { $0.id == host.selectedPageID }) ?? pages.first {
-                    DashboardGrid(pageID: page.id, editing: host.layoutEditing, showsHome: page.showsHome)
-                        .id(page.id)
-                        .navigationTitle(page.name)
+                    VStack(spacing: 0) {
+                        if page.isDraft { DraftLayoutBanner(page: page) }
+                        DashboardGrid(pageID: page.id, editing: host.layoutEditing, showsHome: page.showsHome)
+                    }
+                    .id(page.id)
+                    .navigationTitle(page.name)
                 } else {
                     ProgressView()
                 }
@@ -99,6 +102,12 @@ struct RootView: View {
 /// folding animates: icons stay put (centred in the folded rail), the width and the selection
 /// highlight ease, titles and headers fade. Every row shows its name as a tooltip.
 private struct Sidebar: View {
+    static let suggestLayoutPrompt = """
+        Suggest a dashboard layout for me. Call layout_context, then ask me a few short questions about \
+        my needs (what I check first, on-call, which repos and projects) unless you already know, then build \
+        it with suggest_layout and place the widgets.
+        """
+
     let pages: [DashboardPage]
     let compact: Bool
     @Binding var editing: PageEditor.Target?
@@ -169,6 +178,7 @@ private struct Sidebar: View {
             .contentShape(.rect)
             .contextMenu {
                 Button("New Page…", systemImage: "plus") { editing = .new(section: nil) }
+                Button("Suggest a Layout…", systemImage: "sparkles") { host.askClaude(Self.suggestLayoutPrompt) }
                 Button("New Section", systemImage: "folder.badge.plus") { newSection() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .dashNewSection)) { _ in newSection() }
@@ -306,8 +316,10 @@ private struct Sidebar: View {
             host.selectedPageID = page.id
             host.mainView = "page"
         } label: {
-            row(page.name, icon: page.systemImage, key: page.id.uuidString, tinted: true,
+            row(page.name, icon: page.isDraft ? "sparkles" : page.systemImage, key: page.id.uuidString, tinted: true,
                 selected: host.mainView == "page" && host.selectedPageID == page.id)
+                .opacity(page.isDraft ? 0.75 : 1)
+                .help(page.isDraft ? "Suggested by \(host.persona.name): open it to keep, change or discard" : page.name)
         }
         .buttonStyle(.plain)
         // A line above the row while another page is dragged onto it: dropping puts it here.
@@ -641,5 +653,46 @@ private struct EditingBar: View {
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .padding(.bottom, 20)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}
+
+/// On a page Dashii suggested: why it's laid out this way, and Keep / Change / Discard.
+struct DraftLayoutBanner: View {
+    let page: DashboardPage
+    @Environment(ExtensionHost.self) private var host
+    @State private var confirmingDiscard = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 34, height: 34)
+                .background(.tint.opacity(0.12), in: .circle)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Suggested by \(host.persona.name)").font(.callout.weight(.semibold))
+                if !page.draftRationale.isEmpty {
+                    Text(page.draftRationale).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            Spacer(minLength: 12)
+            Button("Discard", role: .destructive) { confirmingDiscard = true }
+            Button("Change…", systemImage: "bubble.left") {
+                host.askClaude("Change the suggested layout on page “\(page.name)” (id \(page.id.uuidString)): ")
+            }
+            Button("Keep", systemImage: "checkmark") {
+                withAnimation(.snappy) { try? host.dashboard.keepDraft(page.id) }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .controlSize(.regular)
+        .padding(14)
+        .background(.tint.opacity(0.06), in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.tint.opacity(0.25)))
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .confirmationDialog("Discard the suggested “\(page.name)” page?", isPresented: $confirmingDiscard) {
+            Button("Discard Page", role: .destructive) { withAnimation(.snappy) { try? host.dashboard.deletePage(page.id) } }
+        }
     }
 }
