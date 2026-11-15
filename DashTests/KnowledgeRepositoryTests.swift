@@ -1,0 +1,53 @@
+import Foundation
+import Testing
+@testable import Dash
+
+@MainActor
+@Suite("Knowledge repositories")
+struct KnowledgeRepositoryTests {
+    func checkout(_ path: String, in root: URL, origin: String? = nil) throws -> URL {
+        let url = root.appending(path: path)
+        try FileManager.default.createDirectory(at: url.appending(path: ".git"), withIntermediateDirectories: true)
+        if let origin {
+            try "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = \(origin)\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+                .write(to: url.appending(path: ".git/config"), atomically: true, encoding: .utf8)
+        }
+        return url
+    }
+
+    @Test func findsCheckoutsAndOrigins() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "dash-find-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let api = try checkout("acme/billing-api", in: root, origin: "git@github.com:acme/billing-api.git")
+        _ = try checkout("acme/users-api", in: root)
+        _ = try checkout("perso/dash", in: root)
+        // Too deep, and inside node_modules: skipped.
+        _ = try checkout("a/b/c/deep-api", in: root)
+        _ = try checkout("x/node_modules/api-lib", in: root)
+        let found = KnowledgeExtension.findCheckouts(matching: "api", roots: [root])
+        #expect(found.map(\.lastPathComponent) == ["billing-api", "users-api"])
+        #expect(KnowledgeExtension.findCheckouts(matching: "", roots: [root]).count == 3)
+        #expect(KnowledgeExtension.originURL(api) == "git@github.com:acme/billing-api.git")
+    }
+
+    @Test func toolsAreOffered() {
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "k-\(UUID())")!, url: nil)
+        let names = knowledge.tools.map(\.name)
+        #expect(names.contains("knowledge_find_repos") && names.contains("knowledge_add_repository") && names.contains("knowledge_remove_repository"))
+        #expect(knowledge.tools.first { $0.name == "knowledge_add_repository" }?.requiresApproval == true)
+        #expect(knowledge.tools.first { $0.name == "knowledge_find_repos" }?.requiresApproval == false)
+    }
+
+    @Test func indexedRepositoriesComeBackIfTheListLosesThem() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "dash-restore-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = try checkout("svc", in: root)
+        try "package main\nfunc Handle() {}\n".write(to: repo.appending(path: "main.go"), atomically: true, encoding: .utf8)
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "k-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        _ = try await KnowledgeExtension.index(repo.path, store: store, history: false)
+        #expect(knowledge.repositories.isEmpty)
+        await knowledge.restoreRepositories()
+        #expect(knowledge.repositories == [repo.standardizedFileURL.path] || knowledge.repositories == [repo.path])
+    }
+}

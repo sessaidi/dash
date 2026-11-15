@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Kubernetes clusters (GKE and others) serve certificates from their own CA, which Dash
+	     checks itself against the cluster's CA from the kubeconfig or the GKE API. App Transport
+	     Security would block those connections before that check runs, so it is relaxed here;
+	     every connection Dash makes is HTTPS. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- Where Updater looks for releases (GitHub owner/name; see scripts/release.sh). -->
+	<key>DashUpdateRepository</key>
+	<string>sessaidi/dash</string>
+	<!-- dash://ask?q=… sends a request to Dashii (asks first unless it carries the local token). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.sessaidi.Dash</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dash</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
