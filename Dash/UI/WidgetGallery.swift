@@ -11,6 +11,8 @@ struct WidgetGallery: View {
     @State private var search = ""
     /// Widgets added this session, for the brief "Added" confirmation.
     @State private var added: [String: Int] = [:]
+    /// The preview size picked per widget kind (it is added at that size).
+    @State private var sizes: [String: WidgetSize] = [:]
 
     /// Grouped by what they're about (not by plugin, which mostly gives one widget each), each
     /// tile naming the plugin it comes from.
@@ -89,15 +91,27 @@ struct WidgetGallery: View {
 
     private func tile(_ type: WidgetType, owner: String) -> some View {
         let count = added[type.kind] ?? 0
+        let size = sizes[type.kind] ?? type.defaultSize
+        let choices = WidgetMiniature.sizes(of: type)
         return Button {
-            if (try? host.dashboard.add(kind: type.kind)) != nil {
+            if (try? host.dashboard.add(kind: type.kind, size: size)) != nil {
                 withAnimation(.snappy) { added[type.kind] = count + 1 }
             }
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                WidgetMiniature(type: type)
+                WidgetMiniature(type: type, size: size)
                     .frame(width: WidgetMiniature.maxSize.width, height: WidgetMiniature.maxSize.height)
                     .frame(maxWidth: .infinity)
+                    .animation(.snappy(duration: 0.2), value: size)
+                if choices.count > 1 {
+                    // Each preset size's layout; the widget is added at the one shown.
+                    Picker("Size", selection: Binding(get: { size }, set: { sizes[type.kind] = $0 })) {
+                        ForEach(choices, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {

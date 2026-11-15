@@ -126,11 +126,8 @@ private struct Overview: View {
                         HStack(alignment: .top, spacing: 16) {
                             ForEach(item.widgets) { widget in
                                 VStack(alignment: .leading, spacing: 6) {
-                                    WidgetMiniature(type: widget)
-                                    HStack(spacing: 6) {
-                                        Text(widget.displayName).font(.callout.bold())
-                                        Badge(widget.defaultSize.rawValue)
-                                    }
+                                    SizedWidgetPreview(type: widget)
+                                    Text(widget.displayName).font(.callout.bold())
                                     Text(widget.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                                         .frame(width: WidgetMiniature.maxSize.width, alignment: .leading)
                                     if added.contains(widget.kind) {
@@ -149,7 +146,7 @@ private struct Overview: View {
                 } header: {
                     Text("Widgets")
                 } footer: {
-                    Text("Previews use sample data. Resize and configure widgets once they're on the dashboard.")
+                    Text("Previews use sample data; switch sizes to see each layout. Resize and configure widgets once they're on the dashboard.")
                 }
             }
             let tools = item.tools
@@ -273,22 +270,62 @@ private struct StorageView: View {
 
 /// A widget rendered at its preset size with its default config, scaled down for previews.
 /// It draws the widget's sample preview (never live data) and doesn't respond to clicks.
+/// A widget's preview with its allowed sizes to switch between.
+struct SizedWidgetPreview: View {
+    let type: WidgetType
+    @State private var size: WidgetSize?
+
+    var body: some View {
+        let sizes = WidgetMiniature.sizes(of: type)
+        VStack(alignment: .leading, spacing: 6) {
+            // One scale for every size, so a larger size shows more room, as on the dashboard.
+            WidgetMiniature(type: type, size: size ?? type.defaultSize, scale: 0.5)
+                .animation(.snappy(duration: 0.2), value: size)
+            if sizes.count > 1 {
+                Picker("Size", selection: Binding(get: { size ?? type.defaultSize }, set: { size = $0 })) {
+                    ForEach(sizes, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 300)
+            }
+        }
+    }
+}
+
 struct WidgetMiniature: View {
     static let maxSize = CGSize(width: 260, height: 190)
     let type: WidgetType
+    let size: WidgetSize
     private let config: JSONValue
 
-    init(type: WidgetType) {
+    /// nil fits the preview in `maxSize`; a number draws it at that scale (sizes then differ on screen).
+    let scale: CGFloat?
+
+    init(type: WidgetType, size: WidgetSize? = nil, scale: CGFloat? = nil) {
         self.type = type
+        self.size = size ?? type.defaultSize
+        self.scale = scale
         config = type.defaultConfig
     }
 
+    /// The preset sizes the widget allows (its size limits), smallest first.
+    static func sizes(of type: WidgetType) -> [WidgetSize] {
+        let limits = type.sizeLimits
+        let allowed = WidgetSize.allCases.filter { size in
+            let cells = size.cells
+            return (limits.minW...max(limits.minW, limits.maxW)).contains(cells.w) && (limits.minH...max(limits.minH, limits.maxH)).contains(cells.h)
+        }
+        return allowed.isEmpty ? [type.defaultSize] : allowed
+    }
+
     var body: some View {
-        let cells = type.defaultSize.cells
+        let cells = size.cells
         // Same geometry as the dashboard grid at a typical column width.
         let full = CGSize(width: CGFloat(cells.w) * 80 + CGFloat(cells.w - 1) * 16,
                           height: CGFloat(cells.h) * 40 + CGFloat(cells.h - 1) * 16)
-        let scale = min(Self.maxSize.width / full.width, Self.maxSize.height / full.height, 0.75)
+        let scale = self.scale ?? min(Self.maxSize.width / full.width, Self.maxSize.height / full.height, 0.75)
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: type.systemImage).foregroundStyle(.secondary)
@@ -300,6 +337,8 @@ struct WidgetMiniature: View {
                 if let preview = type.preview { preview(config) } else { WidgetPlaceholder(type: type) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Previews adapt to the size like the real widget does.
+            .measuresWidgetLayout()
         }
         .padding(14)
         .frame(width: full.width, height: full.height)
