@@ -5,8 +5,9 @@ import Foundation
 import Observation
 
 /// Updates Dash from the GitHub releases of its repository (`DashUpdateRepository` in the
-/// Info.plist). A release is tagged `v<version>` and carries `Dash-<version>.zip`, as made by
-/// `scripts/release.sh`. Installing downloads the zip, checks it is Dash at that version with a
+/// Info.plist, changeable in Settings › Updates), or from a local folder: a Dash checkout whose
+/// `dist/` holds the zips `scripts/release.sh` builds. A GitHub release is tagged `v<version>` and
+/// carries `Dash-<version>.zip`. Installing downloads the zip, checks it is Dash at that version with a
 /// valid signature (and GitHub's SHA-256 of the asset when it gives one), then quits: a small
 /// script waits for Dash to exit, swaps the bundle in place and opens the new one.
 @MainActor
@@ -23,8 +24,9 @@ final class Updater {
 
     struct Asset: Equatable {
         let name: String
-        /// The API URL: works for private repositories with a token.
-        let apiURL: URL
+        /// The API URL: works for private repositories with a token. A local zip has none.
+        let apiURL: URL?
+        /// The download, or the zip itself for a local folder.
         let downloadURL: URL
         /// "sha256:…" when GitHub has computed it.
         let digest: String?
@@ -46,7 +48,11 @@ final class Updater {
         didSet { defaults.set(automaticChecks, forKey: "updates.automatic") }
     }
 
-    let repository = Bundle.main.object(forInfoDictionaryKey: "DashUpdateRepository") as? String ?? "sessaidi/dash"
+    /// Where releases come from: "owner/name" (or a GitHub URL) or a local folder path.
+    var source: String {
+        didSet { defaults.set(source, forKey: "updates.source") }
+    }
+    static let defaultSource = Bundle.main.object(forInfoDictionaryKey: "DashUpdateRepository") as? String ?? "sessaidi/dash"
     let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
     /// Debug builds run from the build folder: they check, but never replace themselves.
@@ -65,6 +71,30 @@ final class Updater {
     init(defaults: UserDefaults = DashDefaults.shared) {
         self.defaults = defaults
         automaticChecks = defaults.object(forKey: "updates.automatic") as? Bool ?? true
+        source = defaults.string(forKey: "updates.source") ?? Self.defaultSource
+    }
+
+    enum Source: Equatable {
+        case github(String)
+        case local(URL)
+    }
+
+    /// "owner/name", "https://github.com/owner/name", "git@github.com:owner/name.git", or a
+    /// path starting with "/" or "~".
+    nonisolated static func parse(_ text: String) -> Source? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("/") || text.hasPrefix("~") {
+            return .local(URL(filePath: (text as NSString).expandingTildeInPath, directoryHint: .isDirectory))
+        }
+        var repo = text
+        for prefix in ["https://github.com/", "http://github.com/", "git@github.com:", "github.com/"] where repo.hasPrefix(prefix) {
+            repo = String(repo.dropFirst(prefix.count))
+        }
+        if repo.hasSuffix(".git") { repo = String(repo.dropLast(4)) }
+        if repo.hasSuffix("/") { repo = String(repo.dropLast()) }
+        let parts = repo.split(separator: "/")
+        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && !$0.contains(" ") }) else { return nil }
+        return .github(repo)
     }
 
     /// Checks now, then every six hours while automatic checks are on.
@@ -119,6 +149,30 @@ final class Updater {
     // MARK: - GitHub
 
     private func latestRelease() async throws -> Release {
+        switch Self.parse(source) {
+        case .github(let repository): try await latestRelease(github: repository)
+        case .local(let folder): try Self.latestRelease(in: folder)
+        case nil: throw UpdateError("“\(source)” is neither owner/name nor a folder path.")
+        }
+    }
+
+    /// The newest `Dash-<version>.zip` in a folder or its `dist/`.
+    nonisolated static func latestRelease(in folder: URL) throws -> Release {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: folder.path) else { throw UpdateError("\(folder.path) doesn't exist.") }
+        let zips = [folder, folder.appending(path: "dist")].flatMap { directory in
+            ((try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.lastPathComponent.hasPrefix("Dash-") && $0.pathExtension == "zip" }
+        }
+        let versions = zips.map { zip in (zip, String(zip.deletingPathExtension().lastPathComponent.dropFirst("Dash-".count))) }
+        guard let (zip, version) = versions.max(by: { isNewer($1.1, than: $0.1) }) else {
+            throw UpdateError("No Dash-….zip in \(folder.path) or its dist/. Build one with scripts/release.sh.")
+        }
+        return Release(version: version, notes: "", page: nil,
+                       asset: Asset(name: zip.lastPathComponent, apiURL: nil, downloadURL: zip, digest: nil))
+    }
+
+    private func latestRelease(github repository: String) async throws -> Release {
         let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
         var (data, status) = try await get(url, token: token)
         // A private repository answers 404 without a token: retry with the GitHub CLI's.
@@ -154,7 +208,12 @@ final class Updater {
     }
 
     private func download(_ asset: Asset) async throws -> URL {
-        var request = URLRequest(url: token == nil ? asset.downloadURL : asset.apiURL)
+        let zip = FileManager.default.temporaryDirectory.appending(path: "dash-update-\(UUID().uuidString).zip")
+        if asset.downloadURL.isFileURL {
+            try FileManager.default.copyItem(at: asset.downloadURL, to: zip)
+            return zip
+        }
+        var request = URLRequest(url: token == nil ? asset.downloadURL : asset.apiURL ?? asset.downloadURL)
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (file, response) = try await URLSession.shared.download(for: request, delegate: DropAuthOnRedirect())
@@ -164,7 +223,6 @@ final class Updater {
                 throw UpdateError("The download doesn't match GitHub's checksum.")
             }
         }
-        let zip = FileManager.default.temporaryDirectory.appending(path: "dash-update-\(UUID().uuidString).zip")
         try FileManager.default.moveItem(at: file, to: zip)
         return zip
     }

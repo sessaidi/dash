@@ -358,7 +358,8 @@ private struct UpdateSettings: View {
         Form {
             Section {
                 LabeledContent("Installed", value: updater.currentVersion)
-                LabeledContent("Repository", value: updater.repository)
+                TextField("Source", text: $updater.source, prompt: Text("owner/name or ~/path"))
+                    .onSubmit { Task { await updater.check() } }
                 status
                 HStack {
                     Button("Check Now") { Task { await updater.check() } }
@@ -371,7 +372,7 @@ private struct UpdateSettings: View {
                 }
             } footer: {
                 Text(updater.canInstall
-                     ? "Dash downloads the release, checks it, quits, replaces itself and opens again."
+                     ? "A GitHub repository (owner/name) or a local Dash checkout (~/code/perso/dash: the newest zip in its dist/). Dash gets the release, checks it, quits, replaces itself and opens again."
                      : "This is a debug build: it checks for releases but doesn't replace itself. Install a release build from scripts/release.sh.")
             }
             Section {
