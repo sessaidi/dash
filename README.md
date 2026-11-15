@@ -20,6 +20,8 @@ open Dash.xcodeproj          # or:
 xcodebuild -scheme Dash -derivedDataPath build/DerivedData test
 ```
 
+Releases and in-app updates: [docs/RELEASING.md](docs/RELEASING.md).
+
 Then fill in Settings: Claude Code must be installed and logged in (`claude /login`) — no API key needed; your Jira site, email and API token, a GitHub fine-grained PAT plus the repos to watch, and the Jira project → local repo mapping for Agents.
 
 ## Layout
