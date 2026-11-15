@@ -34,6 +34,8 @@ public protocol DashExtension: AnyObject {
     var hookPresets: [HookPresetSpec] { get }
     /// Statements this extension adds to DashQL (`ticket follow LAF-123`), each mapped to one of its tools.
     var verbs: [DashQLVerb] { get }
+    /// Dashii jobs this extension offers to other extensions, Dashii and agents (`DashiiFunction.erased`).
+    var functions: [AnyDashiiFunction] { get }
     /// What its background work asks Dashii to do (e.g. automatic PR reviews), configurable in
     /// the extension's AI settings (`host.aiSettings(.extension(id), tasks: aiTasks)`).
     var aiTasks: [AITask] { get }
@@ -90,6 +92,7 @@ extension DashExtension {
     public var datasets: [QueryDataset] { [] }
     public var hookPresets: [HookPresetSpec] { [] }
     public var verbs: [DashQLVerb] { [] }
+    public var functions: [AnyDashiiFunction] { [] }
     public var tools: [DashiiTool] { [] }
     public func settingsView() -> AnyView { AnyView(EmptyView()) }
     public func start(host: any ExtensionContext) {}

@@ -131,6 +131,67 @@ public struct DashiiFunction<Input: Encodable & Sendable, Output: Decodable & Se
     }
 }
 
+extension DashiiFunction where Input: Decodable, Output: Encodable {
+    /// This function for callers that speak JSON: `DashExtension.functions` publishes it.
+    public var erased: AnyDashiiFunction {
+        AnyDashiiFunction(name: name, summary: summary, inputSchema: inputSchema, outputSchema: outputSchema) { input, dashii, settings in
+            try JSONValue(encoding: try await run(try input.decode(Input.self), dashii: dashii, settings: settings))
+        }
+    }
+}
+
+/// A `DashiiFunction` taking and returning JSON, so extensions can offer their functions to each
+/// other, to Dashii and to agents (`host.function("logs.digest")`).
+public struct AnyDashiiFunction: Sendable, Identifiable {
+    public let name: String
+    public let summary: String
+    public let inputSchema: JSONValue
+    public let outputSchema: JSONValue
+    let call: @MainActor @Sendable (JSONValue, any DashiiService, AISettings?) async throws -> JSONValue
+
+    public var id: String { name }
+
+    public init(name: String, summary: String, inputSchema: JSONValue, outputSchema: JSONValue,
+                call: @escaping @MainActor @Sendable (JSONValue, any DashiiService, AISettings?) async throws -> JSONValue) {
+        self.name = name
+        self.summary = summary
+        self.inputSchema = inputSchema
+        self.outputSchema = outputSchema
+        self.call = call
+    }
+
+    @MainActor
+    public func run(_ input: JSONValue, dashii: any DashiiService, settings: AISettings? = nil) async throws -> JSONValue {
+        do {
+            return try await call(input, dashii, settings)
+        } catch let error as DecodingError {
+            throw ToolError("Input doesn't match \(name)'s schema: \(error.localizedDescription)")
+        }
+    }
+
+    /// Name, summary and both schemas, for listing.
+    public var json: JSONValue {
+        ["name": .string(name), "summary": .string(summary), "input_schema": inputSchema, "output_schema": outputSchema]
+    }
+}
+
+extension ExtensionContext {
+    /// Every function on offer: DashKit's own (`DashiiFunctions`), then each enabled extension's.
+    public var functions: [AnyDashiiFunction] {
+        DashiiFunctions.all + extensions.filter { isEnabled($0) }.flatMap(\.functions)
+    }
+
+    public func function(_ name: String) -> AnyDashiiFunction? { functions.first { $0.name == name } }
+
+    /// Runs a function by name with Dashii.
+    public func runFunction(_ name: String, input: JSONValue) async throws -> JSONValue {
+        guard let function = function(name) else {
+            throw ToolError("No function “\(name)”. Functions: \(functions.map(\.name).joined(separator: ", ")).")
+        }
+        return try await function.run(input, dashii: dashii)
+    }
+}
+
 /// Answers `DashiiFunction`s may reuse, newest 200 kept, in memory only.
 @MainActor
 final class DashiiFunctionCache {

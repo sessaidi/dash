@@ -56,4 +56,14 @@ public enum JSONSchema {
     public static func integer(_ description: String) -> JSONValue { ["type": "integer", "description": .string(description)] }
     public static func boolean(_ description: String) -> JSONValue { ["type": "boolean", "description": .string(description)] }
     public static func object(_ description: String) -> JSONValue { ["type": "object", "description": .string(description)] }
+    public static func number(_ description: String) -> JSONValue { ["type": "number", "description": .string(description)] }
+    public static func array(_ description: String, of items: JSONValue) -> JSONValue {
+        ["type": "array", "description": .string(description), "items": items]
+    }
+    /// An object with these properties; `required` lists the ones that must be there.
+    public static func object(_ description: String = "", properties: [String: JSONValue], required: [String] = []) -> JSONValue {
+        var schema: [String: JSONValue] = ["type": "object", "properties": .object(properties), "required": .array(required.map(JSONValue.string))]
+        if !description.isEmpty { schema["description"] = .string(description) }
+        return .object(schema)
+    }
 }
