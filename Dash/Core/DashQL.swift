@@ -11,6 +11,20 @@ enum DashQL {
         return QueryEngine(datasets: builtIn(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap(\.datasets), me: me(host: host))
     }
 
+    /// The statements enabled extensions add to DashQL, first one wins when two claim the same words.
+    static func verbs(host: ExtensionHost) -> [DashQLVerb] {
+        var seen = Set<String>()
+        return host.extensions.filter { host.isEnabled($0) }.flatMap(\.verbs).filter { seen.insert("\($0.keyword) \($0.action)").inserted }
+    }
+
+    /// The plugin statements among `tools`, for a tool description; empty when there are none.
+    static func verbsGuide(host: ExtensionHost, tools: [DashiiTool]) -> String {
+        let allowed = Set(tools.map(\.name))
+        let usable = verbs(host: host).filter { allowed.contains($0.tool) }
+        guard !usable.isEmpty else { return "" }
+        return "\n\nPlugin statements:\n" + usable.map { "  \($0.usage)   \($0.summary)" }.joined(separator: "\n")
+    }
+
     /// Who `me` is: the name on Home and the logins the integrations report.
     static func me(host: ExtensionHost) -> [String] {
         var names = [host.ext(HomeExtension.self)?.userName ?? ""]
@@ -165,9 +179,11 @@ enum DashQL {
             },
             DashiiTool(
                 name: "dashql_schema",
-                description: "The datasets DashQL can read, with their fields, aliases and arguments, and the query syntax."
+                description: "The datasets DashQL can read, with their fields, aliases and arguments, the statements plugins add (keyword action args), and the query syntax."
             ) { _ in
-                ["datasets": .array(engine(host: host).datasets.map(\.schema)), "syntax": .string(guide)]
+                ["datasets": .array(engine(host: host).datasets.map(\.schema)),
+                 "verbs": .array(verbs(host: host).map { ["usage": .string($0.usage), "summary": .string($0.summary), "tool": .string($0.tool)] }),
+                 "syntax": .string(guide)]
             },
         ]
     }

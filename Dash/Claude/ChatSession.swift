@@ -120,7 +120,7 @@ final class ChatSession {
     private func dashTool(over tools: [DashiiTool]) -> DashiiTool {
         DashiiTool(
             name: "dash",
-            description: "Read and work in Dash with DashQL statements (one per line): query any data, drive widgets, build pages, notes, memory, and call any other tool. Start with `help` or `schema` when unsure.\n\n" + DashScript.guide + "\n" + DashQL.guide,
+            description: "Read and work in Dash with DashQL statements (one per line): query any data, drive widgets, build pages, notes, memory, and call any other tool. Start with `help` or `schema` when unsure.\n\n" + DashScript.guide + "\n" + DashQL.guide + DashQL.verbsGuide(host: host, tools: tools),
             properties: ["script": JSONSchema.string("One or more statements, one per line."),
                          "plan": JSONSchema.boolean("Only translate: return the actions (tool calls) each statement becomes, without running them.")],
             required: ["script"]

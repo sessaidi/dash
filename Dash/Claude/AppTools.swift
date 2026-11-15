@@ -155,7 +155,7 @@ enum AppTools {
                 store.deleteCommand(input["name"]?.string ?? "")
                 return "deleted"
             },
-            DashiiTool(name: "hook_presets", description: "Ready-made hooks by use case: watchers (Dash runs a DashQL query itself and fires on new rows, no Claude), notifications, and wake-ups that hand what a watcher found to an agent. Create one with hook_create preset=<id>.") { _ in
+            DashiiTool(name: "hook_presets", description: "Ready-made hooks by use case: watchers (Dash runs a DashQL query itself and fires on new rows, no Dashii), notifications, and wake-ups that hand what a watcher found to an agent. Create one with hook_create preset=<id>.") { _ in
                 .array(HookPreset.all(host: host).map { ["id": .string($0.id), "category": .string($0.category), "name": .string($0.name),
                                               "when": .string($0.trigger.summary), "do": .string($0.action.summary)] })
             },

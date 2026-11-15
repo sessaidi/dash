@@ -147,8 +147,35 @@ struct DashScript {
         default:
             // A tool name on its own works too: `jira_follow key=LAF-1`.
             if tools.contains(where: { $0.name == verb }) { return try await call(verb, .object(words.options())) }
-            throw ToolError("Unknown verb `\(verb)`. Verbs: from, widget, page, show, open, note, sidebar, section, plugin, automation, rules, command, hook, agent, remember, recall, forget, search, tool, help.")
+            if let result = try await pluginVerb(verb.lowercased(), &words) { return result }
+            let keywords = Set(verbs.map(\.keyword)).sorted()
+            throw ToolError("Unknown verb `\(verb)`. Verbs: from, widget, page, show, open, note, sidebar, section, plugin, automation, rules, command, hook, agent, remember, recall, forget, search, tool, help"
+                + (keywords.isEmpty ? "." : "; from plugins: \(keywords.joined(separator: ", ")).") )
         }
+    }
+
+    /// The statements enabled extensions add (`ticket follow LAF-123`), limited to the tools the caller may use.
+    var verbs: [DashQLVerb] {
+        let allowed = Set(tools.map(\.name))
+        return DashQL.verbs(host: host).filter { allowed.contains($0.tool) }
+    }
+
+    /// `keyword action <args…> key=value…`, mapped to the extension's tool; nil if no extension uses `keyword`.
+    private func pluginVerb(_ keyword: String, _ words: inout DashArgs) async throws -> JSONValue? {
+        let matching = verbs.filter { $0.keyword == keyword }
+        guard !matching.isEmpty else { return nil }
+        let action = words.word()?.lowercased()
+        guard let verb = matching.first(where: { $0.action == action }) else {
+            throw ToolError(matching.map(\.usage).joined(separator: " | "))
+        }
+        var input: [String: JSONValue] = [:]
+        for name in verb.arguments {
+            guard let value = words.word() else { break }
+            input[name] = .string(value)
+        }
+        input.merge(words.options()) { _, option in option }
+        input.merge(verb.presets) { _, preset in preset }
+        return try await call(verb.tool, .object(input))
     }
 
     private func section(_ words: inout DashArgs) async throws -> JSONValue {
@@ -294,8 +321,13 @@ struct DashScript {
         if let topic, let tool = tools.first(where: { $0.name == topic }) {
             return ["tool": .string(tool.name), "description": .string(tool.description), "input_schema": tool.inputSchema]
         }
-        return ["language": .string(Self.guide),
-                "tools": .array(tools.map { .string("\($0.name): \(ChatSession.summary(of: $0.description, limit: 110))") })]
+        if let topic, case let matching = verbs.filter({ $0.keyword == topic.lowercased() }), !matching.isEmpty {
+            return .array(matching.map { ["usage": .string($0.usage), "summary": .string($0.summary), "tool": .string($0.tool)] })
+        }
+        var help: [String: JSONValue] = ["language": .string(Self.guide),
+                                         "tools": .array(tools.map { .string("\($0.name): \(ChatSession.summary(of: $0.description, limit: 110))") })]
+        if !verbs.isEmpty { help["plugin_verbs"] = .array(verbs.map { .string("\($0.usage): \($0.summary)") }) }
+        return .object(help)
     }
 
     /// Statements: one per line (or separated by `;`), outside quotes and brackets.
@@ -340,6 +372,7 @@ struct DashScript {
           (watchers run a query themselves, no Claude, and fire on new rows: prefer them to agents for "tell me when X appears")
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
           skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
+          <keyword> <action> <args> key=value …   statements plugins add (ticket follow LAF-1); `help` lists them, `help <keyword>` shows one
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
         Saved vs temporary: `filter` and `set` are saved with the widget; `do` actions are temporary.
         Linked widgets: widget "PRs" filter tickets ~ $selected("Jira board").key  (follows the ticket picked on the board)

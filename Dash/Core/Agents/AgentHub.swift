@@ -211,7 +211,7 @@ final class AgentHub {
         }
         let dash = DashiiTool(
             name: "dash",
-            description: "Read Dash's data and use your tools with DashQL statements (one per line). `help` lists your tools, `schema` the datasets.\n\n" + DashQL.guide,
+            description: "Read Dash's data and use your tools with DashQL statements (one per line). `help` lists your tools, `schema` the datasets.\n\n" + DashQL.guide + DashQL.verbsGuide(host: host, tools: allowed),
             properties: ["script": JSONSchema.string("One or more statements, one per line."),
                          "plan": JSONSchema.boolean("Only translate: return the actions (tool calls) each statement becomes, without running them.")],
             required: ["script"]

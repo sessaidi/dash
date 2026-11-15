@@ -32,7 +32,9 @@ public protocol DashExtension: AnyObject {
     var datasets: [QueryDataset] { get }
     /// Ready-made hooks for this extension's data: watchers, notifications, agent wake-ups.
     var hookPresets: [HookPresetSpec] { get }
-    /// What its background work asks Claude to do (e.g. automatic PR reviews), configurable in
+    /// Statements this extension adds to DashQL (`ticket follow LAF-123`), each mapped to one of its tools.
+    var verbs: [DashQLVerb] { get }
+    /// What its background work asks Dashii to do (e.g. automatic PR reviews), configurable in
     /// the extension's AI settings (`host.aiSettings(.extension(id), tasks: aiTasks)`).
     var aiTasks: [AITask] { get }
     /// What it proposes on the Home page right now (things waiting for the user). Keep it cheap:
@@ -87,6 +89,7 @@ extension DashExtension {
     public var widgets: [WidgetType] { [] }
     public var datasets: [QueryDataset] { [] }
     public var hookPresets: [HookPresetSpec] { [] }
+    public var verbs: [DashQLVerb] { [] }
     public var tools: [DashiiTool] { [] }
     public func settingsView() -> AnyView { AnyView(EmptyView()) }
     public func start(host: any ExtensionContext) {}
