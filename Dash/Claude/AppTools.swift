@@ -126,7 +126,15 @@ enum AppTools {
                      "when": .string(hook.trigger.summary), "do": .string(hook.action.summary), "last_status": hook.lastStatus.map(JSONValue.string) ?? .null]
                 })]
             },
-            DashiiTool(name: "automation_set_rules", description: "Replace the user's rules for Claude: scope global (every conversation) or an extension id (whenever its tools run). Empty text removes them.",
+            DashiiTool(name: "rules_show", description: "The rules Dashii follows for a scope (global or an extension id): the user's version if they changed it, and the extension's own default. Read them before proposing a change.",
+                       properties: ["scope": JSONSchema.string("global or an extension id.")], required: ["scope"]) { input in
+                let scope = input["scope"]?.string ?? "global"
+                let custom = store.rule(scope)
+                let shipped = scope == "global" ? nil : host.extensions.first { $0.id == scope }?.defaultRules
+                return ["scope": .string(scope), "in_use": store.rules(scope).map(JSONValue.string) ?? .null,
+                        "customized": .bool(custom != nil), "default": shipped.map(JSONValue.string) ?? .null]
+            },
+            DashiiTool(name: "automation_set_rules", description: "Propose new rules for Dashii for a scope (global or an extension id): the user sees the full text and approves before anything changes. Read rules_show first and keep what still applies; empty text goes back to the extension's default.",
                        properties: ["scope": JSONSchema.string("global or an extension id."), "text": JSONSchema.string("The rules, Markdown.")],
                        required: ["scope", "text"], requiresApproval: true) { input in
                 let scope = input["scope"]?.string ?? "global", text = input["text"]?.string ?? ""

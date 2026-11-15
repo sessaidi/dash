@@ -83,6 +83,7 @@ struct DashScript {
         case "automation": return try await call("automation_list", [:])
         case "rules":
             let scope = words.word() ?? "global"
+            if words.rest.trimmingCharacters(in: .whitespaces).isEmpty { return try await call("rules_show", ["scope": .string(scope)]) }
             return try await call("automation_set_rules", ["scope": .string(scope), "text": words.options()["text"] ?? .string(words.rest)])
         case "command":
             guard let action = words.word()?.lowercased(), let name = words.word() else { throw ToolError("command save <name> prompt=\"…\" summary=\"…\" | command delete <name>") }
@@ -333,7 +334,7 @@ struct DashScript {
           sidebar | section create "Ops" | section rename "Ops" name="On-call" | section delete "Ops"
           page "Name" move section="Ops" before="Other page" | page "Name" home on|off
           plugins | plugin "jira-board" on|off|settings       open marketplace | open hooks | open gallery | open jira-board
-          automation | rules global text="…" | command save standup prompt="…" summary="…" | command delete standup
+          automation | rules <scope> (show) | rules <scope> text="…" (propose; the user approves) | command save standup prompt="…" summary="…" | command delete standup
           hook create name="Morning brief" trigger={"schedule":{"time":"09:00","weekdays":[2,3,4,5,6]}} action={"prompt":{"prompt":"…","noteTitle":null,"notify":true}}
           hook on|off|delete "Name" | hook presets | hook preset <id> | hook preset <wake-…id> agent=<agent id>
           (watchers run a query themselves, no Claude, and fire on new rows: prefer them to agents for "tell me when X appears")

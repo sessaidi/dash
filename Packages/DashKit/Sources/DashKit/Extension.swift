@@ -73,7 +73,9 @@ extension DashExtension {
     public var aiTasks: [AITask] { [] }
     public var suggestions: [Suggestion] { [] }
     public var components: [MarkdownComponentType] { [] }
-    public var defaultRules: String? { nil }
+    /// By default, the Markdown file `Rules/<id>.md` (or `<id>.rules.md`) shipped in the
+    /// extension's bundle: rules are text, edited without touching code. nil when there's none.
+    public var defaultRules: String? { RulesFile.load(id: id, bundle: Bundle(for: type(of: self))) }
     public var defaultCommands: [CommandDefinition] { [] }
     public var events: [EventDefinition] { [] }
     public var knowledge: [KnowledgeEntity] { [] }
@@ -357,5 +359,17 @@ extension ExtensionContext {
     public func emit(_ kind: String, from item: any DashExtension, title: String, detail: String? = nil, link: String? = nil,
                      importance: ActivityEvent.Importance = .info) -> ActivityEvent {
         activity.emit(kind, source: item.id, title: title, detail: detail, link: link, importance: importance)
+    }
+}
+
+/// Rules shipped as Markdown in an extension's bundle.
+public enum RulesFile {
+    /// `Rules/<id>.md`, else `<id>.rules.md`, from `bundle`'s resources; nil when missing or empty.
+    public static func load(id: String, bundle: Bundle) -> String? {
+        let url = bundle.url(forResource: id, withExtension: "md", subdirectory: "Rules")
+            ?? bundle.url(forResource: "\(id).rules", withExtension: "md")
+        guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
