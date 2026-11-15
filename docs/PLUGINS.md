@@ -160,7 +160,9 @@ what was wrong, and optionally cached:
 static let triage = DashiiFunction<AlertContext, Triage>(
     name: "alerts.triage", version: 1, task: "triage",
     instructions: "Find the most likely cause. Cite the rows you used.",
-    outputSchema: Triage.schema, model: .fast, inputFormat: .compact, cacheFor: .seconds(600),
+    outputSchema: JSONSchema.object(properties: ["cause": JSONSchema.string(""), "evidence": JSONSchema.array("", of: JSONSchema.string(""))],
+                                    required: ["cause", "evidence"]),
+    model: .fast, inputFormat: .compact, cacheFor: .seconds(600),
     check: { guard !$0.evidence.isEmpty else { throw ToolError("cite evidence") } })
 
 let triage = try await Self.triage.run(context, dashii: host.dashii, settings: host.aiSettings(.extension(id), tasks: aiTasks))
