@@ -78,8 +78,18 @@ struct KnowledgeView: View {
                 }
                 let counts = knowledge.counts
                 if !counts.isEmpty {
-                    Text(["symbol", "file", "concept", "ticket", "pr"].compactMap { key in counts[key].map { "\($0) \(key)s" } }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], spacing: 6) {
+                        ForEach(["symbol", "file", "concept", "ticket", "pr"].filter { counts[$0] != nil }, id: \.self) { key in
+                            VStack(spacing: 1) {
+                                Text((counts[key] ?? 0).formatted(.number.notation(.compactName))).font(.callout.weight(.semibold).monospacedDigit())
+                                Text(key == "pr" ? "PRs" : key + "s").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 8))
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
             if knowledge.isWorking { ProgressView(knowledge.status).controlSize(.small).font(.caption) }
@@ -155,48 +165,21 @@ private struct KnowledgeDetail: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    if canGoBack {
-                        Button("Back", systemImage: "chevron.left", action: onBack).labelStyle(.iconOnly).buttonStyle(.borderless)
-                    }
-                    Image(systemName: KnowledgeRow.icon(node.kind)).foregroundStyle(.tint)
-                    Text(node.kind == "symbol" ? node.qualified : node.name).font(.title2.bold()).textSelection(.enabled)
-                    Text(node.kind == "symbol" ? node.language : node.kind).font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    actions
-                }
-                if !node.path.isEmpty {
-                    Text(node.line > 0 ? "\(node.path):\(node.line)–\(node.endLine)" : node.path)
-                        .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                if !node.summary.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("What Claude understood", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.secondary)
-                        Text(node.summary).textSelection(.enabled)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.tint.opacity(0.08), in: .rect(cornerRadius: 10))
-                }
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                if !node.summary.isEmpty { SummaryCard(text: node.summary) }
                 if !node.signature.isEmpty {
                     Text(node.signature)
                         .font(node.kind == "symbol" ? .callout.monospaced() : .callout)
                         .lineLimit(node.kind == "symbol" ? nil : 12)
                         .textSelection(.enabled)
-                        .padding(10)
+                        .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 8))
+                        .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 10))
                 }
                 ForEach(groups, id: \.relation) { group in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(group.relation.replacingOccurrences(of: "_", with: " ").capitalized + " (\(group.nodes.count))")
-                            .font(.caption.bold()).foregroundStyle(.secondary)
-                        ForEach(group.nodes.prefix(40), id: \.id) { other in
-                            Button { onOpen(other) } label: { KnowledgeRow(node: other) }
-                                .buttonStyle(.plain)
-                        }
-                    }
+                    RelationSection(title: group.relation.replacingOccurrences(of: "_", with: " ").capitalized,
+                                    nodes: group.nodes, onOpen: onOpen)
                 }
             }
             .padding(20)
@@ -204,6 +187,43 @@ private struct KnowledgeDetail: View {
             .frame(maxWidth: .infinity)
         }
         .task(id: knowledge.revision) { neighbors = (try? await knowledge.store?.neighbors(node.id, limit: 120)) ?? [] }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                if canGoBack {
+                    Button("Back", systemImage: "chevron.left", action: onBack).labelStyle(.iconOnly).buttonStyle(.borderless)
+                }
+                Image(systemName: KnowledgeRow.icon(node.kind))
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .frame(width: 34, height: 34)
+                    .background(.tint.opacity(0.12), in: .rect(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(node.kind == "symbol" ? node.qualified : node.name)
+                        .font(.title2.bold())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        Text(node.kind == "symbol" ? node.language : node.kind)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(.quaternary, in: .capsule)
+                        if !node.path.isEmpty {
+                            Text(node.line > 0 ? "\(node.path):\(node.line)–\(node.endLine)" : node.path)
+                                .font(.caption.monospaced())
+                                .lineLimit(1).truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) { actions }
+                .controlSize(.small)
+        }
     }
 
     private var groups: [(relation: String, nodes: [KnowledgeNode])] {
@@ -215,11 +235,10 @@ private struct KnowledgeDetail: View {
     @ViewBuilder private var actions: some View {
         if let file = fileURL {
             Button("Open", systemImage: "arrow.up.forward.app") { NSWorkspace.shared.open(file) }
-            Button("Reveal", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-                .labelStyle(.iconOnly)
+            Button("Reveal in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
         }
         if let url = URL(string: node.url), !node.url.isEmpty {
-            Button("Open Link", systemImage: "safari") { NSWorkspace.shared.open(url) }.labelStyle(.iconOnly)
+            Button("Open Link", systemImage: "safari") { NSWorkspace.shared.open(url) }
         }
         if node.kind == "directory" || node.kind == "repo" {
             Button {
@@ -322,38 +341,52 @@ private struct RepositoryRow: View {
     @State private var studying = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: open) {
-                Label((path as NSString).lastPathComponent, systemImage: "shippingbox")
-            }
-            .buttonStyle(.plain)
-            Spacer()
-            if let coverage, coverage.directories > 0 {
-                ProgressView(value: Double(coverage.studied), total: Double(coverage.directories))
-                    .frame(width: 70)
-                    .help("Claude has studied \(coverage.studied) of \(coverage.directories) directories")
-                Text("\(Int((Double(coverage.studied) / Double(coverage.directories) * 100).rounded()))% studied")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            if history == 0 {
-                Image(systemName: "clock.badge.exclamationmark").foregroundStyle(.orange)
-                    .help("No git history linked yet (authors, files that change together, tickets). It comes back at the next refresh.")
-            }
-            if studying {
-                ProgressView().controlSize(.small)
-            } else {
-                Button("Study More") {
-                    studying = true
-                    Task {
-                        _ = await knowledge.learn(budget: 10, repo: "repo:" + path)
-                        await load()
-                        studying = false
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "shippingbox").foregroundStyle(.tint).frame(width: 18)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Button(action: open) {
+                        Text((path as NSString).lastPathComponent).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                    }
+                    .buttonStyle(.plain)
+                    .help(path)
+                    if history == 0 {
+                        Image(systemName: "clock.badge.exclamationmark").foregroundStyle(.orange).font(.caption)
+                            .help("No git history linked yet (authors, files that change together, tickets). It comes back at the next refresh.")
                     }
                 }
-                .controlSize(.small)
-                .help("Have Claude study the next 10 directories (uses Claude usage)")
+                if let coverage, coverage.directories > 0 {
+                    HStack(spacing: 8) {
+                        ProgressView(value: Double(coverage.studied), total: Double(coverage.directories))
+                            .progressViewStyle(.linear)
+                        Text("\(Int((Double(coverage.studied) / Double(coverage.directories) * 100).rounded()))%")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            .fixedSize()
+                    }
+                    .help("Claude has studied \(coverage.studied) of \(coverage.directories) directories")
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if studying {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Study More", systemImage: "sparkles") {
+                        studying = true
+                        Task {
+                            _ = await knowledge.learn(budget: 10, repo: "repo:" + path)
+                            await load()
+                            studying = false
+                        }
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Study more: Claude reads the next 10 directories (uses Claude usage)")
+                }
+            }
+            .frame(width: 22)
         }
+        .padding(.vertical, 2)
         .task(id: knowledge.revision) { await load() }
     }
 
@@ -363,3 +396,103 @@ private struct RepositoryRow: View {
         history = (try? await store.edgeCount(kind: "authored", repo: "repo:" + path)) ?? 0
     }
 }
+
+/// Claude's summary: paragraphs, with "- " lines shown as a bulleted list and "Title:" lines as headings.
+private struct SummaryCard: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("What Claude understood", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.secondary)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let title):
+                    Text(title).font(.callout.weight(.semibold)).padding(.top, 4)
+                case .bullet(let item):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle().fill(.tint).frame(width: 5, height: 5).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                        Text(LocalizedStringKey(item)).fixedSize(horizontal: false, vertical: true)
+                    }
+                case .paragraph(let body):
+                    Text(LocalizedStringKey(body)).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .textSelection(.enabled)
+            .lineSpacing(2)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.tint.opacity(0.07), in: .rect(cornerRadius: 12))
+    }
+
+    enum Block { case heading(String), bullet(String), paragraph(String) }
+
+    var blocks: [Block] {
+        text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map { line in
+            if line.hasPrefix("- ") || line.hasPrefix("• ") || line.hasPrefix("* ") { return .bullet(String(line.dropFirst(2))) }
+            if line.hasSuffix(":"), line.count < 60 { return .heading(String(line.dropLast())) }
+            return .paragraph(line)
+        }
+    }
+}
+
+/// One relation (e.g. "About"): its nodes as compact tiles in a grid, the first dozen until expanded.
+private struct RelationSection: View {
+    let title: String
+    let nodes: [KnowledgeNode]
+    let onOpen: (KnowledgeNode) -> Void
+    @State private var expanded = false
+
+    private static let collapsed = 12
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.headline)
+                Text("\(nodes.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1).background(.quaternary, in: .capsule)
+                Spacer()
+                if nodes.count > Self.collapsed {
+                    Button(expanded ? "Show less" : "Show all") { withAnimation(.snappy) { expanded.toggle() } }
+                        .buttonStyle(.borderless).font(.caption)
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(nodes.prefix(expanded ? 200 : Self.collapsed), id: \.id) { other in
+                    Button { onOpen(other) } label: { RelationTile(node: other) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+private struct RelationTile: View {
+    let node: KnowledgeNode
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: KnowledgeRow.icon(node.kind)).foregroundStyle(.tint).frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(node.kind == "symbol" ? node.qualified : node.name).font(.callout).lineLimit(1).truncationMode(.middle)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hovering ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.35)), in: .rect(cornerRadius: 8))
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        .help(node.summary.isEmpty ? node.name : node.summary)
+    }
+
+    /// The path, else the start of the summary; the kind only adds noise when the section groups one kind.
+    private var detail: String? {
+        if !node.path.isEmpty { return node.line > 0 ? "\(node.path):\(node.line)" : node.path }
+        if !node.summary.isEmpty { return node.summary }
+        return nil
+    }
+}
+
