@@ -99,6 +99,9 @@ enum HookTrigger: Codable, Hashable {
     case beforeTool(name: String)
     /// After Claude ran a tool.
     case afterTool(name: String)
+    /// A watcher: every `everyMinutes`, Dash runs this DashQL query itself (no Claude) and fires
+    /// when rows appear that weren't there last time, told apart by `key` (a field) or the whole row.
+    case query(query: String, everyMinutes: Int, key: String?)
 
     var summary: String {
         switch self {
@@ -109,6 +112,7 @@ enum HookTrigger: Codable, Hashable {
         case .launch: "When Dash starts"
         case .beforeTool(let name): "Before Claude runs \(name)"
         case .afterTool(let name): "After Claude ran \(name)"
+        case .query(let query, let minutes, _): "When `\(query.count > 60 ? String(query.prefix(60)) + "…" : query)` finds something new (every \(minutes) min)"
         }
     }
 }

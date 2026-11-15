@@ -28,7 +28,10 @@ final class HookEngine {
         }
         // Schedules are checked every 30 seconds.
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkSchedules() }
+            MainActor.assumeIsolated {
+                self?.checkSchedules()
+                self?.checkWatchers()
+            }
         }
         for hook in hooks() where hook.enabled {
             if case .launch = hook.trigger { Task { await run(hook, values: Self.baseValues()) } }
@@ -70,6 +73,50 @@ final class HookEngine {
             hook.lastRun = now  // claimed before running, so a slow run isn't started twice
             Task { await run(hook, values: Self.baseValues(now: now)) }
         }
+    }
+
+    // MARK: Watchers
+
+    /// Runs the watchers that are due: each query, by Dash, no Claude; fires on rows not seen before.
+    private func checkWatchers(now: Date = .now) {
+        guard let host else { return }
+        for hook in hooks() where hook.enabled {
+            guard case .query(let query, let minutes, let key) = hook.trigger,
+                  now.timeIntervalSince(lastChecked[hook.id] ?? .distantPast) >= Double(max(minutes, 1) * 60) - 5 else { continue }
+            lastChecked[hook.id] = now
+            Task {
+                guard let rows = try? await DashQL.engine(host: host).run(DashQL.resolveSelections(query, host: host).text).rows else { return }
+                let fresh = Self.newRows(rows, key: key, hookID: hook.id)
+                guard !fresh.isEmpty else { return }
+                await run(hook, values: Self.watcherValues(fresh))
+            }
+        }
+    }
+
+    @ObservationIgnored private var lastChecked: [UUID: Date] = [:]
+
+    /// The rows not seen on the previous check (none on the first: that check sets the baseline).
+    /// What was seen is kept per hook, so a restart doesn't fire on everything again.
+    static func newRows(_ rows: [JSONValue], key: String?, hookID: UUID, defaults: UserDefaults = DashDefaults.shared) -> [JSONValue] {
+        let storeKey = "hooks.seen.\(hookID.uuidString)"
+        let identity: (JSONValue) -> String = { row in key.flatMap { row.value(at: $0).map { $0.jsonString() } } ?? row.jsonString() }
+        let current = rows.map(identity)
+        defer { defaults.set(Array(current.suffix(2000)), forKey: storeKey) }
+        guard let seen = defaults.stringArray(forKey: storeKey).map(Set.init) else { return [] }
+        return zip(rows, current).filter { !seen.contains($0.1) }.map(\.0)
+    }
+
+    static func watcherValues(_ rows: [JSONValue], now: Date = .now) -> [String: String] {
+        var values = baseValues(now: now)
+        values["count"] = String(rows.count)
+        values["rows"] = rows.prefix(20).map { row in
+            guard case .object(let fields) = row else { return row.jsonString() }
+            return fields.sorted { $0.key < $1.key }.prefix(6).map { "\($0.key): \($0.value.jsonString())" }.joined(separator: ", ")
+        }.joined(separator: "\n")
+        if case .object(let fields)? = rows.first {
+            for (name, value) in fields { values["first.\(name)"] = value.string ?? value.jsonString() }
+        }
+        return values
     }
 
     /// Due when today is one of the weekdays, the time has passed, and it hasn't run since.
@@ -230,6 +277,7 @@ final class HookEngine {
         case .event: names += ["event.title", "event.detail", "event.kind", "event.source", "event.link", "event.importance"]
         case .beforeTool: names += ["tool.name", "tool.input"]
         case .afterTool: names += ["tool.name", "tool.input", "tool.result"]
+        case .query: names += ["count", "rows", "first.<field>"]
         default: break
         }
         return names

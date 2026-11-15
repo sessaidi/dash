@@ -337,7 +337,7 @@ private struct HookForm: View {
 
     // MARK: Trigger
 
-    private enum TriggerKind: String, CaseIterable { case event, schedule, launch, beforeTool, afterTool }
+    private enum TriggerKind: String, CaseIterable { case event, query, schedule, launch, beforeTool, afterTool }
 
     private var triggerKind: Binding<TriggerKind> {
         Binding(get: {
@@ -347,6 +347,7 @@ private struct HookForm: View {
             case .launch: .launch
             case .beforeTool: .beforeTool
             case .afterTool: .afterTool
+            case .query: .query
             }
         }, set: { kind in
             switch kind {
@@ -355,6 +356,7 @@ private struct HookForm: View {
             case .launch: hook.trigger = .launch
             case .beforeTool: hook.trigger = .beforeTool(name: host.availableTools.first?.name ?? "*")
             case .afterTool: hook.trigger = .afterTool(name: host.availableTools.first?.name ?? "*")
+            case .query: hook.trigger = .query(query: "from pods where status ~ crash", everyMinutes: 5, key: "name")
             }
         })
     }
@@ -363,6 +365,7 @@ private struct HookForm: View {
     private var triggerEditor: some View {
         Picker("Trigger", selection: triggerKind) {
             Text("An event happens").tag(TriggerKind.event)
+            Text("Watch: a query finds something new").tag(TriggerKind.query)
             Text("On a schedule").tag(TriggerKind.schedule)
             Text("Dash starts").tag(TriggerKind.launch)
             Text("Before Claude runs a tool").tag(TriggerKind.beforeTool)
@@ -399,6 +402,15 @@ private struct HookForm: View {
                     .toggleStyle(.button)
                 }
             }
+        case .query(let query, let minutes, let key):
+            TextField("Query", text: Binding(get: { query }, set: { hook.trigger = .query(query: $0, everyMinutes: minutes, key: key) }),
+                      prompt: Text("from pods where restarts > 5"), axis: .vertical)
+                .font(.callout.monospaced()).lineLimit(1...4)
+            Stepper("Every \(minutes) min", value: Binding(get: { minutes }, set: { hook.trigger = .query(query: query, everyMinutes: $0, key: key) }), in: 1...240)
+            TextField("Rows are the same when", text: Binding(get: { key ?? "" }, set: { hook.trigger = .query(query: query, everyMinutes: minutes, key: $0.isEmpty ? nil : $0) }),
+                      prompt: Text("a field, e.g. name or key (empty: the whole row)"))
+            Text("Dash runs the query itself, without Claude, and fires only for rows it hasn't seen before; the first check just takes note of what's there. Easier: ask Dashii to set up a watcher.")
+                .font(.caption).foregroundStyle(.secondary)
         case .launch:
             Text("Runs each time Dash opens.").foregroundStyle(.secondary)
         case .beforeTool(let name):
