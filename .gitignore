@@ -11,3 +11,4 @@ DerivedData/
 .DS_Store
 .claude/settings.local.json
 runtime-502/
+dist/
