@@ -219,11 +219,11 @@ final class AgentHub {
             guard approved else { return MCPToolResult("The user declined this action.", isError: true) }
         }
         do {
-            let result = try await tool.run(arguments).jsonString()
+            let result = Sanitizer.clean(try await tool.run(arguments)).jsonString()
             HookEngine.shared.afterTool(name, input: arguments, result: result)
             return MCPToolResult(result)
         } catch {
-            return MCPToolResult(error.localizedDescription, isError: true)
+            return MCPToolResult(Sanitizer.clean(error.localizedDescription), isError: true)
         }
     }
 

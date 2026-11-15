@@ -231,11 +231,12 @@ final class ChatSession {
             guard approved else { return ("The user declined this action.", true) }
         }
         do {
-            let result = try await tool.run(call.input).jsonString()
+            // Secrets in tool output (tokens, keys, passwords) never reach Claude.
+            let result = Sanitizer.clean(try await tool.run(call.input)).jsonString()
             HookEngine.shared.afterTool(call.name, input: call.input, result: result)
             return (result, false)
         } catch {
-            return (error.localizedDescription, true)
+            return (Sanitizer.clean(error.localizedDescription), true)
         }
     }
 
