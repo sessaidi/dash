@@ -324,8 +324,8 @@ struct ChatSidePanel: View {
     var visible = true
     @Environment(ChatSession.self) private var chat
     @Environment(ExtensionHost.self) private var host
-    @AppStorage("chat.folded") private var folded = false
-    @AppStorage("chat.width") private var width = 400.0
+    @AppStorage("chat.folded", store: DashDefaults.shared) private var folded = false
+    @AppStorage("chat.width", store: DashDefaults.shared) private var width = 400.0
     @State private var dragStart: Double?
 
     static let widthRange = 320.0...720.0

@@ -61,10 +61,23 @@ struct Preference<Value> {
 }
 
 
-/// Dash's preferences. Under tests it's a separate domain, so a test run never changes the
-/// user's settings (repositories, enabled plugins, pages…), whatever the test does.
+/// Dash's preferences, and every plugin's (`DashStorage.defaults`), kept in Dash's database.
+/// Under tests they live in memory, so a test run never changes the user's settings.
 enum DashDefaults {
     static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    nonisolated(unsafe) static let shared: UserDefaults = isTesting ? UserDefaults(suiteName: "dev.sessaidi.Dash.tests")! : .standard
+    nonisolated(unsafe) static let shared: UserDefaults = make()
+
+    private static func make() -> UserDefaults {
+        if isTesting { return (try? DatabaseDefaults(url: nil)) ?? UserDefaults(suiteName: "dev.sessaidi.Dash.tests")! }
+        do {
+            try FileManager.default.createDirectory(at: DatabaseDefaults.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let defaults = try DatabaseDefaults(url: DatabaseDefaults.fileURL)
+            defaults.importOnce(from: UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "dev.sessaidi.Dash") ?? [:])
+            return defaults
+        } catch {
+            DashLog.error("Couldn't open the preferences database, using the plist: \(error)", category: "preferences")
+            return .standard
+        }
+    }
 }

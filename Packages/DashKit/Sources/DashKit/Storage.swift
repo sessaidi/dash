@@ -245,6 +245,12 @@ public struct SecretStore: Sendable {
     }
 }
 
+/// Where extensions keep their settings and state: Dash points it at its database before any
+/// extension is made. Plugins default their `UserDefaults` to it instead of `.standard`.
+public enum DashStorage {
+    nonisolated(unsafe) public static var defaults: UserDefaults = .standard
+}
+
 /// UserDefaults values owned by one extension: keys "<prefix>.<name>".
 public struct PreferenceStore: Sendable {
     public let prefix: String
@@ -256,7 +262,7 @@ public struct PreferenceStore: Sendable {
     public func key(_ name: String) -> String { "\(prefix).\(name)" }
 
     /// Where preferences live; the host points it elsewhere under tests.
-    nonisolated(unsafe) public static var defaults = UserDefaults.standard
+    nonisolated(unsafe) public static var defaults = DashStorage.defaults
     private var defaults: UserDefaults { Self.defaults }
 
     public func string(_ name: String) -> String? { defaults.string(forKey: key(name)) }

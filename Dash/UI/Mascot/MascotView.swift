@@ -19,8 +19,8 @@ struct MascotOverlay: View {
     @State private var localMonitor: Any?
     @State private var petting = false
     @State private var dragStart: NSPoint?
-    @AppStorage("mascot.offsetX") private var offsetX = 0.0
-    @AppStorage("mascot.offsetY") private var offsetY = 0.0
+    @AppStorage("mascot.offsetX", store: DashDefaults.shared) private var offsetX = 0.0
+    @AppStorage("mascot.offsetY", store: DashDefaults.shared) private var offsetY = 0.0
     @FocusState private var askFocused: Bool
 
     private var persona: Persona { host.persona }

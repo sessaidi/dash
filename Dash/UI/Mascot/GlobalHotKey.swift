@@ -44,6 +44,11 @@ final class GlobalHotKey {
 final class DashAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Preferences are saved a moment after they change; save what's pending before quitting.
+    func applicationWillTerminate(_ notification: Notification) {
+        (DashDefaults.shared as? DatabaseDefaults)?.flush()
+    }
+
     /// Right-click on the Dock icon.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()

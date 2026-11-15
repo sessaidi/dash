@@ -11,9 +11,9 @@ struct RootView: View {
     @Query(sort: \DashboardPage.order) private var pages: [DashboardPage]
     @State private var editing: PageEditor.Target?
     /// Collapsed = an icon rail instead of a hidden sidebar.
-    @AppStorage("sidebar.compact") private var compact = false
-    @AppStorage("chat.folded") private var chatFolded = false
-    @AppStorage("chat.width") private var chatWidth = 400.0
+    @AppStorage("sidebar.compact", store: DashDefaults.shared) private var compact = false
+    @AppStorage("chat.folded", store: DashDefaults.shared) private var chatFolded = false
+    @AppStorage("chat.width", store: DashDefaults.shared) private var chatWidth = 400.0
 
     /// Home's width with both panels open, but never narrower than a comfortable reading
     /// width when the panels leave room for it.
@@ -114,7 +114,7 @@ private struct Sidebar: View {
     @State private var hoveredHeader: UUID??
     @State private var hoveredRow: String?
     @State private var dropBefore: UUID?
-    @AppStorage(DashboardStore.defaultSectionKey + ".name") private var defaultName = "Pages"
+    @AppStorage(DashboardStore.defaultSectionKey + ".name", store: DashDefaults.shared) private var defaultName = "Pages"
     @FocusState private var nameFocused: Bool
 
     /// Side margin of the rows; with the row's own padding it puts every icon's centre 32 pt from
