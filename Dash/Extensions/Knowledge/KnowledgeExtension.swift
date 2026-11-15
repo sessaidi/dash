@@ -514,7 +514,7 @@ final class KnowledgeExtension: DashExtension {
 
     private struct SearchInput: Decodable { let query: String; let kind: String?; let limit: Int? }
     private struct NodeInput: Decodable { let id: String }
-    private struct TraceInput: Decodable { let id: String; let direction: String?; let depth: Int? }
+    private struct TraceInput: Decodable { let id: String; let direction: String?; let depth: Int?; let min_confidence: Double? }
     private struct PathInput: Decodable { let from: String; let to: String }
     private struct LearnInput: Decodable { let directories: Int?; let repo: String? }
     private struct ImpactInput: Decodable { let id: String }
@@ -618,15 +618,17 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_trace",
-                description: "Who calls a symbol (direction in) or what it calls (direction out), several hops deep.",
+                description: "Who calls a symbol (direction in) or what it calls (direction out), several hops deep. Each call has a confidence: 0.95 same file, 0.85 an imported file, 0.7 same directory, 0.6 unique name, 0.3 ambiguous.",
                 properties: ["id": JSONSchema.string("Symbol id."),
                              "direction": JSONSchema.string("in: callers, out: callees (default out).", enum: ["in", "out"]),
-                             "depth": JSONSchema.integer("Hops, 1-4 (default 2).")],
+                             "depth": JSONSchema.integer("Hops, 1-4 (default 2)."),
+                             "min_confidence": JSONSchema.number("Skip calls resolved with less confidence (0.3 ambiguous … 0.95 same file; default 0).")],
                 required: ["id"]
             ) { [weak self] input in
                 guard let store = self?.store else { return [] }
                 let request = try input.toolInput(TraceInput.self)
-                let steps = try await store.trace(request.id, kinds: ["calls"], reverse: request.direction == "in", depth: min(max(request.depth ?? 2, 1), 4))
+                let steps = try await store.trace(request.id, kinds: ["calls"], reverse: request.direction == "in", depth: min(max(request.depth ?? 2, 1), 4),
+                                                  minWeight: request.min_confidence ?? 0)
                 return .array(steps.map { step in
                     var object = Self.json(step.node).object ?? [:]
                     object["depth"] = .number(Double(step.depth))

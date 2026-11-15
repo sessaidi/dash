@@ -34,7 +34,11 @@ struct CodeIndexer: Sendable {
                                      url: mirror?.webURL ?? remote.map { "https://github.com/\($0)" } ?? "", source: "code")
         let files = listFiles()
         report.files = files.count
-        let known = try await store.fileHashes(repo: repoID)
+        // Call names are kept per symbol since v2 of the index: parse everything once to fill them.
+        let callsStored = try await store.meta("calls-v2:" + repoID) != nil
+        let known = callsStored ? try await store.fileHashes(repo: repoID) : [:]
+        // Names defined in files that change or go: their callers elsewhere are resolved again.
+        var touchedNames = Set<String>()
         let goModule = Self.goModule(root)
 
         // Phase 1: nodes, containment, definitions and imports of changed files.
@@ -49,6 +53,7 @@ struct CodeIndexer: Sendable {
                   let text = String(data: data, encoding: .utf8) else { continue }
             let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             if known[path] == hash { continue }
+            if known[path] != nil { touchedNames.formUnion(try await store.symbolNames(repo: repoID, path: path)) }
             let parsed = CodeParser.parse(text, language: language)
             let (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
             batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges))
@@ -63,6 +68,8 @@ struct CodeIndexer: Sendable {
         }
         let current = Set(files)
         for path in known.keys where !current.contains(path) {
+            touchedNames.formUnion(try await store.symbolNames(repo: repoID, path: path))
+            try await store.removeSymbolCalls(repo: repoID, path: root.path + "/" + path)
             batch.append(KnowledgeStore.FileGraph(path: path, nodes: [], edges: []))
             report.removed += 1
             touchedDirectories.formUnion(Self.ancestors(of: path))
@@ -88,30 +95,72 @@ struct CodeIndexer: Sendable {
         try await store.upsert([repoNode] + directoryNodes)
         try await store.upsert(directoryEdges)
 
-        // Phase 2: calls, resolved by name against the whole repository's symbols.
-        let index = try await store.symbolIndex(repo: repoID)
-        var callEdges: [KnowledgeEdge] = []
+        // Phase 2: calls, resolved by name with a confidence (same file, imported file, same
+        // directory, unique in the repository, ambiguous). The changed files' symbols are resolved,
+        // and so is every symbol elsewhere that calls a name a changed file defines or dropped, so
+        // edges never point at what was renamed or moved.
         for file in changed {
-            let directory = (file.path as NSString).deletingLastPathComponent
-            for (symbol, id) in zip(file.parsed.symbols, file.symbolIDs) {
-                for name in symbol.calls {
-                    let candidates = (index[name] ?? []).filter { $0 != id }
-                    guard !candidates.isEmpty else { continue }
-                    let sameFile = candidates.filter { $0.hasPrefix("sym:" + root.path + "/" + file.path + "#") }
-                    let sameDirectory = candidates.filter { $0.hasPrefix("sym:" + root.path + "/" + (directory.isEmpty ? "" : directory + "/")) }
-                    let targets = !sameFile.isEmpty ? sameFile : !sameDirectory.isEmpty && sameDirectory.count <= 3 ? sameDirectory : candidates.count <= 3 ? candidates : []
-                    for target in targets {
-                        callEdges.append(KnowledgeEdge(src: id, dst: target, kind: "calls", weight: 1 / Double(targets.count), source: "code"))
-                    }
-                }
-            }
+            try await store.replaceSymbolCalls(repo: repoID, path: root.path + "/" + file.path,
+                                               zip(file.symbolIDs, file.parsed.symbols).map { ($0, Array($1.calls)) })
+            touchedNames.formUnion(file.parsed.symbols.map(\.name))
         }
-        try await store.upsert(callEdges)
+        var callers: [String: [String]] = [:]
+        for file in changed { for (id, symbol) in zip(file.symbolIDs, file.parsed.symbols) { callers[id] = Array(symbol.calls) } }
+        if !touchedNames.isEmpty {
+            for (id, names) in try await store.symbolCalls(repo: repoID, calling: touchedNames) where callers[id] == nil { callers[id] = names }
+        }
+        let index = try await store.symbolIndex(repo: repoID)
+        let imports = try await store.importTargets(repo: repoID)
+        var callEdges: [KnowledgeEdge] = []
+        for (id, names) in callers {
+            callEdges += Self.resolveCalls(from: id, names: names, index: index, imports: imports, root: root.path)
+        }
+        try await store.replaceCallEdges(from: Set(callers.keys), callEdges)
+        try await store.setMeta("calls-v2:" + repoID, "1")
+
 
         try await indexTests(files)
         if readHistory { try await indexHistory() }
         try await store.setMeta("indexed:" + repoID, ISO8601DateFormatter().string(from: .now))
         return report
+    }
+
+    /// The path of a symbol id "sym:<root>/<path>#<qualified>".
+    static func path(ofSymbol id: String, root: String) -> String {
+        let body = id.dropFirst(("sym:" + root + "/").count)
+        return String(body.prefix { $0 != "#" })
+    }
+
+    /// Call edges from one symbol, weighted by how sure the match is: 0.95 same file, 0.85 a file or
+    /// package the caller imports, 0.7 same directory (≤3 candidates), 0.6 the only one in the
+    /// repository, 0.3 split between up to three; more candidates make no edge.
+    static func resolveCalls(from id: String, names: [String], index: [String: [String]], imports: [String: Set<String>], root: String) -> [KnowledgeEdge] {
+        let path = Self.path(ofSymbol: id, root: root)
+        let directory = (path as NSString).deletingLastPathComponent
+        let imported = imports["file:" + root + "/" + path] ?? []
+        var edges: [KnowledgeEdge] = []
+        for name in Set(names) {
+            let candidates = (index[name] ?? []).filter { $0 != id }
+            guard !candidates.isEmpty else { continue }
+            func inFile(_ candidate: String) -> String { Self.path(ofSymbol: candidate, root: root) }
+            let sameFile = candidates.filter { inFile($0) == path }
+            let viaImport = candidates.filter { candidate in
+                let file = inFile(candidate)
+                return imported.contains("file:" + root + "/" + file) || imported.contains("dir:" + root + "/" + (file as NSString).deletingLastPathComponent)
+            }
+            let sameDirectory = candidates.filter { (inFile($0) as NSString).deletingLastPathComponent == directory }
+            let (targets, confidence): ([String], Double) =
+                !sameFile.isEmpty ? (sameFile, 0.95)
+                : !viaImport.isEmpty && viaImport.count <= 3 ? (viaImport, 0.85)
+                : !sameDirectory.isEmpty && sameDirectory.count <= 3 ? (sameDirectory, 0.7)
+                : candidates.count == 1 ? (candidates, 0.6)
+                : candidates.count <= 3 ? (candidates, 0.3)
+                : ([], 0)
+            for target in targets {
+                edges.append(KnowledgeEdge(src: id, dst: target, kind: "calls", weight: targets.count == 1 ? confidence : confidence / Double(targets.count), source: "code"))
+            }
+        }
+        return edges
     }
 
     // MARK: Nodes for one file

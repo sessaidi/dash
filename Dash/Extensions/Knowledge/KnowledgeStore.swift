@@ -100,6 +100,9 @@ actor KnowledgeStore {
                 VALUES (new.rowid, new.name, new.qualified, new.signature, new.summary);
             END;
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS symbol_calls(src TEXT NOT NULL, name TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY(src, name)) WITHOUT ROWID;
+            CREATE INDEX IF NOT EXISTS symbol_calls_name ON symbol_calls(repo, name);
+            CREATE TABLE IF NOT EXISTS vectors(id TEXT PRIMARY KEY, repo TEXT, hash TEXT, vector BLOB);
             """)
     }
 
@@ -215,6 +218,8 @@ actor KnowledgeStore {
     func removeRepo(_ repo: String) throws {
         try run("DELETE FROM edges WHERE src IN (SELECT id FROM nodes WHERE repo = ?1) OR dst IN (SELECT id FROM nodes WHERE repo = ?1)", [repo])
         try run("DELETE FROM nodes WHERE repo = ?1 OR id = ?1", [repo])
+        try run("DELETE FROM symbol_calls WHERE repo = ?1", [repo])
+        try run("DELETE FROM vectors WHERE repo = ?1", [repo])
     }
 
     /// Drops the edges one writer made (e.g. "git" before re-reading history, an extension's
@@ -275,6 +280,64 @@ actor KnowledgeStore {
         return result
     }
 
+    // MARK: Calls
+
+    /// The names of a file's symbols.
+    func symbolNames(repo: String, path: String) throws -> [String] {
+        try strings("SELECT name FROM nodes WHERE repo = ?1 AND path = ?2 AND kind = 'symbol'", [repo, path])
+    }
+
+    /// Keeps what each symbol of a file calls (by name), so callers can be resolved again later
+    /// without parsing their files. `path` is the file's absolute path.
+    func replaceSymbolCalls(repo: String, path: String, _ calls: [(id: String, names: [String])]) throws {
+        try transaction {
+            try removeSymbolCalls(repo: repo, path: path)
+            let statement = try prepare("INSERT OR IGNORE INTO symbol_calls(src, name, repo) VALUES (?1, ?2, ?3)")
+            defer { sqlite3_finalize(statement) }
+            for (id, names) in calls {
+                for name in names {
+                    sqlite3_reset(statement)
+                    bind(statement, [id, name, repo])
+                    guard sqlite3_step(statement) == SQLITE_DONE else { throw error("symbol_calls") }
+                }
+            }
+        }
+    }
+
+    func removeSymbolCalls(repo: String, path: String) throws {
+        try run("DELETE FROM symbol_calls WHERE repo = ?1 AND src >= ?2 AND src < ?3", [repo, "sym:" + path + "#", "sym:" + path + "$"])
+    }
+
+    /// Symbols that call any of `names`, with everything they call.
+    func symbolCalls(repo: String, calling names: Set<String>) throws -> [String: [String]] {
+        var callers = Set<String>()
+        for chunk in Array(names).chunked(400) {
+            let marks = chunk.indices.map { "?\($0 + 2)" }.joined(separator: ",")
+            callers.formUnion(try strings("SELECT DISTINCT src FROM symbol_calls WHERE repo = ?1 AND name IN (\(marks))", [repo] + chunk))
+        }
+        var result: [String: [String]] = [:]
+        for id in callers { result[id] = try strings("SELECT name FROM symbol_calls WHERE src = ?1", [id]) }
+        return result
+    }
+
+    /// file id → the files and directories it imports, for a repository.
+    func importTargets(repo: String) throws -> [String: Set<String>] {
+        var result: [String: Set<String>] = [:]
+        let statement = try prepare("SELECT e.src, e.dst FROM edges e JOIN nodes n ON n.id = e.src WHERE n.repo = ?1 AND n.kind = 'file' AND e.kind = 'imports'")
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo])
+        while sqlite3_step(statement) == SQLITE_ROW { result[text(statement, 0), default: []].insert(text(statement, 1)) }
+        return result
+    }
+
+    /// Replaces the call edges going out of `sources`.
+    func replaceCallEdges(from sources: Set<String>, _ edges: [KnowledgeEdge]) throws {
+        try transaction {
+            for id in sources { try run("DELETE FROM edges WHERE src = ?1 AND kind = 'calls' AND source = 'code'", [id]) }
+            try upsert(edges)
+        }
+    }
+
     /// name → ids of a repository's symbols, for resolving calls by name.
     func symbolIndex(repo: String) throws -> [String: [String]] {
         var result: [String: [String]] = [:]
@@ -320,14 +383,15 @@ actor KnowledgeStore {
 
     /// Follows `kinds` edges (outgoing, or incoming when `reverse`) up to `depth` hops:
     /// callees, or callers with `reverse`.
-    func trace(_ id: String, kinds: [String], reverse: Bool, depth: Int) throws -> [(depth: Int, node: KnowledgeNode)] {
+    func trace(_ id: String, kinds: [String], reverse: Bool, depth: Int, minWeight: Double = 0) throws -> [(depth: Int, node: KnowledgeNode)] {
         var seen: Set<String> = [id]
         var frontier = [id]
         var result: [(Int, KnowledgeNode)] = []
         for level in 1...max(depth, 1) {
             var next: [String] = []
             for current in frontier {
-                for neighbor in try neighbors(current, kinds: kinds, limit: 100) where neighbor.incoming == reverse && seen.insert(neighbor.node.id).inserted {
+                for neighbor in try neighbors(current, kinds: kinds, limit: 100)
+                where neighbor.incoming == reverse && neighbor.edge.weight >= minWeight && seen.insert(neighbor.node.id).inserted {
                     result.append((level, neighbor.node))
                     next.append(neighbor.node.id)
                 }
@@ -469,7 +533,7 @@ actor KnowledgeStore {
 
     // MARK: SQLite plumbing
 
-    private func nodes(_ sql: String, _ values: [Any?]) throws -> [KnowledgeNode] {
+    func nodes(_ sql: String, _ values: [Any?]) throws -> [KnowledgeNode] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         bind(statement, values)
@@ -478,7 +542,7 @@ actor KnowledgeStore {
         return result
     }
 
-    private func readNode(_ statement: OpaquePointer?, offset o: Int32) -> KnowledgeNode {
+    func readNode(_ statement: OpaquePointer?, offset o: Int32) -> KnowledgeNode {
         KnowledgeNode(
             id: text(statement, o), kind: text(statement, o + 1), name: text(statement, o + 2), qualified: text(statement, o + 3),
             repo: text(statement, o + 4), path: text(statement, o + 5), line: Int(sqlite3_column_int64(statement, o + 6)),
@@ -488,7 +552,7 @@ actor KnowledgeStore {
             summarized: sqlite3_column_type(statement, o + 15) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, o + 15)))
     }
 
-    private func strings(_ sql: String, _ values: [Any?]) throws -> [String] {
+    func strings(_ sql: String, _ values: [Any?]) throws -> [String] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         bind(statement, values)
@@ -497,20 +561,20 @@ actor KnowledgeStore {
         return result
     }
 
-    private func int(_ sql: String) throws -> Int64 {
+    func int(_ sql: String) throws -> Int64 {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         return sqlite3_step(statement) == SQLITE_ROW ? sqlite3_column_int64(statement, 0) : 0
     }
 
-    private func run(_ sql: String, _ values: [Any?]) throws {
+    func run(_ sql: String, _ values: [Any?]) throws {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         bind(statement, values)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw error(sql) }
     }
 
-    private func exec(_ sql: String) throws { try Self.exec(db, sql) }
+    func exec(_ sql: String) throws { try Self.exec(db, sql) }
 
     private static func exec(_ db: OpaquePointer?, _ sql: String) throws {
         var message: UnsafeMutablePointer<CChar>?
@@ -521,7 +585,7 @@ actor KnowledgeStore {
         }
     }
 
-    private func prepare(_ sql: String) throws -> OpaquePointer? {
+    func prepare(_ sql: String) throws -> OpaquePointer? {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw error(sql) }
         return statement
@@ -529,7 +593,7 @@ actor KnowledgeStore {
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    private func bind(_ statement: OpaquePointer?, _ values: [Any?]) {
+    func bind(_ statement: OpaquePointer?, _ values: [Any?]) {
         for (index, value) in values.enumerated() {
             let position = Int32(index + 1)
             switch value {
@@ -541,11 +605,17 @@ actor KnowledgeStore {
         }
     }
 
-    private func text(_ statement: OpaquePointer?, _ column: Int32) -> String {
+    func text(_ statement: OpaquePointer?, _ column: Int32) -> String {
         sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
     }
 
-    private func error(_ context: String) -> StoreError {
+    func error(_ context: String) -> StoreError {
         StoreError.sqlite("\(String(cString: sqlite3_errmsg(db))) (\(context.prefix(80)))")
+    }
+}
+
+extension Array {
+    func chunked(_ size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
     }
 }
