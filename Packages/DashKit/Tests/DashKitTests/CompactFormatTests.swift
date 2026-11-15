@@ -1,7 +1,6 @@
-import DashKit
 import Foundation
 import Testing
-@testable import Dash
+@testable import DashKit
 
 /// The token-lean form tool results reach Dashii in: shorter than JSON, and nothing lost.
 struct CompactFormatTests {

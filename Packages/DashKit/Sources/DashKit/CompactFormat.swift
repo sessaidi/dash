@@ -1,7 +1,7 @@
-import DashKit
 import Foundation
 
-/// How tool results reach Dashii and the agents: a token-lean form of JSON (inspired by TOON).
+/// A token-lean form of JSON for what Dashii reads (inspired by TOON): tool results, and the
+/// input of a `DashiiFunction` that asks for it.
 /// Field names come once per table instead of once per row, and there are no braces or quotes
 /// around plain values. Whichever is shorter, this or minified JSON, is sent; `decode` reads both.
 ///
@@ -17,16 +17,16 @@ import Foundation
 ///       - id: 1
 ///
 /// Keys holding null are left out, and an empty table cell is null.
-enum CompactFormat {
+public enum CompactFormat {
     /// What Dashii is told once, in the system prompt.
-    static let legend = """
+    public static let legend = """
         Tool results come in a compact form (or plain JSON when that's shorter): `k: v`; `k:` then lines indented \
         2 more is a nested object; `k[n]: a|b` is a list; `k[n]{f1|f2}:` is a table, then n rows `v1|v2` in header \
         order (empty cell = null); `k[n]:` then `- ` lines is a list of mixed items. Absent keys are null; quoted \
         values are JSON strings; values starting with [ or { are JSON.
         """
 
-    static func encode(_ value: JSONValue) -> String {
+    public static func encode(_ value: JSONValue) -> String {
         let json = value.jsonString()
         let compact: String
         switch value {
@@ -121,7 +121,7 @@ enum CompactFormat {
     // MARK: Decoding
 
     /// Reads what `encode` wrote (or plain JSON).
-    static func decode(_ text: String) throws -> JSONValue {
+    public static func decode(_ text: String) throws -> JSONValue {
         if let json = try? JSONValue.parse(text) { return json }
         var reader = Reader(lines: text.components(separatedBy: "\n"))
         if text.hasPrefix("[") {
