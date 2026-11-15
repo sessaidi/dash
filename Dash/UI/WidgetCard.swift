@@ -10,6 +10,10 @@ struct WidgetCard: View {
     @State private var wiggle = false
     /// The widget's menu shows when the pointer is over it (no card to anchor it otherwise).
     @State private var hovering = false
+    /// Width of the controls the widget puts in the header, kept clear of the title.
+    @State private var headerItemsWidth: CGFloat = 0
+    /// Width of the filter chip, which the header controls sit left of.
+    @State private var filterChipWidth: CGFloat = 0
     @State private var dashiiLooking = false
 
     var body: some View {
@@ -19,6 +23,7 @@ struct WidgetCard: View {
         let linked = DashQL.resolveSelections(widget.query, host: host)
         let context = WidgetContext(widgetID: widget.id, host: host, aiTasks: type?.aiTasks ?? [],
                                     queryText: linked.waiting.isEmpty ? linked.text : "")
+        let showsFilter = !editing && type != nil && !widget.query.isEmpty
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 // The header is the drag handle; the content keeps its own gestures.
@@ -28,7 +33,8 @@ struct WidgetCard: View {
                     Text(widget.title)
                         .font(.headline)
                         .lineLimit(1)
-                    Spacer()
+                        .truncationMode(.tail)
+                    Spacer(minLength: headerItemsWidth)
                 }
                 .contentShape(.rect)
                 // Press and hold a header to unlock the layout, like a home screen.
@@ -36,8 +42,9 @@ struct WidgetCard: View {
                     guard !editing else { return }
                     withAnimation(.snappy(duration: 0.2)) { host.layoutEditing = true }
                 }
-                if !editing, let type, !widget.query.isEmpty {
+                if showsFilter, let type {
                     FilterChip(widget: widget, fields: type.queryFields)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { filterChipWidth = $0 }
                 }
                 if !editing { menu.opacity(hovering ? 1 : 0) }
             }
@@ -69,8 +76,12 @@ struct WidgetCard: View {
         .overlayPreferenceValue(WidgetHeaderKey.self, alignment: .topTrailing) { items in
             if !editing, !items.isEmpty {
                 HStack(spacing: 8) { ForEach(items) { $0.view } }
+                    .fixedSize()
                     .frame(height: 22)
-                    .padding(.trailing, 30)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { headerItemsWidth = $0 + 8 }
+                    .padding(.trailing, 30 + (showsFilter ? filterChipWidth + 8 : 0))
+            } else {
+                Color.clear.frame(width: 0, height: 0).onAppear { headerItemsWidth = 0 }
             }
         }
         .padding(14)
