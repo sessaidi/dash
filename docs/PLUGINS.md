@@ -132,12 +132,17 @@ struct BoardProvider: WidgetDataProvider {
 
 static func content(config: Binding<BoardConfig>, context: WidgetContext) -> some View {
     ProvidedWidget(BoardProvider(host: context.host), config: config.wrappedValue) { snapshot, layout in
-        BoardView(snapshot: snapshot, layout: layout)
+        BoardView(snapshot: snapshot, family: layout.family)
     }
 }
 
 /// Previews are measured like the real card, so `\.widgetLayout` drives the same layouts.
-static func preview(config: BoardConfig) -> some View { BoardResponsiveView(snapshot: .sample) }
+static func preview(config: BoardConfig) -> some View { BoardPreview() }
+
+struct BoardPreview: View {
+    @Environment(\.widgetLayout) private var layout
+    var body: some View { BoardView(snapshot: .sample, family: layout.family) }
+}
 ```
 
 ### Dashii tools and functions
@@ -244,8 +249,12 @@ Never call real services, spawn processes or push in tests.
 ## Compatibility
 
 DashKit is built with library evolution. Within a major version it only grows: new protocol
-requirements come with defaults, new parameters with default values, public enums are switched
-with `@unknown default`, stored value types decode old data.
+requirements come with defaults, new parameters come in a new overload (adding a parameter to an
+existing function, even with a default value, changes its symbol and breaks built plugins),
+public enums are switched with `@unknown default`, stored value types decode old data.
+
+DashKit 2.1 added the widget's grid span to `WidgetLayout` (`columns`, `rows`): plugins that read
+them need `2.1.0`.
 
 A new **major** version may break the API. Dash refuses a plugin built for another major (the
 user is told to update it from the Marketplace) and one needing a newer minor than it has. Set

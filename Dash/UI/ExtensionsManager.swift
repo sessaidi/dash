@@ -337,8 +337,8 @@ struct WidgetMiniature: View {
                 if let preview = type.preview { preview(config) } else { WidgetPlaceholder(type: type) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            // Previews adapt to the size like the real widget does.
-            .measuresWidgetLayout()
+            // Previews adapt to the size like the real widget does (same grid span).
+            .measuresWidgetLayout(columns: cells.w, rows: cells.h)
         }
         .padding(14)
         .frame(width: full.width, height: full.height)

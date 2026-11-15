@@ -59,7 +59,7 @@ struct WidgetCard: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // Widgets read their size and size family (narrow, medium, wide, large) from here.
-            .measuresWidgetLayout()
+            .measuresWidgetLayout(columns: widget.gridW, rows: widget.gridH)
             // Dashii reads and drives the widget through this.
             .environment(\.widgetLive, host.live(widget.id))
             // While editing, the whole card is a drag handle and its content doesn't take clicks.

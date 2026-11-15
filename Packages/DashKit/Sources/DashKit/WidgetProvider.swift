@@ -112,6 +112,7 @@ public final class WidgetSnapshotLoader<Provider: WidgetDataProvider> {
 public struct ProvidedWidget<Provider: WidgetDataProvider, Content: View>: View {
     @State private var loader: WidgetSnapshotLoader<Provider>
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.widgetLayout) private var outer
     @State private var visible = false
     let config: Provider.Config
     let loadingTitle: String
@@ -131,7 +132,7 @@ public struct ProvidedWidget<Provider: WidgetDataProvider, Content: View>: View 
         GeometryReader { geometry in
             Group {
                 if let snapshot = loader.snapshot {
-                    content(snapshot, WidgetLayout(size: geometry.size))
+                    content(snapshot, WidgetLayout(size: geometry.size, columns: outer.columns, rows: outer.rows))
                         .overlay(alignment: .topTrailing) { staleBadge }
                 } else if let error = loader.error {
                     StateView(.failed(message: error), action: ("Retry", { Task { await loader.load(config) } }))
