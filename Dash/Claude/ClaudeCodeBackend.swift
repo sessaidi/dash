@@ -16,6 +16,13 @@ extension ClaudeCodeKit.JSON {
 /// no saved sessions, the configured model and effort, and the Claude login (not an API key).
 @MainActor
 enum ClaudeCodeDefaults {
+    /// Commands that write to a forge or the network, denied even if a shell is ever allowed.
+    static let remoteWriteRules = [
+        "Bash(git push:*)", "Bash(git send-email:*)",
+        "Bash(gh:*)", "Bash(glab:*)", "Bash(tea:*)", "Bash(hub:*)",
+        "Bash(curl:*)", "Bash(wget:*)", "Bash(http:*)", "Bash(https:*)", "Bash(xh:*)",
+    ]
+
     static func options(settings: AppSettings, system: String) -> ClaudeCodeOptions {
         var options = ClaudeCodeOptions()
         if !settings.claudePath.isEmpty { options.executable = URL(filePath: (settings.claudePath as NSString).expandingTildeInPath) }
@@ -23,6 +30,7 @@ enum ClaudeCodeDefaults {
         options.effort = settings.effort
         options.systemPrompt = .replace(system)
         options.tools = []
+        options.disallowedTools = remoteWriteRules
         options.strictMCPConfig = true
         options.noSessionPersistence = true
         options.settingSources = ""

@@ -42,6 +42,14 @@ struct ClaudeCodeBackendTests {
         #expect(chat.trace.last?.model.contains("Claude Code") == true)
     }
 
+    /// Dashii and Dash agents get no shell, and remote-writing commands are denied on top.
+    @Test func defaultsDenyShellAndRemoteWrites() throws {
+        let options = ClaudeCodeDefaults.options(settings: try host().settings, system: "s")
+        #expect(options.tools == [])
+        for rule in ["Bash(gh:*)", "Bash(glab:*)", "Bash(curl:*)", "Bash(git push:*)"] { #expect(options.disallowedTools.contains(rule)) }
+        #expect(options.arguments.contains("--disallowedTools"))
+    }
+
     /// Opt-in: DASH_REAL_CLAUDE=1 runs one cheap turn through the installed Claude Code CLI.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["DASH_REAL_CLAUDE"] == "1"))
     func realClaudeCodeUsesADashTool() async throws {
