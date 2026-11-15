@@ -294,9 +294,11 @@ struct NotesView: View {
                             }
                             backlinks(note)
                         }
-                        .padding(20)
-                        .frame(maxWidth: 760, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 20)
+                        // A readable column, centred in whatever width the window gives.
+                        .frame(maxWidth: 880, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .environment(\.openURL, OpenURLAction { url in
                         switch url.scheme {
