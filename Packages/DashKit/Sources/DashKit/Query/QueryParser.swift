@@ -70,9 +70,11 @@ extension DashQuery {
             try lexer.expectEnd()
             return .sort(keys)
         case "take", "limit", "head":
-            guard case .number(let count)? = lexer.next(), count >= 0 else { throw QueryError("take takes a number, e.g. `take 10`.") }
+            guard case .number(let count)? = lexer.next(), count >= 0, let whole = Int(exactly: min(count.rounded(.down), 1_000_000)) else {
+                throw QueryError("take takes a number, e.g. `take 10`.")
+            }
             try lexer.expectEnd()
-            return .take(Int(count))
+            return .take(whole)
         case "select", "project", "fields":
             var projections: [Projection] = []
             repeat {
@@ -412,9 +414,8 @@ struct QueryLexer {
             else if character == "," { add(.comma, from: start); position = text.index(after: position) }
             else if let match = remaining.prefixMatch(of: /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?/) {
                 let literal = String(match.output)
-                let date = ISO8601DateFormatter().date(from: literal)
-                    ?? ISO8601DateFormatter().date(from: literal.replacingOccurrences(of: " ", with: "T") + "Z")
-                    ?? Self.day(String(literal.prefix(10)))
+                // Without a time zone, a typed date and time is the user's local time.
+                let date = DashDate.parse(literal)
                 add(date.map(QueryToken.date) ?? .word(literal), from: start)
                 position = match.range.upperBound
             } else if let match = remaining.prefixMatch(of: /([+-]?)(\d+(?:\.\d+)?)([smhdw])(?![\w])/) {

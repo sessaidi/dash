@@ -27,13 +27,10 @@ final class PermissionCenter: PermissionAsking {
     @ObservationIgnored private var queue: [Request] = []
 
     /// Shows the modal and waits for the answer. Returns true when allowed.
-    func ask(
-        icon: String = "hand.raised", title: String, message: String, details: [Detail] = [],
-        allowLabel: String = "Allow", denyLabel: String = "Don't Allow"
-    ) async -> Bool {
+    func ask(_ prompt: PermissionPrompt) async -> Bool {
         await withCheckedContinuation { continuation in
-            let request = Request(icon: icon, title: title, message: message, details: details,
-                                  allowLabel: allowLabel, denyLabel: denyLabel, continuation: continuation)
+            let request = Request(icon: prompt.icon, title: prompt.title, message: prompt.message, details: prompt.details,
+                                  allowLabel: prompt.allowLabel, denyLabel: prompt.denyLabel, continuation: continuation)
             if current == nil {
                 current = request
                 NSApp.activate()

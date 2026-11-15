@@ -1,6 +1,6 @@
 import Foundation
 
-/// Something an extension knows about, handed to Dash's knowledge graph so Claude can connect
+/// Something an extension knows about, handed to Dash's knowledge graph so Dashii can connect
 /// it with the code and with what other extensions know: a ticket, a PR, an agent session,
 /// a meeting. Built from data the extension already stored (no network calls).
 ///

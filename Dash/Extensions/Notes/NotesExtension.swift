@@ -78,7 +78,7 @@ final class NotesExtension: DashExtension {
     static let assistTask = AITask(
         id: "assist", title: "Writing help",
         summary: "Summarizes, continues and extracts action items from a note.",
-        models: [.sonnet, .haiku, .opus], defaultModel: .sonnet, efforts: [.low, .medium, .high], defaultEffort: .low,
+        models: [.balanced, .fast, .strong], defaultModel: .balanced, efforts: [.low, .medium, .high], defaultEffort: .low,
         templates: [
             AITemplate(id: Action.summarize.rawValue, title: "Summarize",
                        defaultText: "Summarize this note in 3 to 5 bullet points. Reply with Markdown only.\n\n# {{title}}\n{{text}}",
@@ -101,7 +101,7 @@ final class NotesExtension: DashExtension {
         guard let host else { throw ToolError("Notes isn't running.") }
         let settings = host.aiSettings(.extension(id), tasks: aiTasks)
         let prompt = settings.render(Self.assistTask.id, action.rawValue, ["title": title, "text": text])
-        return try await host.claude.complete(task: Self.assistTask.id, settings: settings,
+        return try await host.dashii.complete(task: Self.assistTask.id, settings: settings,
                                               system: "You help write notes. Reply with Markdown only, no preamble.", prompt: prompt)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -111,7 +111,7 @@ final class NotesExtension: DashExtension {
         guard let host else { throw ToolError("Notes isn't running.") }
         let settings = host.aiSettings(.extension(id), tasks: aiTasks)
         let prompt = settings.render(Self.assistTask.id, "selection", ["instruction": action.instruction, "title": title, "selection": selection])
-        return try await host.claude.complete(task: Self.assistTask.id, settings: settings,
+        return try await host.dashii.complete(task: Self.assistTask.id, settings: settings,
                                               system: "You edit text in notes. Reply with Markdown only, no preamble.", prompt: prompt)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -142,12 +142,12 @@ final class NotesExtension: DashExtension {
             """
     }
 
-    var tools: [ClaudeTool] {
+    var tools: [DashiiTool] {
         let components = host.map { host in host.extensions.filter { host.isEnabled($0) }.flatMap(\.components) } ?? CoreComponents.all
         let guide = Self.writingGuide(components)
         return [
             DocKind.tool,
-            ClaudeTool(name: "notes_search", description: "Search the user's notes by title and text; returns titles, folders and dates (newest first).",
+            DashiiTool(name: "notes_search", description: "Search the user's notes by title and text; returns titles, folders and dates (newest first).",
                        properties: ["query": JSONSchema.string("Words to look for; empty lists recent notes.")]) { [weak self] input in
                 guard let self else { return nil }
                 let query = try input.toolInput(SearchInput.self).query ?? ""
@@ -155,14 +155,14 @@ final class NotesExtension: DashExtension {
                     ["title": .string(note.title), "folder": .string(note.folder), "modified": .string(note.modified.formatted(.iso8601))]
                 })
             },
-            ClaudeTool(name: "notes_read", description: "Read one note's Markdown by title.",
+            DashiiTool(name: "notes_read", description: "Read one note's Markdown by title.",
                        properties: ["title": JSONSchema.string("Note title (file name without .md).")], required: ["title"]) { [weak self] input in
                 guard let self else { return nil }
                 let title = try input.toolInput(TitleInput.self).title
                 guard let note = store.note(titled: title) else { throw ToolError("No note titled “\(title)”. Use notes_search.") }
                 return .string(store.read(note))
             },
-            ClaudeTool(name: "notes_components", description: "List the components notes can use (MDX-like block directives such as @Callout or @Widget) with their parameters and an example each. Call before writing a note with components.") { [weak self] _ in
+            DashiiTool(name: "notes_components", description: "List the components notes can use (MDX-like block directives such as @Callout or @Widget) with their parameters and an example each. Call before writing a note with components.") { [weak self] _ in
                 guard let host = self?.host else { return [] }
                 let all = host.extensions.filter { host.isEnabled($0) }.flatMap(\.components)
                 return .array(all.map { component in
@@ -174,7 +174,7 @@ final class NotesExtension: DashExtension {
                      })]
                 })
             },
-            ClaudeTool(name: "notes_create", description: "Create a new note in the user's vault. To change a note that exists, use notes_update instead of creating another.\n\n" + guide,
+            DashiiTool(name: "notes_create", description: "Create a new note in the user's vault. To change a note that exists, use notes_update instead of creating another.\n\n" + guide,
                        properties: ["title": JSONSchema.string("Title (becomes the file name)."), "markdown": JSONSchema.string("Content."),
                                     "folder": JSONSchema.string("Optional sub-folder, e.g. Meetings.")],
                        required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
@@ -185,7 +185,7 @@ final class NotesExtension: DashExtension {
                 }
                 return .string(try store.create(title: request.title, markdown: request.markdown, folder: request.folder).title)
             },
-            ClaudeTool(name: "notes_update", description: "Replace an existing note's whole content (read it first with notes_read). Use this to rewrite or restructure a note.\n\n" + guide,
+            DashiiTool(name: "notes_update", description: "Replace an existing note's whole content (read it first with notes_read). Use this to rewrite or restructure a note.\n\n" + guide,
                        properties: ["title": JSONSchema.string("Note title."), "markdown": JSONSchema.string("The note's new full content.")],
                        required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
@@ -194,7 +194,7 @@ final class NotesExtension: DashExtension {
                 try store.write(request.markdown.hasSuffix("\n") ? request.markdown : request.markdown + "\n", to: note)
                 return .string("updated")
             },
-            ClaudeTool(name: "notes_answer", description: "Write your answer into a @Dashii block of a note (the user asked you something there). Replaces that block's previous answer; the rest of the note is untouched.\n\n" + guide,
+            DashiiTool(name: "notes_answer", description: "Write your answer into a @Dashii block of a note (the user asked you something there). Replaces that block's previous answer; the rest of the note is untouched.\n\n" + guide,
                        properties: ["title": JSONSchema.string("Note title."), "block": JSONSchema.string("The block's id, or its question if it has no id."),
                                     "markdown": JSONSchema.string("The answer.")],
                        required: ["title", "block", "markdown"]) { [weak self] input in
@@ -204,7 +204,7 @@ final class NotesExtension: DashExtension {
                 try store.write(try DashiiBlocks.answering(request.block, with: request.markdown, in: store.read(note)), to: note)
                 return .string("answered")
             },
-            ClaudeTool(name: "notes_delete", description: "Move a note, and its sub-notes, to the macOS Trash (the user can restore it from there). Use after merging notes, or when asked to remove one.",
+            DashiiTool(name: "notes_delete", description: "Move a note, and its sub-notes, to the macOS Trash (the user can restore it from there). Use after merging notes, or when asked to remove one.",
                        properties: ["title": JSONSchema.string("Note title.")], required: ["title"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
                 let title = try input.toolInput(TitleInput.self).title
@@ -213,7 +213,7 @@ final class NotesExtension: DashExtension {
                 try store.delete(note)
                 return .string("moved to the Trash" + (children ? " with its sub-notes" : ""))
             },
-            ClaudeTool(name: "notes_rename", description: "Rename a note (its sub-notes follow). [[Links]] to the old title are not rewritten; mention that to the user.",
+            DashiiTool(name: "notes_rename", description: "Rename a note (its sub-notes follow). [[Links]] to the old title are not rewritten; mention that to the user.",
                        properties: ["title": JSONSchema.string("Current title."), "new_title": JSONSchema.string("New title.")],
                        required: ["title", "new_title"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
@@ -221,7 +221,7 @@ final class NotesExtension: DashExtension {
                 guard let note = store.note(titled: request.title) else { throw ToolError("No note titled “\(request.title)”.") }
                 return .string(try store.rename(note, to: request.new_title).title)
             },
-            ClaudeTool(name: "notes_move", description: "Move a note (with its sub-notes) in the sidebar: under another note as a sub-note, to the top level, and/or before or after a sibling. Notes nest at most \(NotesStore.maxDepth) levels.",
+            DashiiTool(name: "notes_move", description: "Move a note (with its sub-notes) in the sidebar: under another note as a sub-note, to the top level, and/or before or after a sibling. Notes nest at most \(NotesStore.maxDepth) levels.",
                        properties: ["title": JSONSchema.string("The note to move."),
                                     "parent": JSONSchema.string("Note to put it under; \"\" for the top level. Omit to keep its parent."),
                                     "before": JSONSchema.string("Place it just before this sibling."),
@@ -245,7 +245,7 @@ final class NotesExtension: DashExtension {
                 return ["title": .string(note.title), "parent": store.parent(of: note).map { .string($0.title) } ?? .null,
                         "position": .number(Double((store.siblingTitles(in: note.folder).firstIndex(of: note.title) ?? 0) + 1))]
             },
-            ClaudeTool(name: "notes_append", description: "Append to the end of an existing note, using the same note syntax:\n\n" + guide,
+            DashiiTool(name: "notes_append", description: "Append to the end of an existing note, using the same note syntax:\n\n" + guide,
                        properties: ["title": JSONSchema.string("Note title."), "markdown": JSONSchema.string("Text to add.")],
                        required: ["title", "markdown"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }

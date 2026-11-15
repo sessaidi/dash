@@ -178,7 +178,7 @@ private struct Sidebar: View {
             .contentShape(.rect)
             .contextMenu {
                 Button("New Page…", systemImage: "plus") { editing = .new(section: nil) }
-                Button("Suggest a Layout…", systemImage: "sparkles") { host.askClaude(Self.suggestLayoutPrompt) }
+                Button("Suggest a Layout…", systemImage: "sparkles") { host.askDashii(Self.suggestLayoutPrompt) }
                 Button("New Section", systemImage: "folder.badge.plus") { newSection() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .dashNewSection)) { _ in newSection() }
@@ -574,7 +574,7 @@ struct DashboardGrid: View {
                     Button("Add Widgets…", systemImage: "plus") { host.openWidgetGallery() }
                         .buttonStyle(.borderedProminent)
                     Button("Ask \(host.persona.name)", systemImage: "sparkles") {
-                        host.askClaude("Build this page for me: suggest and place widgets that fit its name.")
+                        host.askDashii("Build this page for me: suggest and place widgets that fit its name.")
                     }
                 }
             } else {
@@ -678,7 +678,7 @@ struct DraftLayoutBanner: View {
             Spacer(minLength: 12)
             Button("Discard", role: .destructive) { confirmingDiscard = true }
             Button("Change…", systemImage: "bubble.left") {
-                host.askClaude("Change the suggested layout on page “\(page.name)” (id \(page.id.uuidString)): ")
+                host.askDashii("Change the suggested layout on page “\(page.name)” (id \(page.id.uuidString)): ")
             }
             Button("Keep", systemImage: "checkmark") {
                 withAnimation(.snappy) { try? host.dashboard.keepDraft(page.id) }

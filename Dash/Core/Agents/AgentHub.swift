@@ -202,14 +202,14 @@ final class AgentHub {
 
     /// The tools an agent may use: the ones it names and those of its integrations, minus the
     /// ones that change things when it's read-only, and never one that writes remotely.
-    static func tools(for agent: AgentDefinition, in host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(for agent: AgentDefinition, in host: ExtensionHost) -> [DashiiTool] {
         // DashQL is read-only, so every agent can query; `dash` reaches the same tools, no more.
         // Skills are guidance, so every agent may read and load them (not save or delete).
         let skills = Skills.tools(host: host).filter { ["skills_list", "skill_use"].contains($0.name) }
         let allowed = DashQL.tools(host: host) + skills + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
             owner.tools.filter { !$0.writesRemotely && agent.allows(tool: $0.name, from: owner.id, requiresApproval: $0.requiresApproval) }
         }
-        let dash = ClaudeTool(
+        let dash = DashiiTool(
             name: "dash",
             description: "Read Dash's data and use your tools with DashQL statements (one per line). `help` lists your tools, `schema` the datasets.\n\n" + DashQL.guide,
             properties: ["script": JSONSchema.string("One or more statements, one per line."),
@@ -232,7 +232,7 @@ final class AgentHub {
     }
 
     /// An agent's tool call: hooks may deny it, tools that change things ask the user first.
-    private func call(_ name: String, arguments: JSONValue, tools: [ClaudeTool], agent: String) async -> MCPToolResult {
+    private func call(_ name: String, arguments: JSONValue, tools: [DashiiTool], agent: String) async -> MCPToolResult {
         guard let host, let tool = tools.first(where: { $0.name == name }) else { return MCPToolResult("Unknown tool \(name).", isError: true) }
         if case .deny(let reason) = await HookEngine.shared.beforeTool(name, input: arguments) { return MCPToolResult(reason, isError: true) }
         if tool.requiresApproval {

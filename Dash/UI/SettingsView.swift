@@ -1,6 +1,6 @@
 import ClaudeCodeKit
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import AppKit
 import SwiftUI
 

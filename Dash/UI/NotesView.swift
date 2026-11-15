@@ -95,7 +95,7 @@ struct NotesView: View {
             .sheet(item: $drafting) { kind in
                 DocRequestSheet(kind: kind) { topic in
                     drafting = nil
-                    host.askClaude(kind.prompt(topic: topic))
+                    host.askDashii(kind.prompt(topic: topic))
                 } cancel: { drafting = nil }
             }
             .padding(10)

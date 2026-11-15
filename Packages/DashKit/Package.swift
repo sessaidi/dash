@@ -2,10 +2,10 @@
 import PackageDescription
 
 /// The Dash extension SDK: what integrations, features and plugins build on.
-/// - DashKit: extension protocols, metadata, widgets, Claude tools and services, activity,
+/// - DashKit: extension protocols, metadata, widgets, Dashii tools and services, activity,
 ///   storage (Keychain, preferences), connections, and the plugin entry point.
 /// - DashKitUI: shared SwiftUI components and the snap grid.
-/// - DashKitTesting: test doubles (host, Claude, permissions, integration, HTTP stubs) for
+/// - DashKitTesting: test doubles (host, Dashii, permissions, integration, HTTP stubs) for
 ///   plugin tests (`import DashKitTesting`).
 ///
 /// One dynamic framework, built with library evolution, so compiled `.dashplugin`

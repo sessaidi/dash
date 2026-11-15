@@ -6,7 +6,7 @@ import Testing
 /// DashQL statements: Dashii's and the agents' one way to work in Dash.
 @MainActor
 struct DashScriptTests {
-    private func make(gate: @escaping (ClaudeTool, JSONValue) async -> String? = { _, _ in nil }) throws -> (ExtensionHost, DashScript) {
+    private func make(gate: @escaping (DashiiTool, JSONValue) async -> String? = { _, _ in nil }) throws -> (ExtensionHost, DashScript) {
         let host = try ExtensionHost(settings: AppSettings(defaults: UserDefaults(suiteName: "script-\(UUID())")!),
                                      extensions: ExtensionHost.builtInExtensions(), inMemory: true)
         host.dashboard.migrate()

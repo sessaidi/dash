@@ -103,7 +103,7 @@ public struct WidgetQuery: Sendable {
     private static func value(_ value: QueryValue) -> String {
         switch value {
         case .string(let text): text
-        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .number(let number): DashDate.number(number)
         case .bool(let flag): flag ? "yes" : "no"
         case .null: "empty"
         case .me: "me"
@@ -114,7 +114,7 @@ public struct WidgetQuery: Sendable {
     }
 
     /// Who `me` is for widget queries; set by the host.
-    @MainActor public static var me: [String] = []
+    @_spi(DashHost) @MainActor public static var me: [String] = []
 }
 
 extension WidgetContext {

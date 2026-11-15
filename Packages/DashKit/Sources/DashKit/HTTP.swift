@@ -65,21 +65,15 @@ extension Date {
 }
 
 extension ISO8601DateFormatter {
+    @available(*, deprecated, message: "Use DashDate.parse(_:)")
     nonisolated(unsafe) public static let lenient: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    public static func date(_ text: String?) -> Date? {
-        guard let text else { return nil }
-        if let date = lenient.date(from: text) { return date }
-        // Jira uses "2024-01-02T03:04:05.000+0000", which ISO8601DateFormatter rejects.
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
-        return formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text)
-    }
+    /// Kept for plugins built against DashKit 1.4; prefer `DashDate.parse(_:)`.
+    public static func date(_ text: String?) -> Date? { DashDate.parse(text) }
 }
 
 /// Recent HTTP requests, for the Debug window. URLs are recorded without query strings.
@@ -98,7 +92,7 @@ public enum HTTPTrace {
     nonisolated(unsafe) private static var buffer: [Entry] = []
     private static let lock = NSLock()
 
-    public static var entries: [Entry] { lock.withLock { buffer } }
+    @_spi(DashHost) public static var entries: [Entry] { lock.withLock { buffer } }
 
     public static func record(_ request: URLRequest, status: Int, bytes: Int, started: Date, service: String) {
         var components = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }

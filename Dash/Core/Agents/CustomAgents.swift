@@ -39,7 +39,7 @@ final class CustomAgent {
         scope = ""
         everyMinutes = 0
         events = []
-        model = ClaudeModel.sonnet.rawValue
+        model = DashiiModel.balanced.rawValue
         createdAt = .now
     }
 
@@ -49,7 +49,7 @@ final class CustomAgent {
             role: role, specialities: specialities, instructions: instructions, tools: tools, integrations: integrations,
             access: canAct ? .actWithApproval : .readOnly, scope: scope,
             schedule: AgentSchedule(everyMinutes: everyMinutes > 0 ? everyMinutes : nil, events: events),
-            defaultModel: ClaudeModel(rawValue: model) ?? .sonnet, enabledByDefault: true)
+            defaultModel: DashiiModel(rawValue: model) ?? .balanced, enabledByDefault: true)
     }
 
     /// Starting points for the editor.
@@ -116,9 +116,9 @@ final class AgentsStudio: DashExtension {
     private struct RunInput: Decodable { let id: String; let reason: String? }
     private struct ReportsInput: Decodable { let id: String; let limit: Int? }
 
-    var tools: [ClaudeTool] {
+    var tools: [DashiiTool] {
         [
-            ClaudeTool(name: "dash_agents", description: "List the background agents (the user's and plugins'): id, name, role, specialities, access, schedule, and their latest report.") { _ in
+            DashiiTool(name: "dash_agents", description: "List the background agents (the user's and plugins'): id, name, role, specialities, access, schedule, and their latest report.") { _ in
                 let hub = AgentHub.shared
                 return .array(hub.entries.map { entry in
                     let last = hub.reports(entry.id, limit: 1).first
@@ -132,14 +132,14 @@ final class AgentsStudio: DashExtension {
                     ]
                 })
             },
-            ClaudeTool(name: "dash_agent_run", description: "Run a background agent now and return its report (summary and findings).",
+            DashiiTool(name: "dash_agent_run", description: "Run a background agent now and return its report (summary and findings).",
                        properties: ["id": JSONSchema.string("Agent id from dash_agents."), "reason": JSONSchema.string("Why it runs now.")],
                        required: ["id"]) { input in
                 let request = try input.toolInput(RunInput.self)
                 let report = try await AgentHub.shared.run(request.id, reason: request.reason ?? "asked in chat")
                 return try JSONValue.parse(String(decoding: JSONEncoder().encode(report), as: UTF8.self))
             },
-            ClaudeTool(name: "dash_agent_reports", description: "An agent's latest reports, newest first.",
+            DashiiTool(name: "dash_agent_reports", description: "An agent's latest reports, newest first.",
                        properties: ["id": JSONSchema.string("Agent id."), "limit": JSONSchema.integer("How many (default 5).")],
                        required: ["id"]) { input in
                 let request = try input.toolInput(ReportsInput.self)

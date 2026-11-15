@@ -59,7 +59,7 @@ final class FakeIntegration: Integration {
     var isConnected: Bool
     var connection: IntegrationConnection? { isConnected ? IntegrationConnection(baseURL: URL(string: "https://example.test")!) : nil }
     var exports: JSONValue { ["repos": ["acme/api"], "login": "tester"] }
-    var tools: [ClaudeTool] { [ClaudeTool(name: "\(id)_api_get", description: "test") { _ in nil }] }
+    var tools: [DashiiTool] { [DashiiTool(name: "\(id)_api_get", description: "test") { _ in nil }] }
 
     init(id: String, connected: Bool = false) {
         self.id = id
@@ -84,7 +84,7 @@ final class FakeFeature: DashExtension {
     let requires: [String]
     let optional: [String]
     var models: [any PersistentModel.Type] { [FakeNote.self] }
-    var tools: [ClaudeTool] { [ClaudeTool(name: "\(id)_run", description: "test") { _ in nil }] }
+    var tools: [DashiiTool] { [DashiiTool(name: "\(id)_run", description: "test") { _ in nil }] }
 
     init(id: String, requires: [String] = [], optional: [String] = []) {
         self.id = id

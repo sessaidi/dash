@@ -8,13 +8,13 @@ import SwiftData
 /// reach on purpose.
 @MainActor
 enum AppTools {
-    static func tools(host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(host: ExtensionHost) -> [DashiiTool] {
         sidebar(host: host) + plugins(host: host) + automation(host: host) + agents(host: host) + [open(host: host)]
     }
 
     // MARK: Sidebar
 
-    private static func sidebar(host: ExtensionHost) -> [ClaudeTool] {
+    private static func sidebar(host: ExtensionHost) -> [DashiiTool] {
         let store = host.dashboard!
         func section(_ name: String?) throws -> UUID? {
             guard let name, !name.isEmpty, name.lowercased() != "pages" else { return nil }
@@ -30,7 +30,7 @@ enum AppTools {
             return found
         }
         return [
-            ClaudeTool(name: "sidebar", description: "The sidebar: its sections in order, each with its pages in order (the built-in section is “Pages”), and which page shows the Home header.") { _ in
+            DashiiTool(name: "sidebar", description: "The sidebar: its sections in order, each with its pages in order (the built-in section is “Pages”), and which page shows the Home header.") { _ in
                 let pages = store.pages()
                 let groups: [(String?, UUID?)] = [(nil, nil)] + store.sections().map { ($0.name, $0.id) }
                 return .array(groups.map { name, id in
@@ -40,26 +40,26 @@ enum AppTools {
                      })]
                 })
             },
-            ClaudeTool(name: "section_create", description: "Add a sidebar section (a group of pages).",
+            DashiiTool(name: "section_create", description: "Add a sidebar section (a group of pages).",
                        properties: ["name": JSONSchema.string("Section name.")], required: ["name"], requiresApproval: true) { input in
                 guard let name = input["name"]?.string, !name.isEmpty else { throw ToolError("Name the section.") }
                 let created = store.createSection(name: name)
                 return ["id": .string(created.id.uuidString), "name": .string(created.name)]
             },
-            ClaudeTool(name: "section_rename", description: "Rename a sidebar section (“Pages” renames the built-in one).",
+            DashiiTool(name: "section_rename", description: "Rename a sidebar section (“Pages” renames the built-in one).",
                        properties: ["section": JSONSchema.string("Section name or id."), "name": JSONSchema.string("New name.")],
                        required: ["section", "name"], requiresApproval: true) { input in
                 guard let name = input["name"]?.string, !name.isEmpty else { throw ToolError("Give the new name.") }
                 store.renameSection(try section(input["section"]?.string), to: name)
                 return "renamed"
             },
-            ClaudeTool(name: "section_delete", description: "Delete a sidebar section; its pages move to “Pages” (nothing else is deleted).",
+            DashiiTool(name: "section_delete", description: "Delete a sidebar section; its pages move to “Pages” (nothing else is deleted).",
                        properties: ["section": JSONSchema.string("Section name or id.")], required: ["section"], requiresApproval: true) { input in
                 guard let id = try section(input["section"]?.string) else { throw ToolError("The built-in “Pages” section can't be deleted.") }
                 store.deleteSection(id)
                 return "deleted"
             },
-            ClaudeTool(name: "page_move", description: "Move a page to a section (“Pages” for the built-in one), optionally before another page; or reorder within its section.",
+            DashiiTool(name: "page_move", description: "Move a page to a section (“Pages” for the built-in one), optionally before another page; or reorder within its section.",
                        properties: ["page": JSONSchema.string("Page name or id."), "section": JSONSchema.string("Target section name or id; omit to stay."),
                                     "before": JSONSchema.string("Put it before this page (name or id); omit for the end.")],
                        required: ["page"], requiresApproval: true) { input in
@@ -69,7 +69,7 @@ enum AppTools {
                 store.movePage(moved.id, toSection: target, before: before)
                 return "moved"
             },
-            ClaudeTool(name: "page_set_home", description: "Show or hide the Home header (greeting, ask bar, suggestions, brief) on a page.",
+            DashiiTool(name: "page_set_home", description: "Show or hide the Home header (greeting, ask bar, suggestions, brief) on a page.",
                        properties: ["page": JSONSchema.string("Page name or id."), "home": JSONSchema.boolean("true to show it.")],
                        required: ["page", "home"], requiresApproval: true) { input in
                 try store.updatePage(try page(input["page"]?.string ?? "").id, showsHome: input["home"]?.bool ?? true)
@@ -80,15 +80,15 @@ enum AppTools {
 
     // MARK: Plugins
 
-    private static func plugins(host: ExtensionHost) -> [ClaudeTool] {
+    private static func plugins(host: ExtensionHost) -> [DashiiTool] {
         [
-            ClaudeTool(name: "extensions_list", description: "Installed integrations and features: id, name, kind, version, on or off, and what they still need (integrations to connect).") { _ in
+            DashiiTool(name: "extensions_list", description: "Installed integrations and features: id, name, kind, version, on or off, and what they still need (integrations to connect).") { _ in
                 .array(host.extensions.map { item in
                     ["id": .string(item.id), "name": .string(item.name), "kind": .string(item.layer.rawValue), "version": .string(item.metadata.version),
                      "enabled": .bool(host.isEnabled(item)), "needs": .array(host.unmetRequirements(of: item).map { .string($0) })]
                 })
             },
-            ClaudeTool(name: "extension_set_enabled", description: "Turn an integration or feature on or off (its data and settings are kept). Connecting accounts and keys stays with the user, in Settings.",
+            DashiiTool(name: "extension_set_enabled", description: "Turn an integration or feature on or off (its data and settings are kept). Connecting accounts and keys stays with the user, in Settings.",
                        properties: ["id": JSONSchema.string("Extension id from extensions_list."), "enabled": JSONSchema.boolean("true for on.")],
                        required: ["id", "enabled"], requiresApproval: true) { input in
                 guard let id = input["id"]?.string, let item = host.extensions.first(where: { $0.id == id || $0.name.caseInsensitiveCompare(id) == .orderedSame }) else {
@@ -103,7 +103,7 @@ enum AppTools {
 
     // MARK: Automation
 
-    private static func automation(host: ExtensionHost) -> [ClaudeTool] {
+    private static func automation(host: ExtensionHost) -> [DashiiTool] {
         let store = AutomationStore.shared
         let context = host.context
         func hooks() -> [AutomationHook] { (try? context.fetch(FetchDescriptor<AutomationHook>(sortBy: [SortDescriptor(\.createdAt)]))) ?? [] }
@@ -114,7 +114,7 @@ enum AppTools {
             return found
         }
         return [
-            ClaudeTool(name: "automation_list", description: "The user's automation: rules for Claude (global and per extension), /commands, and hooks (when → do), with ids.") { _ in
+            DashiiTool(name: "automation_list", description: "The user's automation: rules for Dashii (global and per extension), /commands, and hooks (when → do), with ids.") { _ in
                 let rules = ((try? context.fetch(FetchDescriptor<AutomationRule>())) ?? []).map {
                     ["scope": .string($0.scope), "text": .string($0.text), "enabled": .bool($0.enabled)] as JSONValue
                 }
@@ -126,14 +126,14 @@ enum AppTools {
                      "when": .string(hook.trigger.summary), "do": .string(hook.action.summary), "last_status": hook.lastStatus.map(JSONValue.string) ?? .null]
                 })]
             },
-            ClaudeTool(name: "automation_set_rules", description: "Replace the user's rules for Claude: scope global (every conversation) or an extension id (whenever its tools run). Empty text removes them.",
+            DashiiTool(name: "automation_set_rules", description: "Replace the user's rules for Claude: scope global (every conversation) or an extension id (whenever its tools run). Empty text removes them.",
                        properties: ["scope": JSONSchema.string("global or an extension id."), "text": JSONSchema.string("The rules, Markdown.")],
                        required: ["scope", "text"], requiresApproval: true) { input in
                 let scope = input["scope"]?.string ?? "global", text = input["text"]?.string ?? ""
                 if text.isEmpty { store.resetRules(scope) } else { store.setRules(scope, text: text) }
                 return "saved"
             },
-            ClaudeTool(name: "command_save", description: "Create or replace a /command: a named prompt the user types as /name; {{args}} takes what follows it.",
+            DashiiTool(name: "command_save", description: "Create or replace a /command: a named prompt the user types as /name; {{args}} takes what follows it.",
                        properties: ["name": JSONSchema.string("Without the slash."), "summary": JSONSchema.string("One line."), "prompt": JSONSchema.string("The prompt, with {{args}} where the arguments go.")],
                        required: ["name", "prompt"], requiresApproval: true) { input in
                 guard let name = input["name"]?.string?.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")), !name.isEmpty, let prompt = input["prompt"]?.string else {
@@ -142,16 +142,16 @@ enum AppTools {
                 try store.saveCommand(name: name, summary: input["summary"]?.string ?? "", prompt: prompt, replacing: name)
                 return ["saved": .string("/\(name)")]
             },
-            ClaudeTool(name: "command_delete", description: "Delete a /command.", properties: ["name": JSONSchema.string("Without the slash.")],
+            DashiiTool(name: "command_delete", description: "Delete a /command.", properties: ["name": JSONSchema.string("Without the slash.")],
                        required: ["name"], requiresApproval: true) { input in
                 store.deleteCommand(input["name"]?.string ?? "")
                 return "deleted"
             },
-            ClaudeTool(name: "hook_presets", description: "Ready-made hooks by use case: watchers (Dash runs a DashQL query itself and fires on new rows, no Claude), notifications, and wake-ups that hand what a watcher found to an agent. Create one with hook_create preset=<id>.") { _ in
+            DashiiTool(name: "hook_presets", description: "Ready-made hooks by use case: watchers (Dash runs a DashQL query itself and fires on new rows, no Claude), notifications, and wake-ups that hand what a watcher found to an agent. Create one with hook_create preset=<id>.") { _ in
                 .array(HookPreset.all(host: host).map { ["id": .string($0.id), "category": .string($0.category), "name": .string($0.name),
                                               "when": .string($0.trigger.summary), "do": .string($0.action.summary)] })
             },
-            ClaudeTool(name: "hook_create", description: """
+            DashiiTool(name: "hook_create", description: """
                 Create a hook: when something happens, do something. trigger is one of {"event": {"kind": "pr.*", "source": null, "contains": null, "criticalOnly": false}}, \
                 {"schedule": {"time": "09:00", "weekdays": [2,3,4,5,6]}}, {"launch": {}}, {"beforeTool": {"name": "…"}}, {"afterTool": {"name": "…"}}, \
                 or a watcher {"query": {"query": "from pods where restarts > 5", "everyMinutes": 5, "key": "name"}} (Dash runs the DashQL query itself, \
@@ -192,7 +192,7 @@ enum AppTools {
                 try context.save()
                 return ["id": .string(hook.id.uuidString), "when": .string(trigger.summary), "do": .string(action.summary)]
             },
-            ClaudeTool(name: "hook_set_enabled", description: "Turn a hook on or off.",
+            DashiiTool(name: "hook_set_enabled", description: "Turn a hook on or off.",
                        properties: ["id": JSONSchema.string("Hook id or name."), "enabled": JSONSchema.boolean("true for on.")],
                        required: ["id", "enabled"], requiresApproval: true) { input in
                 let found = try hook(input["id"]?.string)
@@ -200,7 +200,7 @@ enum AppTools {
                 try context.save()
                 return "done"
             },
-            ClaudeTool(name: "hook_delete", description: "Delete a hook.", properties: ["id": JSONSchema.string("Hook id or name.")],
+            DashiiTool(name: "hook_delete", description: "Delete a hook.", properties: ["id": JSONSchema.string("Hook id or name.")],
                        required: ["id"], requiresApproval: true) { input in
                 context.delete(try hook(input["id"]?.string))
                 try context.save()
@@ -211,7 +211,7 @@ enum AppTools {
 
     // MARK: Custom agents
 
-    private static func agents(host: ExtensionHost) -> [ClaudeTool] {
+    private static func agents(host: ExtensionHost) -> [DashiiTool] {
         let context = host.context
         func agent(_ id: String?) throws -> CustomAgent {
             let all = (try? context.fetch(FetchDescriptor<CustomAgent>())) ?? []
@@ -240,7 +240,7 @@ enum AppTools {
             "can_act": JSONSchema.boolean("May use tools that change things (each still asks the user). Default false: read-only."),
         ]
         return [
-            ClaudeTool(name: "agent_create", description: "Create a background agent: a role, instructions, the integrations it reads, and when it runs (every N minutes and/or on activity events). It reports findings; read-only unless can_act.",
+            DashiiTool(name: "agent_create", description: "Create a background agent: a role, instructions, the integrations it reads, and when it runs (every N minutes and/or on activity events). It reports findings; read-only unless can_act.",
                        properties: properties, required: ["name", "instructions"], requiresApproval: true) { input in
                 let created = CustomAgent(name: input["name"]?.string ?? "New agent")
                 apply(input, to: created)
@@ -248,14 +248,14 @@ enum AppTools {
                 try context.save()
                 return ["id": .string(created.id.uuidString), "name": .string(created.name)]
             },
-            ClaudeTool(name: "agent_update", description: "Change a custom agent (only the fields given).",
+            DashiiTool(name: "agent_update", description: "Change a custom agent (only the fields given).",
                        properties: properties.merging(["id": JSONSchema.string("Agent id or name.")]) { a, _ in a }, required: ["id"], requiresApproval: true) { input in
                 let found = try agent(input["id"]?.string)
                 apply(input, to: found)
                 try context.save()
                 return ["id": .string(found.id.uuidString), "name": .string(found.name)]
             },
-            ClaudeTool(name: "agent_delete", description: "Delete a custom agent (its past reports stay).", properties: ["id": JSONSchema.string("Agent id or name.")],
+            DashiiTool(name: "agent_delete", description: "Delete a custom agent (its past reports stay).", properties: ["id": JSONSchema.string("Agent id or name.")],
                        required: ["id"], requiresApproval: true) { input in
                 context.delete(try agent(input["id"]?.string))
                 try context.save()
@@ -266,8 +266,8 @@ enum AppTools {
 
     // MARK: Opening screens
 
-    private static func open(host: ExtensionHost) -> ClaudeTool {
-        ClaudeTool(name: "open_screen", description: """
+    private static func open(host: ExtensionHost) -> DashiiTool {
+        DashiiTool(name: "open_screen", description: """
             Open a screen for the user: settings (claude, usage, automation, rules, commands, hooks, skills, agents, persona, plugins, marketplace, debug), \
             an extension's settings by id (e.g. jira-board), or the widget gallery (gallery).
             """, properties: ["screen": JSONSchema.string("What to open.")], required: ["screen"]) { input in

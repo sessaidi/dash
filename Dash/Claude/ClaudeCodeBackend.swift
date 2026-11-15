@@ -41,24 +41,17 @@ enum ClaudeCodeDefaults {
     }
 }
 
-/// Dash's only `ClaudeService`: Claude Code with the user's Claude login. PR reviews, meeting
+/// Dash's only `DashiiService`: Claude Code with the user's Claude login. PR reviews, meeting
 /// summaries and plugins use it.
 @MainActor
-struct ClaudeCodeService: ClaudeService {
+struct ClaudeCodeService: DashiiService {
     let settings: AppSettings
 
     var model: String { settings.model }
 
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: nil, source: nil)
-    }
-
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: model, source: nil)
-    }
-
     /// `source` attributes the request in usage analytics; plugins calling without one show as "plugin".
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?, source: String?) async throws -> String {
+    func complete(_ request: DashiiRequest) async throws -> String {
+        let (system, prompt, outputSchema, effort, model, source) = (request.system, request.prompt, request.outputSchema, request.effort, request.model, request.source)
         // The user's rules: global ones, plus the calling extension's.
         let rules = source?.hasPrefix("hook.") == true ? nil : AutomationStore.shared.instructions(forSource: source)
         var options = ClaudeCodeDefaults.options(settings: settings, system: system + (rules.map { "\n\n" + $0 } ?? ""))

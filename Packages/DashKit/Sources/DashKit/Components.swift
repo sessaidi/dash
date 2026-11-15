@@ -14,7 +14,7 @@ import SwiftUI
 public struct MarkdownComponentType: Identifiable {
     public struct Parameter: Sendable, Hashable {
         public let name: String
-        /// "string", "number", "boolean" or "enum"; shown to Claude and in the catalog.
+        /// "string", "number", "boolean" or "enum"; shown to Dashii and in the catalog.
         public let type: String
         public let summary: String
         public let required: Bool
@@ -35,7 +35,7 @@ public struct MarkdownComponentType: Identifiable {
     public let parameters: [Parameter]
     /// Takes Markdown children (`@Callout { … }`).
     public let acceptsChildren: Bool
-    /// A ready-to-paste example, for Claude and the component catalog.
+    /// A ready-to-paste example, for Dashii and the component catalog.
     public let example: String
     public let render: (MarkdownComponentContext) -> AnyView
 

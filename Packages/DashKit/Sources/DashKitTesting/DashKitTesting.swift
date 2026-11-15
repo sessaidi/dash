@@ -20,7 +20,7 @@ public func knowledgeIssues(_ entities: [KnowledgeEntity]) -> [String] {
     return issues
 }
 
-// Test doubles for plugin authors: a host, Claude, permissions, an integration, and HTTP stubs,
+// Test doubles for plugin authors: a host, Dashii, permissions, an integration, and HTTP stubs,
 // so a plugin's tests exercise it the way Dash will, without the app, the network or a login.
 // Link it from test targets only.
 
@@ -31,9 +31,9 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     public var context: ModelContext { container.mainContext }
     public var extensions: [any DashExtension]
     public let testPermissions = TestPermissions()
-    public let testClaude = TestClaude()
+    public let testDashii = TestDashii()
     public var permissions: any PermissionAsking { testPermissions }
-    public var claude: any ClaudeService { testClaude }
+    public var dashii: any DashiiService { testDashii }
     public let activity = ActivityLog()
     /// The mirror of online data, in memory.
     public let testSynced = MemorySyncedStore()
@@ -43,7 +43,7 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     /// AI choices per scope, as the user would set them in an AI tab.
     public var aiChoices: [AIScope: [String: AITaskChoice]] = [:]
 
-    public private(set) var askedClaude: [String] = []
+    public private(set) var askedDashii: [String] = []
     public private(set) var openedManager: [String?] = []
     public private(set) var addedWidgets: [String] = []
     /// Notes written with `createNote` (title, markdown, folder).
@@ -57,7 +57,7 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     }
 
     public func isEnabled(_ item: any DashExtension) -> Bool { !disabled.contains(item.id) }
-    public func askClaude(_ prompt: String) { askedClaude.append(prompt) }
+    public func askDashii(_ prompt: String) { askedDashii.append(prompt) }
     public func openManager(_ extensionID: String?) { openedManager.append(extensionID) }
     public func addWidget(kind: String) throws { addedWidgets.append(kind) }
 
@@ -75,8 +75,8 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     /// Reports of agents run with `runAgent`, newest first, by "<extension id>.<agent id>".
     public private(set) var reports: [String: [AgentReport]] = [:]
 
-    /// Runs an agent like Dash does: its precheck, then (unless skipped) `testClaude` with the
-    /// report schema. Queue the report JSON in `testClaude.replies` to test what it finds.
+    /// Runs an agent like Dash does: its precheck, then (unless skipped) `testDashii` with the
+    /// report schema. Queue the report JSON in `testDashii.replies` to test what it finds.
     public func runAgent(_ id: String, reason: String) async throws -> AgentReport {
         let parts = id.split(separator: ".", maxSplits: 1).map(String.init)
         guard parts.count == 2, let owner = extensions.first(where: { $0.id == parts[0] }),
@@ -97,7 +97,7 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
         }
         let report: AgentReport
         do {
-            let text = try await testClaude.complete(system: agent.systemPrompt, prompt: "Reason: \(reason)\n\(context)",
+            let text = try await testDashii.complete(system: agent.systemPrompt, prompt: "Reason: \(reason)\n\(context)",
                                                      outputSchema: AgentReport.outputSchema, effort: nil, model: nil,
                                                      source: "agent.\(id)")
             report = try AgentReport.parse(text, agentID: id, startedAt: started, reason: reason)
@@ -116,7 +116,7 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
         for item in items.filter({ $0.layer == .integration }) + items.filter({ $0.layer == .feature }) { item.start(host: self) }
     }
 
-    /// Runs one of the installed extensions' Claude tools by name.
+    /// Runs one of the installed extensions' Dashii tools by name.
     public func runTool(_ name: String, _ input: JSONValue = [:]) async throws -> JSONValue? {
         guard let tool = extensions.lazy.flatMap(\.tools).first(where: { $0.name == name }) else {
             throw ToolError("No tool named \(name).")
@@ -125,9 +125,9 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     }
 }
 
-/// Claude for tests: returns queued replies (or `reply`) and records every request.
+/// Dashii for tests: returns queued replies (or `reply`) and records every request.
 @MainActor
-public final class TestClaude: ClaudeService {
+public final class TestDashii: DashiiService {
     public struct Call: Sendable {
         public let system: String
         public let prompt: String
@@ -137,7 +137,7 @@ public final class TestClaude: ClaudeService {
         public let source: String?
     }
 
-    public var model = "claude-test"
+    public var model = "dashii-test"
     /// Returned when `replies` is empty.
     public var reply = ""
     /// Returned in order, one per call.
@@ -147,16 +147,9 @@ public final class TestClaude: ClaudeService {
 
     public init() {}
 
-    public func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: nil)
-    }
-
-    public func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: model, source: nil)
-    }
-
-    public func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?, source: String?) async throws -> String {
-        calls.append(Call(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: model, source: source))
+    public func complete(_ request: DashiiRequest) async throws -> String {
+        calls.append(Call(system: request.system, prompt: request.prompt, outputSchema: request.outputSchema, effort: request.effort,
+                          model: request.model, source: request.source))
         if let error { throw error }
         return replies.isEmpty ? reply : replies.removeFirst()
     }
@@ -170,8 +163,8 @@ public final class TestPermissions: PermissionAsking {
 
     public init() {}
 
-    public func ask(icon: String, title: String, message: String, details: [PermissionDetail], allowLabel: String, denyLabel: String) async -> Bool {
-        asked.append(title)
+    public func ask(_ prompt: PermissionPrompt) async -> Bool {
+        asked.append(prompt.title)
         return answer
     }
 }

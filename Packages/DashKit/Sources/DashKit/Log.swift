@@ -57,5 +57,5 @@ public enum DashLog {
     public static func notice(_ message: String, category: String = "app") { log(.notice, message, category: category) }
     public static func error(_ message: String, category: String = "app") { log(.error, message, category: category) }
 
-    public static func clear() { lock.withLock { buffer = [] } }
+    @_spi(DashHost) public static func clear() { lock.withLock { buffer = [] } }
 }

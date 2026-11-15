@@ -1,5 +1,5 @@
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import Foundation
 import Security
 import SwiftUI
@@ -8,6 +8,7 @@ import SwiftUI
 /// ad hoc (development builds) is a new app to it after every rebuild, so macOS asks for your
 /// password again and again. Those builds use an owner-only file instead, unless you choose the
 /// keychain.
+@MainActor
 enum SecretStorage {
     static let key = "secrets.backend"
 

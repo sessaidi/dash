@@ -14,10 +14,10 @@ private final class WatchExtension: DashExtension {
     var healthy = true
     func settingsView() -> AnyView { AnyView(EmptyView()) }
     func start(host: any ExtensionContext) {}
-    var tools: [ClaudeTool] {
-        [ClaudeTool(name: "watch_status", description: "Status.") { _ in "ok" },
-         ClaudeTool(name: "watch_restart", description: "Restart.", requiresApproval: true) { _ in "done" },
-         ClaudeTool(name: "watch_comment", description: "Comment remotely.", writesRemotely: true) { _ in "posted" }]
+    var tools: [DashiiTool] {
+        [DashiiTool(name: "watch_status", description: "Status.") { _ in "ok" },
+         DashiiTool(name: "watch_restart", description: "Restart.", requiresApproval: true) { _ in "done" },
+         DashiiTool(name: "watch_comment", description: "Comment remotely.", writesRemotely: true) { _ in "posted" }]
     }
     var agents: [AgentDefinition] {
         [AgentDefinition(id: "sre", name: "Watch SRE", summary: "Watches.", role: "SRE", specialities: ["Kubernetes"],

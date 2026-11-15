@@ -194,8 +194,8 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
     }
 
     @MainActor
-    static var tool: ClaudeTool {
-        ClaudeTool(
+    static var tool: DashiiTool {
+        DashiiTool(
             name: "doc_template",
             description: "The structure, sources and rules for a document you write into Notes from what Dash knows: how-to, runbook, postmortem, meeting notes, daily note, service overview or decision record. Call it before writing one.",
             properties: ["kind": JSONSchema.string("Document kind.", enum: allCases.map(\.rawValue))],

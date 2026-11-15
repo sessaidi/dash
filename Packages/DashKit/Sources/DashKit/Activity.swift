@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Something that happened on the dashboard. Extensions emit these; Claude is told about
+/// Something that happened on the dashboard. Extensions emit these; Dashii is told about
 /// them before each chat turn and can query them with `dashboard_activity`.
 public struct ActivityEvent: Identifiable, Codable, Hashable, Sendable {
     public enum Importance: String, Codable, Sendable, Comparable {
@@ -25,7 +25,7 @@ public struct ActivityEvent: Identifiable, Codable, Hashable, Sendable {
     public let link: String?
     public let importance: Importance
 
-    /// "[14:02] pull-requests review.completed: Claude reviewed acme/api#812 — request changes, high risk"
+    /// "[14:02] pull-requests review.completed: Dashii reviewed acme/api#812 — request changes, high risk"
     public var line: String {
         let time = date.formatted(date: .omitted, time: .shortened)
         return "[\(time)] \(source) \(kind): \(title)" + (detail.map { " — \($0)" } ?? "") + (link.map { " <\($0)>" } ?? "")
@@ -38,7 +38,7 @@ public struct ActivityEvent: Identifiable, Codable, Hashable, Sendable {
 public final class ActivityLog {
     public private(set) var events: [ActivityEvent] = []
     @ObservationIgnored private var nextID = 1
-    @ObservationIgnored private var handlers: [(ActivityEvent) -> Void] = []
+    @ObservationIgnored private var handlers: [UUID: (ActivityEvent) -> Void] = [:]
     @ObservationIgnored private let capacity: Int
 
     public init(capacity: Int = 1000) {
@@ -53,14 +53,19 @@ public final class ActivityLog {
         let event = ActivityEvent(id: nextID, date: date, source: source, kind: kind, title: title, detail: detail, link: link, importance: importance)
         nextID += 1
         events.append(event)
-        if events.count > capacity { events.removeFirst(events.count - capacity) }
-        for handler in handlers { handler(event) }
+        // Trimmed in chunks, not one event at a time.
+        if events.count > capacity + capacity / 4 { events.removeFirst(events.count - capacity) }
+        for handler in handlers.values { handler(event) }
         return event
     }
 
-    /// Calls `handler` for every event emitted from now on (notifications, mascot).
-    public func onEmit(_ handler: @escaping (ActivityEvent) -> Void) {
-        handlers.append(handler)
+    /// Calls `handler` for every event emitted from now on, until the returned subscription is
+    /// cancelled (do that in your extension's `stop()`, or it's called again after a restart).
+    @discardableResult
+    public func onEmit(_ handler: @escaping (ActivityEvent) -> Void) -> ActivitySubscription {
+        let id = UUID()
+        handlers[id] = handler
+        return ActivitySubscription { [weak self] in self?.handlers[id] = nil }
     }
 
     /// Events with an id greater than `id` (what happened since a reader last looked).
@@ -74,7 +79,7 @@ public final class ActivityLog {
 
     public var latestID: Int { events.last?.id ?? 0 }
 
-    /// A compact digest for Claude: notable events in full, routine ones counted.
+    /// A compact digest for Dashii: notable events in full, routine ones counted.
     public static func digest(_ events: [ActivityEvent], limit: Int = 40) -> String? {
         guard !events.isEmpty else { return nil }
         let important = events.filter { $0.importance >= .notable }
@@ -86,5 +91,18 @@ public final class ActivityLog {
         var text = "Dashboard activity since your last turn (\(events.count) events, oldest first):\n" + lines.joined(separator: "\n")
         if skipped > 0 { text += "\n(\(skipped) older routine events omitted; call dashboard_activity for the full log.)" }
         return text
+    }
+}
+
+/// A listener added with `ActivityLog.onEmit`; `cancel()` removes it.
+@MainActor
+public final class ActivitySubscription {
+    private var remove: (() -> Void)?
+
+    init(remove: @escaping () -> Void) { self.remove = remove }
+
+    public func cancel() {
+        remove?()
+        remove = nil
     }
 }

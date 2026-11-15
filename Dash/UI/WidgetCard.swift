@@ -133,7 +133,7 @@ struct WidgetCard: View {
     private var menuItems: some View {
             Button("Settings…", systemImage: "slider.horizontal.3") { showSettings = true }
             Button("Ask Dashii", systemImage: "bubble.left") {
-                host.askClaude("Read widget \"\(widget.title)\" (id \(widget.id.uuidString)) and tell me what stands out.")
+                host.askDashii("Read widget \"\(widget.title)\" (id \(widget.id.uuidString)) and tell me what stands out.")
             }
             if host.widgetType(widget.kind)?.queryFields.isEmpty == false {
                 Button("Filter with Dashii…", systemImage: "line.3.horizontal.decrease.circle") {

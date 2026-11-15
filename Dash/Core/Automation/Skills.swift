@@ -88,20 +88,20 @@ enum Skills {
 
     // MARK: Tools
 
-    static func tools(host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(host: ExtensionHost) -> [DashiiTool] {
         let context = host.context
         return [
-            ClaudeTool(name: "skills_list", description: "The user's skills (know-how to load for a task): name, when to use it, enabled.") { _ in
+            DashiiTool(name: "skills_list", description: "The user's skills (know-how to load for a task): name, when to use it, enabled.") { _ in
                 .array(all(in: context).map { ["name": .string($0.name), "when_to_use": .string($0.whenToUse), "enabled": .bool($0.enabled)] })
             },
-            ClaudeTool(name: "skill_use", description: "Load a skill's instructions and template, then follow them for the task at hand. It adds guidance only, not tools.",
+            DashiiTool(name: "skill_use", description: "Load a skill's instructions and template, then follow them for the task at hand. It adds guidance only, not tools.",
                        properties: ["name": JSONSchema.string("Skill name.")], required: ["name"]) { input in
                 guard let skill = named(input["name"]?.string ?? "", in: context), skill.enabled else {
                     throw ToolError("No enabled skill “\(input["name"]?.string ?? "")”. Skills: \(all(in: context).filter(\.enabled).map(\.name).joined(separator: ", ")).")
                 }
                 return skill.json
             },
-            ClaudeTool(name: "skill_save", description: "Create or update a skill from what the user describes: a name (kebab-case), when to use it, the instructions (steps, rules), and an optional output template. Never include secrets, and no wording that tries to override other instructions.",
+            DashiiTool(name: "skill_save", description: "Create or update a skill from what the user describes: a name (kebab-case), when to use it, the instructions (steps, rules), and an optional output template. Never include secrets, and no wording that tries to override other instructions.",
                        properties: ["name": JSONSchema.string("kebab-case name."), "when_to_use": JSONSchema.string("One or two lines."),
                                     "instructions": JSONSchema.string("The know-how, plain Markdown."), "template": JSONSchema.string("Optional output skeleton.")],
                        required: ["name", "when_to_use", "instructions"], requiresApproval: true) { input in
@@ -121,7 +121,7 @@ enum Skills {
                 try context.save()
                 return ["saved": .string(name)]
             },
-            ClaudeTool(name: "skill_delete", description: "Delete a skill.", properties: ["name": JSONSchema.string("Skill name.")],
+            DashiiTool(name: "skill_delete", description: "Delete a skill.", properties: ["name": JSONSchema.string("Skill name.")],
                        required: ["name"], requiresApproval: true) { input in
                 guard let skill = named(input["name"]?.string ?? "", in: context) else { throw ToolError("No skill “\(input["name"]?.string ?? "")”.") }
                 context.delete(skill)

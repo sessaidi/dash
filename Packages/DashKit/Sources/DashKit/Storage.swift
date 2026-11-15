@@ -1,5 +1,7 @@
 import Foundation
+import Darwin
 import Security
+import Synchronization
 
 /// Where secrets live. Dash chooses at launch (Settings › Debug).
 public enum SecretBackend: String, Sendable, CaseIterable {
@@ -41,15 +43,32 @@ public protocol SecretVault: Sendable {
     func accounts() -> [String]
 }
 
-/// Secrets by account name ("<extension id>.<key>"), in the chosen backend. Every extension's
-/// `SecretStore` goes through here.
+/// Secrets by account name ("<extension id>.<key>"), in the chosen backend. Host-only: extensions
+/// use their own `SecretStore`, which can't reach other extensions' secrets.
+@_spi(DashHost)
 public enum Keychain {
     static let service = "dev.sessaidi.Dash"
 
-    /// Set by Dash before extensions start.
-    nonisolated(unsafe) public static var backend: SecretBackend = .keychain
-    nonisolated(unsafe) public static var fileURL = URL.applicationSupportDirectory.appending(path: "Dash/secrets.json")
-    nonisolated(unsafe) public static var vault: (any SecretVault)?
+    private struct Configuration: Sendable {
+        var backend: SecretBackend = .keychain
+        var fileURL = URL.applicationSupportDirectory.appending(path: "Dash/secrets.json")
+        var vault: (any SecretVault)?
+    }
+    private static let configuration = Mutex(Configuration())
+
+    /// Where secrets go; set by Dash before extensions start, and when the user switches backend.
+    public static var backend: SecretBackend {
+        get { configuration.withLock { $0.backend } }
+        set { configuration.withLock { $0.backend = newValue } }
+    }
+    public static var fileURL: URL {
+        get { configuration.withLock { $0.fileURL } }
+        set { configuration.withLock { $0.fileURL = newValue } }
+    }
+    public static var vault: (any SecretVault)? {
+        get { configuration.withLock { $0.vault } }
+        set { configuration.withLock { $0.vault = newValue } }
+    }
     private static let lock = NSLock()
 
     public static func read(_ account: String) -> String? { read(account, in: backend) }
@@ -78,7 +97,7 @@ public enum Keychain {
     public static func accounts(in backend: SecretBackend) -> [String] {
         switch backend {
         case .keychain: keychainAccounts()
-        case .file: lock.withLock { load().keys.sorted() }
+        case .file: lock.withLock { ((try? load()) ?? [:]).keys.sorted() }
         case .database: vault?.accounts() ?? []
         }
     }
@@ -111,6 +130,8 @@ public enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Saves (or, for nil or "", deletes) an item. An existing item is updated in place, so a
+    /// failed save never loses the value that was there.
     @discardableResult
     public static func keychainWrite(_ value: String?, for account: String) -> Bool {
         let query: [String: Any] = [
@@ -118,10 +139,16 @@ public enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
-        guard let value, !value.isEmpty else { return true }
+        guard let value, !value.isEmpty else {
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+        let data = Data(value.utf8)
+        let updated = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
         var attributes = query
-        attributes[kSecValueData as String] = Data(value.utf8)
+        attributes[kSecValueData as String] = data
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
@@ -140,25 +167,37 @@ public enum Keychain {
 
     // MARK: File
 
-    private static func load() -> [String: String] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
-        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    /// The file's secrets: empty when there's no file yet. A file that can't be read or decoded
+    /// throws, so a write never replaces it (and every other secret) with just one key.
+    private static func load() throws -> [String: String] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch CocoaError.fileReadNoSuchFile {
+            return [:]
+        }
+        return try JSONDecoder().decode([String: String].self, from: data)
     }
 
+    /// Writes through a temporary file created owner-only (0600) beside it, then renames it over
+    /// the old one: the secrets are never readable by others, even for a moment.
     private static func save(_ secrets: [String: String]) -> Bool {
-        let files = FileManager.default
         let folder = fileURL.deletingLastPathComponent()
         do {
-            try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(secrets)
-            // Created owner-only before any secret is written to it.
-            if !files.fileExists(atPath: fileURL.path) {
-                files.createFile(atPath: fileURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+            let temporary = folder.appending(path: ".\(fileURL.lastPathComponent).\(UUID().uuidString)")
+            let descriptor = open(temporary.path, O_CREAT | O_EXCL | O_WRONLY, 0o600)
+            guard descriptor >= 0 else { return false }
+            let written = data.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
+            let synced = fsync(descriptor) == 0
+            close(descriptor)
+            guard written == data.count, synced, rename(temporary.path, fileURL.path) == 0 else {
+                unlink(temporary.path)
+                return false
             }
-            try data.write(to: fileURL, options: .atomic)
-            try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             return true
         } catch {
             return false
@@ -166,41 +205,21 @@ public enum Keychain {
     }
 
     public static func fileRead(_ account: String) -> String? {
-        lock.withLock { load()[account] }
+        lock.withLock { (try? load())?[account] }
     }
 
+    /// Saves (or removes, for nil or "") one secret. Refuses when the file exists but can't be
+    /// read, rather than overwriting the other secrets.
     @discardableResult
     public static func fileWrite(_ value: String?, for account: String) -> Bool {
         lock.withLock {
-            var secrets = load()
+            guard var secrets = try? load() else {
+                DashLog.error("The secrets file can't be read; not writing \(account) over it.", category: "secrets")
+                return false
+            }
             secrets[account] = (value?.isEmpty ?? true) ? nil : value
             return save(secrets)
         }
-    }
-
-    /// Copies Dash's keychain items into the file (macOS asks once per item), then deletes them
-    /// from the keychain. Returns how many moved.
-    @discardableResult
-    public static func moveKeychainToFile() -> Int {
-        var moved = 0
-        for account in keychainAccounts() {
-            guard let value = keychainRead(account), fileWrite(value, for: account) else { continue }
-            keychainWrite(nil, for: account)
-            moved += 1
-        }
-        return moved
-    }
-
-    /// The reverse: the file's secrets into the keychain, then the file is emptied.
-    @discardableResult
-    public static func moveFileToKeychain() -> Int {
-        let secrets = lock.withLock { load() }
-        var moved = 0
-        for (account, value) in secrets where keychainWrite(value, for: account) {
-            fileWrite(nil, for: account)
-            moved += 1
-        }
-        return moved
     }
 }
 
@@ -248,7 +267,16 @@ public struct SecretStore: Sendable {
 /// Where extensions keep their settings and state: Dash points it at its database before any
 /// extension is made. Plugins default their `UserDefaults` to it instead of `.standard`.
 public enum DashStorage {
-    nonisolated(unsafe) public static var defaults: UserDefaults = .standard
+    private static let lock = NSLock()
+    // Guarded by `lock`; UserDefaults itself is thread-safe.
+    nonisolated(unsafe) private static var current: UserDefaults = .standard
+
+    /// The extensions' preferences store.
+    public static var defaults: UserDefaults { lock.withLock { current } }
+
+    /// Points extensions at the host's store (Dash: its database), before any extension is made.
+    @_spi(DashHost)
+    public static func use(_ defaults: UserDefaults) { lock.withLock { current = defaults } }
 }
 
 /// UserDefaults values owned by one extension: keys "<prefix>.<name>".
@@ -261,8 +289,8 @@ public struct PreferenceStore: Sendable {
 
     public func key(_ name: String) -> String { "\(prefix).\(name)" }
 
-    /// Where preferences live; the host points it elsewhere under tests.
-    nonisolated(unsafe) public static var defaults = DashStorage.defaults
+    /// Where preferences live: always `DashStorage.defaults` (the host points that at its store).
+    public static var defaults: UserDefaults { DashStorage.defaults }
     private var defaults: UserDefaults { Self.defaults }
 
     public func string(_ name: String) -> String? { defaults.string(forKey: key(name)) }

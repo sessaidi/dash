@@ -5,7 +5,7 @@ import SwiftData
 import SwiftUI
 
 /// Settings › Usage: what Dash's Claude requests consumed, from the calls kept in the store.
-/// Costs are Claude Code's estimates at API prices; on a subscription they count toward the
+/// Costs are the engine's estimates at API prices; on a subscription they count toward the
 /// plan's limits instead of a bill.
 struct UsageView: View {
     @Environment(AppSettings.self) private var settings
@@ -67,13 +67,13 @@ struct UsageView: View {
                     .frame(height: 160)
                 }
                 breakdown("By source", groups: Dictionary(grouping: calls, by: \.sourceLabel))
-                breakdown("By model", groups: Dictionary(grouping: calls) { ClaudeModel(rawValue: $0.model)?.displayName ?? $0.model })
+                breakdown("By model", groups: Dictionary(grouping: calls) { DashiiModel(rawValue: $0.model)?.displayName ?? $0.model })
                 Section("Recent requests") {
                     ForEach(calls.prefix(25)) { call in
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(call.sourceLabel).font(.callout)
-                                Text("\(ClaudeModel(rawValue: call.model)?.displayName ?? call.model)\(call.effort.map { " · \($0)" } ?? "") · \(call.turns) turns · \(Duration.milliseconds(call.durationMS).formatted(.units(allowed: [.minutes, .seconds], width: .narrow)))")
+                                Text("\(DashiiModel(rawValue: call.model)?.displayName ?? call.model)\(call.effort.map { " · \($0)" } ?? "") · \(call.turns) turns · \(Duration.milliseconds(call.durationMS).formatted(.units(allowed: [.minutes, .seconds], width: .narrow)))")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
@@ -132,7 +132,7 @@ struct UsageView: View {
 
     private func daily(_ calls: [ClaudeCall]) -> [DailyCost] {
         let calendar = Calendar.current
-        let grouped = Dictionary(grouping: calls) { DayModel(day: calendar.startOfDay(for: $0.date), model: ClaudeModel(rawValue: $0.model)?.displayName ?? $0.model) }
+        let grouped = Dictionary(grouping: calls) { DayModel(day: calendar.startOfDay(for: $0.date), model: DashiiModel(rawValue: $0.model)?.displayName ?? $0.model) }
         return grouped.map { DailyCost(day: $0.key.day, model: $0.key.model, cost: $0.value.reduce(0) { $0 + $1.costUSD }) }
             .sorted { $0.day < $1.day }
     }

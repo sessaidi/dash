@@ -50,10 +50,10 @@ struct NotesTests {
         let create = try #require(notes.tools.first { $0.name == "notes_create" })
         #expect(create.description.contains("@TOC") && create.description.contains("@Callout(style:") && create.description.contains("@Tabs"))
 
-        host.testClaude.reply = "- [ ] Roll out retries (Ada)"
+        host.testDashii.reply = "- [ ] Roll out retries (Ada)"
         let items = try await notes.run(.actionItems, title: "Standup", text: "Ada rolls out retries")
         #expect(items == "- [ ] Roll out retries (Ada)")
-        let call = try #require(host.testClaude.calls.last)
+        let call = try #require(host.testDashii.calls.last)
         #expect(call.prompt.contains("# Standup") && call.source == "extension.notes/assist")
     }
 }

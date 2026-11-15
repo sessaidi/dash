@@ -1,5 +1,5 @@
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import SwiftData
 import SwiftUI
 
@@ -23,8 +23,7 @@ struct DashApp: App {
         // Under XCTest the app is only a test host: no real store, no polling of real accounts.
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         // Preferences live in the database (in memory under tests): before any extension reads one.
-        DashStorage.defaults = DashDefaults.shared
-        PreferenceStore.defaults = DashDefaults.shared
+        DashStorage.use(DashDefaults.shared)
         // Secrets: before any extension reads one. Tests use a throwaway file, never the real store.
         SecretStorage.apply()
         if testing {

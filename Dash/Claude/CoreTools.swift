@@ -23,11 +23,11 @@ enum CoreTools {
         return id
     }
 
-    static func tools(host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(host: ExtensionHost) -> [DashiiTool] {
         let store = host.dashboard!
         let sizes = WidgetSize.allCases.map(\.rawValue)
         return [
-            ClaudeTool(
+            DashiiTool(
                 name: "dashboard_activity",
                 description: "The dashboard's activity log: new and reviewed PRs, ticket moves, agent progress, meetings, workspace and layout changes. Use it to answer \"what happened\" questions or to look further back than the per-turn summary.",
                 properties: [
@@ -44,7 +44,7 @@ enum CoreTools {
                      "detail": $0.detail.map(JSONValue.string) ?? .null, "link": $0.link.map(JSONValue.string) ?? .null, "importance": .string($0.importance.rawValue)]
                 })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "list_widget_types",
                 description: "List the widget kinds that can be placed on the dashboard, with each kind's config JSON schema and default config."
             ) { _ in
@@ -53,11 +53,11 @@ enum CoreTools {
                      "config_schema": $0.configSchema, "default_config": $0.defaultConfig]
                 })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "list_pages",
                 description: "List the dashboard's pages (sidebar items) with ids, names, icons, widget counts and which one is on screen."
             ) { _ in .array(store.pages().map(store.describe)) },
-            ClaudeTool(
+            DashiiTool(
                 name: "create_page",
                 description: "Create a new page in the sidebar. Then add widgets to it with add_widget and page_id.",
                 properties: ["name": JSONSchema.string("Page name."), "icon": JSONSchema.string("SF Symbol name.", enum: DashboardStore.pageIcons)],
@@ -66,11 +66,11 @@ enum CoreTools {
                 let request = try input.toolInput(PageInput.self)
                 return store.describe(store.createPage(name: request.name, systemImage: request.icon ?? "square.grid.2x2"))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "layout_context",
                 description: "Everything needed to suggest a layout: the widget types you can place (summary, default size, size limits, config schema, actions), which integrations are connected, what's installed, plugins in the Marketplace not installed yet, the current pages and their widgets, and which sources were busiest this week.",
             ) { _ in layoutContext(host: host) },
-            ClaudeTool(
+            DashiiTool(
                 name: "suggest_layout",
                 description: "Start a suggested layout: creates a draft page the user can Keep, Change or Discard. Then add and place widgets on it (add_widget with page_id, place_widget), configured for the user (repos, namespaces, filters), most important top-left. Ask the user about their needs first unless you already know them.",
                 properties: ["name": JSONSchema.string("Page name, e.g. On-call."), "icon": JSONSchema.string("SF Symbol name.", enum: DashboardStore.pageIcons),
@@ -83,7 +83,7 @@ enum CoreTools {
                 host.mainView = "page"
                 return store.describe(page)
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "update_page",
                 description: "Rename a page or change its icon.",
                 properties: ["id": JSONSchema.string("Page id."), "name": JSONSchema.string("New name."),
@@ -94,7 +94,7 @@ enum CoreTools {
                 try store.updatePage(try uuid(request.id), name: request.name, systemImage: request.icon)
                 return store.describe(try store.page(try uuid(request.id)))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "delete_page",
                 description: "Delete a page and the widgets on it.",
                 properties: ["id": JSONSchema.string("Page id.")], required: ["id"], requiresApproval: true
@@ -102,7 +102,7 @@ enum CoreTools {
                 try store.deletePage(try uuid(try input.toolInput(PageIDInput.self).id))
                 return "deleted"
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "list_widgets",
                 description: "List widgets in reading order with ids, page_id, kinds, titles, grid position and size (x, y, w, h on a 12-column grid) and configs. Call this before answering questions about the dashboard.",
                 properties: ["page_id": JSONSchema.string("Only this page (default: every page).")]
@@ -111,12 +111,12 @@ enum CoreTools {
                 // Hidden widgets (extension missing or turned off) aren't on screen; leave them out.
                 return .array(store.widgets(on: page).filter { host.isWidgetAvailable($0.kind) }.map(store.describe))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "read_widget",
                 description: "Read one widget's live data (for example the issues on a Jira board widget or the PRs in a pull request widget), what the widget type is, what it shows right now beyond its config (ui_state: search, selection, visible range) and the actions you can run on it with widget_act.",
                 properties: ["id": JSONSchema.string("Widget id from list_widgets.")], required: ["id"]
             ) { input in try await store.snapshot(uuid(input.toolInput(WidgetID.self).id)) },
-            ClaudeTool(
+            DashiiTool(
                 name: "widget_query",
                 description: "Set a widget's DashQL filter (saved with it): what it shows, filtered, sorted and cut, e.g. `ns:papi-eu status:failing | sort -restarts | take 20`. It may follow another widget's selection: `tickets ~ $selected(\"Jira board\").key`. Empty clears it. read_widget lists the widget's query_fields; the user sees and can edit the query.",
                 properties: ["id": JSONSchema.string("Widget id."), "query": JSONSchema.string("DashQL without a source (filter | sort | take), or empty.")],
@@ -128,7 +128,7 @@ enum CoreTools {
                 host.live(id).attention = .now
                 return store.describe(try store.widget(id))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "widget_act",
                 description: "Do something with a widget on screen, as the user would: search, select a row, jump to a date… The actions a widget offers are listed by read_widget. They're temporary (not saved): for a lasting filter use widget_query, for settings update_widget. The widget must be on the current page (view_show opens its page).",
                 properties: ["id": JSONSchema.string("Widget id."), "action": JSONSchema.string("Action name from read_widget."),
@@ -149,7 +149,7 @@ enum CoreTools {
                 try? await Task.sleep(for: .milliseconds(150))
                 return ["result": result, "ui_state": live.state]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "add_widget",
                 description: "Add a widget to the end of the dashboard. `config` is merged over the kind's default config.",
                 properties: [
@@ -164,7 +164,7 @@ enum CoreTools {
                 return store.describe(try store.add(kind: request.kind, title: request.title, size: request.size, config: request.config,
                                                     page: try request.page_id.map(uuid)))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "update_widget",
                 description: "Change a widget's title, size or config. `config` is merged over the current config, so pass only the fields to change.",
                 properties: [
@@ -179,7 +179,7 @@ enum CoreTools {
                 try store.update(id, title: request.title, size: request.size, config: request.config)
                 return store.describe(try store.widget(id))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "place_widget",
                 description: "Move and/or resize a widget on the 12-column grid (x 0-11, y rows from the top, w columns, h rows of 40 pt). Overlapped widgets move down and gaps close upward.",
                 properties: [
@@ -194,7 +194,7 @@ enum CoreTools {
                 try store.place(id, x: request.x, y: request.y, w: request.w, h: request.h, page: try request.page_id.map(uuid))
                 return store.describe(try store.widget(id))
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "remove_widget",
                 description: "Remove a widget from the dashboard.",
                 properties: ["id": JSONSchema.string("Widget id.")], required: ["id"], requiresApproval: true

@@ -29,9 +29,9 @@ enum ViewContext {
 
     private struct ShowInput: Decodable { let page: String?; let note: String?; let view: String? }
 
-    static func tools(host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(host: ExtensionHost) -> [DashiiTool] {
         [
-            ClaudeTool(
+            DashiiTool(
                 name: "view_current",
                 description: "What the user is looking at right now, in detail: on a page, every widget with its live data; in Notes, the open note's full Markdown. \"This\", \"here\" and \"these\" usually mean this view."
             ) { _ in
@@ -61,7 +61,7 @@ enum ViewContext {
                     return ["view": "page", "page": store.describe(page), "editing_layout": .bool(host.layoutEditing), "widgets": .array(widgets)]
                 }
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "view_show",
                 description: "Change what's on screen: open a dashboard page (by name or id), open a note in Notes (by title), or go to Notes or Knowledge. Use it to show the user what you're talking about or what you just made.",
                 properties: ["page": JSONSchema.string("Page name or id."), "note": JSONSchema.string("Note title to open in Notes."),

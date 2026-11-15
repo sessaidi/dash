@@ -25,11 +25,11 @@ struct ActivityTests {
         let log = ActivityLog()
         let start = Date(timeIntervalSince1970: 0)
         for index in 0..<10 { log.emit("widget.moved", source: "dashboard", title: "moved \(index)", at: start.addingTimeInterval(Double(index))) }
-        log.emit("review.completed", source: "pull-requests", title: "Claude reviewed acme/api#812", detail: "request changes, high risk",
+        log.emit("review.completed", source: "pull-requests", title: "Dashii reviewed acme/api#812", detail: "request changes, high risk",
                  importance: .notable, at: start.addingTimeInterval(20))
         let digest = try #require(ActivityLog.digest(log.events, limit: 4))
         #expect(digest.contains("11 events"))
-        #expect(digest.contains("Claude reviewed acme/api#812 — request changes, high risk"))
+        #expect(digest.contains("Dashii reviewed acme/api#812 — request changes, high risk"))
         #expect(digest.contains("7 older routine events omitted"))
         #expect(ActivityLog.digest([]) == nil)
     }

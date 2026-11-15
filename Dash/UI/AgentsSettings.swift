@@ -224,7 +224,7 @@ private struct AgentEditor: View {
                     }
                 }
                 Picker("Model", selection: $agent.model) {
-                    ForEach([ClaudeModel.sonnet, .haiku, .opus]) { Text($0.displayName).tag($0.rawValue) }
+                    ForEach([DashiiModel.balanced, .fast, .strong]) { Text($0.displayName).tag($0.rawValue) }
                 }
             }
         }

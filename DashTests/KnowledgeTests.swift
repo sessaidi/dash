@@ -272,13 +272,13 @@ struct KnowledgeTests {
         await knowledge.refresh()
         #expect(knowledge.lastError == nil && (knowledge.counts["symbol"] ?? 0) == 7)
 
-        host.testClaude.reply = #"{"summary":"Bills customers.","responsibilities":["Renewals"],"concepts":[{"name":"Subscription renewal","description":"Charging again each period."}]}"#
+        host.testDashii.reply = #"{"summary":"Bills customers.","responsibilities":["Renewals"],"concepts":[{"name":"Subscription renewal","description":"Charging again each period."}]}"#
         let studied = await knowledge.learn(budget: 2)
         #expect(studied == 2)
         let store = try #require(knowledge.store)
         let billing = try #require(try await store.node("dir:\(root.path)/Sources/Billing"))
         #expect(billing.summary.hasPrefix("Bills customers.") && billing.summarized != nil)
-        #expect(host.testClaude.calls.contains { $0.prompt.contains("func renew() -> Double") })
+        #expect(host.testDashii.calls.contains { $0.prompt.contains("func renew() -> Double") })
         #expect(try await store.neighbors(billing.id, kinds: ["about"]).map(\.node.name) == ["Subscription renewal"])
         // The repository gets an overview from its top-level directories.
         #expect(try await store.node("repo:\(root.path)")?.summary.isEmpty == false)

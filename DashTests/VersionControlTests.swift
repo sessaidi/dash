@@ -100,7 +100,7 @@ struct VersionControlTests {
         await git.check()
         let (_, clone) = try await divergedClone()
         preferences.repositories[clone.path] = VCSPreferences.Settings(update: strategy)
-        func tool(_ name: String) throws -> ClaudeTool { try #require(git.tools.first { $0.name == name }) }
+        func tool(_ name: String) throws -> DashiiTool { try #require(git.tools.first { $0.name == name }) }
 
         try "mine\n".write(to: clone.appending(path: "c.txt"), atomically: true, encoding: .utf8)
         let status = try await tool("git_status").run(["repo": .string(clone.path)])

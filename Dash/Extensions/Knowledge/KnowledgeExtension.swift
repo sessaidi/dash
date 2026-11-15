@@ -287,7 +287,7 @@ final class KnowledgeExtension: DashExtension {
     static let understandTask = AITask(
         id: "understand", title: "Understand the code",
         summary: "Reads one directory at a time (files, declarations, imports, sub-directory notes) and writes what it's for, its responsibilities and the concepts it deals with.",
-        models: [.haiku, .sonnet, .opus], defaultModel: .sonnet, efforts: [.low, .medium, .high], defaultEffort: .low)
+        models: [.fast, .balanced, .strong], defaultModel: .balanced, efforts: [.low, .medium, .high], defaultEffort: .low)
 
     var aiTasks: [AITask] { [Self.understandTask] }
     var ai: AISettings { host?.aiSettings(.extension(id), tasks: aiTasks) ?? AISettings(tasks: aiTasks) }
@@ -351,7 +351,7 @@ final class KnowledgeExtension: DashExtension {
     private func study(_ directory: KnowledgeNode, host: any ExtensionContext, store: KnowledgeStore) async throws {
         status = "Understanding \(directory.path)…"
         let context = try await Self.context(for: directory, store: store)
-        let text = try await host.claude.complete(
+        let text = try await host.dashii.complete(
             task: Self.understandTask.id, settings: ai,
             system: "You study a codebase one directory at a time and write concise, factual notes another engineer (or AI) will rely on. Only state what the material shows.",
             prompt: context, outputSchema: Self.understandSchema)
@@ -381,7 +381,7 @@ final class KnowledgeExtension: DashExtension {
         for directory in top { prompt += "\n## \(directory.path)\n\(directory.summary)\n" }
         if let readme = Self.readme(in: URL(fileURLWithPath: String(repoID.dropFirst(5)))) { prompt += "\nREADME (start):\n\(readme)\n" }
         prompt += "\nDescribe the whole repository: its purpose, main parts and how they fit together."
-        if let text = try? await host.claude.complete(task: Self.understandTask.id, settings: ai,
+        if let text = try? await host.dashii.complete(task: Self.understandTask.id, settings: ai,
                                                       system: "You write concise, factual overviews of codebases.",
                                                       prompt: prompt, outputSchema: Self.understandSchema),
            let understanding = try? JSONValue.parse(text).decode(Understanding.self) {
@@ -460,9 +460,9 @@ final class KnowledgeExtension: DashExtension {
     }
 
     /// Dashii's memory: remember what the user asks it to, recall, forget.
-    private var memoryTools: [ClaudeTool] {
+    private var memoryTools: [DashiiTool] {
         [
-            ClaudeTool(
+            DashiiTool(
                 name: "memory_remember",
                 description: "Remember a fact for later conversations (the user asked you to, or corrected you): one specific sentence, with the tickets, repos, people or concepts it's about. Never secrets.",
                 properties: ["fact": JSONSchema.string("The fact, one sentence."),
@@ -476,7 +476,7 @@ final class KnowledgeExtension: DashExtension {
                 self?.bump()
                 return ["remembered": .string(id)]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "memory_recall",
                 description: "What you learned in earlier conversations about something (facts with confidence, date and id). <what-i-know> already brings the most relevant ones; use this to look further.",
                 properties: ["query": JSONSchema.string("What to recall; omit for the most recent facts.")]
@@ -486,7 +486,7 @@ final class KnowledgeExtension: DashExtension {
                 let nodes = query.isEmpty ? Array(await memory.all(limit: 40).prefix(40)) : await memory.recall(query, limit: 20)
                 return .array(nodes.map { ["id": .string($0.id), "fact": .string($0.signature), "how": .string($0.qualified), "updated": .string($0.updated.formatted(.iso8601))] })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "memory_forget",
                 description: "Forget a fact you learned (it was wrong or the user asked). Ids come from <what-i-know> or memory_recall.",
                 properties: ["id": JSONSchema.string("obs:… id.")], required: ["id"]
@@ -506,9 +506,9 @@ final class KnowledgeExtension: DashExtension {
     private struct ForgetInput: Decodable { let id: String }
     private struct RecallInput: Decodable { let query: String? }
 
-    var tools: [ClaudeTool] {
+    var tools: [DashiiTool] {
         memoryTools + [
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_search",
                 description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Claude's notes. Start here to locate anything.",
                 properties: ["query": JSONSchema.string("Words or a name, e.g. \"renew subscription\" or \"UserService\"."),
@@ -521,7 +521,7 @@ final class KnowledgeExtension: DashExtension {
                 let nodes = try await store.search(request.query, kinds: request.kind.map { [$0] } ?? [], limit: min(request.limit ?? 20, 60))
                 return .array(nodes.map { Self.json($0) })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_node",
                 description: "One node of the knowledge graph with its neighbours grouped by relation (contains, defines, imports, calls, called by, authored, changes_with, touches, mentions, about…). Use it to walk the graph from a search result.",
                 properties: ["id": JSONSchema.string("Node id from another knowledge_* result.")], required: ["id"]
@@ -538,7 +538,7 @@ final class KnowledgeExtension: DashExtension {
                 result["relations"] = .object(groups.mapValues { .array($0) })
                 return .object(result)
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_trace",
                 description: "Who calls a symbol (direction in) or what it calls (direction out), several hops deep.",
                 properties: ["id": JSONSchema.string("Symbol id."),
@@ -555,7 +555,7 @@ final class KnowledgeExtension: DashExtension {
                     return .object(object)
                 })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_path",
                 description: "How two things are connected: the shortest chain of relations between two nodes (e.g. a ticket and a function, a person and a module).",
                 properties: ["from": JSONSchema.string("Node id."), "to": JSONSchema.string("Node id.")],
@@ -568,7 +568,7 @@ final class KnowledgeExtension: DashExtension {
                     ["relation": .string(step.incoming ? Self.inverse(step.edge.kind) : step.edge.kind), "node": Self.json(step.node)]
                 })
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_overview",
                 description: "The indexed repositories with Claude's overview of each and of their top-level directories, plus graph size. Call first when asked about a project as a whole.",
                 properties: [:]
@@ -583,7 +583,7 @@ final class KnowledgeExtension: DashExtension {
                 let counts = try await store.counts()
                 return ["repositories": .array(repos), "counts": .object(counts.mapValues { .number(Double($0)) })]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_snippet",
                 description: "The source code of a symbol or the start of a file, read from disk.",
                 properties: ["id": JSONSchema.string("Symbol or file id.")], required: ["id"]
@@ -598,7 +598,7 @@ final class KnowledgeExtension: DashExtension {
                 return ["file": .string(url.path), "from": .number(Double(start)),
                         "code": .string(lines[(start - 1)..<min(end, lines.count)].joined(separator: "\n"))]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_find_repos",
                 description: "Find git checkouts on this Mac (under ~/code, ~/Codes, ~/Developer, ~/src and similar, three levels deep) whose folder name contains some text, with their origin and whether Knowledge already indexes them. Read-only.",
                 properties: ["query": JSONSchema.string("Part of the repository's folder name; empty lists them all.")]
@@ -613,7 +613,7 @@ final class KnowledgeExtension: DashExtension {
                              "indexed": .bool(repositories.contains(url.standardizedFileURL.path))]
                         })]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_add_repository",
                 description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Claude usage). Give a local path, a folder name found by knowledge_find_repos, or GitHub owner/name: a local checkout is used if there is one, otherwise it's cloned into the code folder with the user's git credentials. Then knowledge_learn can study it.",
                 properties: ["repository": JSONSchema.string("A path, a folder name, or owner/name.")],
@@ -632,7 +632,7 @@ final class KnowledgeExtension: DashExtension {
                 revision += 1
                 return ["path": .string(path), "cloned": .bool(cloned), "indexed": .string(String(describing: report))]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_remove_repository",
                 description: "Stop indexing a repository and drop it from the knowledge graph (the checkout on disk is left alone).",
                 properties: ["repository": JSONSchema.string("Its path or folder name.")], required: ["repository"], requiresApproval: true
@@ -645,7 +645,7 @@ final class KnowledgeExtension: DashExtension {
                 removeRepository(path)
                 return ["removed": .string(path)]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_impact",
                 description: "What a change to a symbol or file would affect: callers (three hops), files importing it, the tests covering it and its callers, files that usually change with it, and who knows it best. Use before changing or reviewing code.",
                 properties: ["id": JSONSchema.string("Symbol or file id from knowledge_search.")], required: ["id"]
@@ -653,7 +653,7 @@ final class KnowledgeExtension: DashExtension {
                 guard let self, let store else { return nil }
                 return try await impact(of: try input.toolInput(ImpactInput.self).id, store: store)
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_experts",
                 description: "Who knows a file, directory or whole repository best: the people who changed it most in the recent git history, with commit counts.",
                 properties: ["id": JSONSchema.string("A repository, directory or file id.")], required: ["id"]
@@ -667,7 +667,7 @@ final class KnowledgeExtension: DashExtension {
                 return ["for": .string(node.kind == "repo" ? node.name : node.path),
                         "experts": .array(experts.map { ["name": .string($0.person.name), "email": .string($0.person.qualified), "commits": .number(Double($0.commits))] })]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_context",
                 description: "Everything the graph knows that's relevant to a question, in one call: the best matching concepts, directories (with Claude's notes), files and symbols, each with the summary of where it lives. Use it to ground an answer about how the code works before reading files.",
                 properties: ["question": JSONSchema.string("The question, in plain words."), "limit": JSONSchema.integer("How many matches (default 12).")],
@@ -677,7 +677,7 @@ final class KnowledgeExtension: DashExtension {
                 let request = try input.toolInput(ContextInput.self)
                 return try await context(for: request.question, limit: min(request.limit ?? 12, 30), store: store)
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_status",
                 description: "The state of the knowledge graph per repository: files and symbols indexed, how much Claude has studied, whether git history is linked, when it was last indexed. Use it to tell the user what Knowledge can answer well.",
                 properties: [:]
@@ -696,7 +696,7 @@ final class KnowledgeExtension: DashExtension {
                         "settings": ["history": .bool(readHistory), "background_study": .bool(understand),
                                      "directories_per_pass": .number(Double(understandBudget)), "hours_between_passes": .number(Double(understandHours))]]
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "knowledge_learn",
                 description: "Have Claude study more of the code now (directories not yet understood or changed since), improving later answers. Costs Claude usage.",
                 properties: ["directories": JSONSchema.integer("How many directories (default 5, max 20)."),

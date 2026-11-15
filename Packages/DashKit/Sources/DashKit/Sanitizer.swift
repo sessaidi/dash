@@ -1,6 +1,6 @@
 import Foundation
 
-/// Removes secrets from text and JSON before they reach Claude, the knowledge graph or logs:
+/// Removes secrets from text and JSON before they reach Dashii, the knowledge graph or logs:
 /// tokens and keys by their well-known shapes, credentials in URLs and auth headers, and the
 /// values of fields whose name says they're secret ("password", "API_KEY", "client_secret"…).
 /// What it can't recognise passes through, so it's a safety net, not a guarantee.
@@ -49,6 +49,8 @@ public enum Sanitizer {
 
     /// The text with secrets replaced by `[REDACTED]`, and how many were found.
     public static func redact(_ text: String) -> (text: String, count: Int) {
+        // Most text holds no secret: skip the patterns unless something that starts one is there.
+        guard mayHoldSecret(text) else { return (text, 0) }
         var result = text
         var count = 0
         for pattern in patterns {
@@ -61,6 +63,13 @@ public enum Sanitizer {
     }
 
     public static func clean(_ text: String) -> String { redact(text).text }
+
+    /// Cheap check before running the patterns: every pattern starts with one of these.
+    static func mayHoldSecret(_ text: String) -> Bool {
+        let markers = ["AKIA", "ASIA", "gh", "github_pat_", "glpat-", "xox", "AIza", "sk-", "eyJ", "-----BEGIN", "://", "=", ":",
+                       "earer", "asic", "oken"]
+        return markers.contains { text.contains($0) }
+    }
 
     /// The JSON with secret-named fields masked and secrets in strings redacted.
     public static func clean(_ value: JSONValue) -> JSONValue {
@@ -77,9 +86,17 @@ public enum Sanitizer {
     }
 
     public static func isSecretName(_ name: String) -> Bool {
-        // "token_count", "max_tokens", "author" are not secrets.
+        // Judged on whole name parts: "token_count", "max_tokens", "author" aren't secrets;
+        // "account_password", "service_account_token", "refresh_tokens" are.
         let lower = name.lowercased()
-        if ["author", "authors", "authored", "authored_at", "auth_type", "authorization_url"].contains(lower) || lower.contains("count") || lower.hasSuffix("tokens") { return false }
-        return lower.wholeMatch(of: secretName) != nil
+        let parts = lower.split(whereSeparator: { $0 == "_" || $0 == "-" || $0 == "." }).map(String.init)
+        if ["author", "authors", "authored", "authored_at", "auth_type", "authorization_url"].contains(lower) { return false }
+        if parts.contains(where: { ["count", "counts", "limit", "budget", "usage", "used"].contains($0) }) { return false }
+        if parts.last == "tokens", parts.contains(where: { ["max", "input", "output", "total", "prompt", "completion", "cache"].contains($0) }) { return false }
+        let secretParts = ["password", "passwd", "pwd", "secret", "token", "tokens", "apikey", "credential", "credentials", "dsn", "authorization"]
+        if parts.contains(where: secretParts.contains) { return true }
+        if lower.contains("api_key") || lower.contains("api-key") || lower.contains("private_key") || lower.contains("access_key")
+            || lower.contains("client_secret") || lower.contains("session_key") || lower.contains("signing_key") { return true }
+        return lower == "auth"
     }
 }

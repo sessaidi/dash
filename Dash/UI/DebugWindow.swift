@@ -1,6 +1,6 @@
 import AppKit
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers

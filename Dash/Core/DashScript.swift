@@ -14,9 +14,9 @@ import Foundation
 struct DashScript {
     let host: ExtensionHost
     /// The tools the caller may use (the chat's, or an agent's).
-    let tools: [ClaudeTool]
+    let tools: [DashiiTool]
     /// Asked before a tool runs: nil to go ahead, else why it can't.
-    let gate: (ClaudeTool, JSONValue) async -> String?
+    let gate: (DashiiTool, JSONValue) async -> String?
     /// Translate only: report the actions each statement becomes, run nothing.
     var plan = false
     /// The tool calls the current statement became.

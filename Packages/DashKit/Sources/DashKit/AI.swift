@@ -1,37 +1,38 @@
 import Foundation
 
-/// The Claude models an AI task can run on. Tasks list the ones that suit them; the user picks
-/// one per widget or feature in its AI settings.
-public enum ClaudeModel: String, CaseIterable, Codable, Sendable, Identifiable {
-    case opus = "claude-opus-5-5"
-    case sonnet = "claude-sonnet-5-5"
-    case haiku = "claude-haiku-5-5"
-    case fable = "claude-fable-5-1"
+/// How much thinking power Dashii puts into a task: tasks list the tiers that suit them, and the
+/// user picks one per widget or feature in its AI settings. (The raw value is the engine's model
+/// id; plugins and users only ever see the tier.)
+public enum DashiiModel: String, CaseIterable, Codable, Sendable, Identifiable {
+    case strong = "claude-opus-5-5"
+    case balanced = "claude-sonnet-5-5"
+    case fast = "claude-haiku-5-5"
+    case deep = "claude-fable-5-1"
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
-        case .opus: "Opus 5.5"
-        case .sonnet: "Sonnet 5.5"
-        case .haiku: "Haiku 5.5"
-        case .fable: "Fable 5.1"
+        case .strong: "Strong"
+        case .balanced: "Balanced"
+        case .fast: "Fast"
+        case .deep: "Deep"
         }
     }
 
     /// One line on what it's good for, shown under the picker.
     public var note: String {
         switch self {
-        case .opus: "Most capable: deep reviews, tricky code."
-        case .sonnet: "Balanced quality and speed."
-        case .haiku: "Fastest and cheapest: summaries, triage."
-        case .fable: "Most capable, slowest."
+        case .strong: "Thorough: deep reviews, tricky code."
+        case .balanced: "Balanced quality and speed."
+        case .fast: "Quickest and cheapest: summaries, triage."
+        case .deep: "Most thorough, slowest."
         }
     }
 }
 
-/// How hard Claude thinks (Claude Code's `--effort`).
-public enum ClaudeEffort: String, CaseIterable, Codable, Sendable, Identifiable {
+/// How hard Dashii thinks about a task.
+public enum DashiiEffort: String, CaseIterable, Codable, Sendable, Identifiable {
     case low, medium, high, xhigh, max
 
     public var id: String { rawValue }
@@ -57,30 +58,31 @@ public struct AITemplate: Sendable, Identifiable, Equatable {
     }
 }
 
-/// Something a widget or feature asks Claude to do (review a PR, write a PR description),
+/// Something a widget or feature asks Dashii to do (review a PR, write a PR description),
 /// declared so the user can pick the model, the effort and the prompt templates.
 public struct AITask: Sendable, Identifiable, Equatable {
     public let id: String
     public let title: String
     public let summary: String
     /// Models that suit the task, best first. The first is the default unless `defaultModel` says otherwise.
-    public let models: [ClaudeModel]
-    public let defaultModel: ClaudeModel
-    public let efforts: [ClaudeEffort]
-    public let defaultEffort: ClaudeEffort?
+    public let models: [DashiiModel]
+    public let defaultModel: DashiiModel
+    public let efforts: [DashiiEffort]
+    public let defaultEffort: DashiiEffort?
     /// Non-nil: the task can be switched off (e.g. "Allow creating PRs"), with this default.
     public let enabledByDefault: Bool?
     public let templates: [AITemplate]
 
     public init(
-        id: String, title: String, summary: String, models: [ClaudeModel] = ClaudeModel.allCases, defaultModel: ClaudeModel? = nil,
-        efforts: [ClaudeEffort] = [], defaultEffort: ClaudeEffort? = nil, enabledByDefault: Bool? = nil, templates: [AITemplate] = []
+        id: String, title: String, summary: String, models: [DashiiModel] = DashiiModel.allCases, defaultModel: DashiiModel? = nil,
+        efforts: [DashiiEffort] = [], defaultEffort: DashiiEffort? = nil, enabledByDefault: Bool? = nil, templates: [AITemplate] = []
     ) {
         self.id = id
         self.title = title
         self.summary = summary
-        self.models = models.isEmpty ? ClaudeModel.allCases : models
-        self.defaultModel = defaultModel.flatMap { models.contains($0) ? $0 : nil } ?? self.models[0]
+        let offered = models.isEmpty ? DashiiModel.allCases : models
+        self.models = offered
+        self.defaultModel = defaultModel.flatMap { offered.contains($0) ? $0 : nil } ?? offered[0]
         self.efforts = efforts
         self.defaultEffort = defaultEffort ?? efforts.first
         self.enabledByDefault = enabledByDefault
@@ -103,17 +105,29 @@ public enum AIScope: Hashable, Sendable, CustomStringConvertible {
 
 /// The user's choices for one task, as saved.
 public struct AITaskChoice: Codable, Sendable, Equatable {
-    public var model: ClaudeModel?
-    public var effort: ClaudeEffort?
+    public var model: DashiiModel?
+    public var effort: DashiiEffort?
     public var enabled: Bool?
     /// Template id to edited text (missing: the default).
     public var templates: [String: String]
 
-    public init(model: ClaudeModel? = nil, effort: ClaudeEffort? = nil, enabled: Bool? = nil, templates: [String: String] = [:]) {
+    public init(model: DashiiModel? = nil, effort: DashiiEffort? = nil, enabled: Bool? = nil, templates: [String: String] = [:]) {
         self.model = model
         self.effort = effort
         self.enabled = enabled
         self.templates = templates
+    }
+
+    private enum CodingKeys: String, CodingKey { case model, effort, enabled, templates }
+
+    /// A model or effort Dash no longer knows (retired, renamed) falls back to the default
+    /// instead of losing the rest of the user's choices.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        model = try? container.decodeIfPresent(DashiiModel.self, forKey: .model)
+        effort = try? container.decodeIfPresent(DashiiEffort.self, forKey: .effort)
+        enabled = try? container.decodeIfPresent(Bool.self, forKey: .enabled)
+        templates = (try? container.decodeIfPresent([String: String].self, forKey: .templates)) ?? [:]
     }
 }
 
@@ -133,13 +147,13 @@ public struct AISettings: Sendable, Equatable {
     private func task(_ id: String) -> AITask? { tasks.first { $0.id == id } }
 
     /// The chosen model, if the task still allows it, else the task's default.
-    public func model(_ taskID: String) -> ClaudeModel {
-        guard let task = task(taskID) else { return .sonnet }
+    public func model(_ taskID: String) -> DashiiModel {
+        guard let task = task(taskID) else { return .balanced }
         if let chosen = choices[taskID]?.model, task.models.contains(chosen) { return chosen }
         return task.defaultModel
     }
 
-    public func effort(_ taskID: String) -> ClaudeEffort? {
+    public func effort(_ taskID: String) -> DashiiEffort? {
         guard let task = task(taskID) else { return nil }
         if let chosen = choices[taskID]?.effort, task.efforts.contains(chosen) { return chosen }
         return task.defaultEffort
@@ -167,7 +181,7 @@ public struct AISettings: Sendable, Equatable {
     }
 }
 
-extension ClaudeService {
+extension DashiiService {
     /// Runs a declared task with the user's model and effort choices, attributed to the task in
     /// Dash's usage analytics ("extension.pull-requests/review").
     public func complete(task taskID: String, settings: AISettings, system: String, prompt: String,

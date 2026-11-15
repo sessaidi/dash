@@ -139,7 +139,7 @@ enum CoreComponents {
         // A button means nothing on paper.
         if context.isPrinting { return AnyView(EmptyView()) }
         return AnyView(Button(context.string("label") ?? context.string("prompt") ?? "Ask", systemImage: "sparkles") {
-            context.host.askClaude(context.string("prompt") ?? "")
+            context.host.askDashii(context.string("prompt") ?? "")
         }
         .buttonStyle(.bordered))
     }
@@ -320,7 +320,7 @@ private struct DashiiBlockView: View {
         guard let title = context.noteTitle else { return }
         asked = true
         let reference = context.string("id") ?? ask
-        context.host.askClaude("""
+        context.host.askDashii("""
             In my note “\(title)”, a @Dashii block asks: \(ask)
 
             Do it with your tools, then write your answer into that block with notes_answer \

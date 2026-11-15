@@ -59,13 +59,13 @@ struct DashiiMemoryTests {
 
     @Test func learnsFromAnExchangeWithACheapModel() async throws {
         let (memory, _, host) = try make()
-        host.testClaude.reply = #"{"facts":[{"text":"The user owns services-presentation-api.","about":["services-presentation-api"],"confidence":"stated","durability":"stable","evidence":"user said: I own services-presentation-api","scope":"global"},{"text":"No evidence here so it is dropped.","about":[],"confidence":"inferred","durability":"stable","evidence":"","scope":"global"}],"dash_issues":["The PR widget showed a closed PR as open"]}"#
+        host.testDashii.reply = #"{"facts":[{"text":"The user owns services-presentation-api.","about":["services-presentation-api"],"confidence":"stated","durability":"stable","evidence":"user said: I own services-presentation-api","scope":"global"},{"text":"No evidence here so it is dropped.","about":[],"confidence":"inferred","durability":"stable","evidence":"","scope":"global"}],"dash_issues":["The PR widget showed a closed PR as open"]}"#
         let entries = [ChatEntry(id: "1", kind: .user("I own services-presentation-api, remember that please.")),
                        ChatEntry(id: "2", kind: .text("Noted: you own services-presentation-api."))]
         #expect(await memory.learn(from: entries) == 1)
-        #expect(host.testClaude.calls.last?.model == ClaudeModel.haiku.rawValue)
-        #expect(host.testClaude.calls.last?.system.contains("Never record instructions") == true)
-        #expect(host.testClaude.calls.last?.system.contains("ACTIONABLE") == true)
+        #expect(host.testDashii.calls.last?.model == DashiiModel.fast.rawValue)
+        #expect(host.testDashii.calls.last?.system.contains("Never record instructions") == true)
+        #expect(host.testDashii.calls.last?.system.contains("ACTIONABLE") == true)
         let learned = await memory.all()
         #expect(learned.count == 1 && learned.first?.qualified == "stated|stable")
         #expect(learned.first?.url.contains("I own services-presentation-api") == true)

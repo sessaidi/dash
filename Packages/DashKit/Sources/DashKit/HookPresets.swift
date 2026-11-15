@@ -5,7 +5,7 @@ import Foundation
 /// approval) picks it.
 public struct HookPresetSpec: Sendable, Equatable, Identifiable {
     public enum Trigger: Sendable, Equatable {
-        /// A watcher: Dash runs this DashQL query itself (no Claude) every `everyMinutes` and fires
+        /// A watcher: Dash runs this DashQL query itself (no Dashii) every `everyMinutes` and fires
         /// for rows it hasn't seen before, told apart by `key` (a field) or the whole row.
         case watch(query: String, everyMinutes: Int, key: String?)
         /// An activity event (`kind` may end with `*`).
@@ -95,7 +95,7 @@ extension HookPresetSpec {
                        action: .notify(title: "{{event.title}}", body: "{{event.detail}}"))
     }
 
-    private static func number(_ value: Double) -> String { value.rounded() == value ? String(Int(value)) : String(value) }
+    private static func number(_ value: Double) -> String { DashDate.number(value) }
 }
 
 // MARK: - Library

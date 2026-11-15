@@ -1,5 +1,5 @@
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import Foundation
 import Observation
 import SwiftData
@@ -62,7 +62,7 @@ final class ExtensionHost: ExtensionContext {
                                     icon: "person.crop.circle", source: "home"))
         }
         if !settings.isClaudeConfigured {
-            items.append(Suggestion(id: "setup.claude", title: "Set up Claude Code", detail: "Install it and log in with claude /login.",
+            items.append(Suggestion(id: "setup.claude", title: "Set up Dashii", detail: "Install its engine (Claude Code) and log in with claude /login.",
                                     icon: "sparkles", priority: .urgent, source: "claude"))
         }
         let dismissed = home?.dismissed ?? []
@@ -102,7 +102,7 @@ final class ExtensionHost: ExtensionContext {
 
     var context: ModelContext { container.mainContext }
     /// Claude for features and plugins: Claude Code with the user's Claude login.
-    var claude: any ClaudeService { ClaudeCodeService(settings: settings) }
+    var dashii: any DashiiService { ClaudeCodeService(settings: settings) }
 
     init(settings: AppSettings, extensions: [any DashExtension], inMemory: Bool = false) throws {
         self.settings = settings
@@ -197,7 +197,7 @@ final class ExtensionHost: ExtensionContext {
 
     /// Tools from enabled extensions whose integrations are all connected, minus the ones that
     /// write remotely: Claude only ever reads from remote systems.
-    var availableTools: [ClaudeTool] {
+    var availableTools: [DashiiTool] {
         extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools).filter { !$0.writesRemotely }
     }
 
@@ -384,7 +384,7 @@ final class ExtensionHost: ExtensionContext {
     }
 
     /// Sends a prompt to the chat panel and shows it.
-    func askClaude(_ prompt: String) {
+    func askDashii(_ prompt: String) {
         chat?.isPanelVisible = true
         chat?.send(prompt)
     }

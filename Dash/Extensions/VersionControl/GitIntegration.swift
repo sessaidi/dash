@@ -113,28 +113,28 @@ final class GitIntegration: Integration {
 
     // MARK: Tools
 
-    var tools: [ClaudeTool] {
+    var tools: [DashiiTool] {
         let repo = JSONSchema.string("The repository: a path, or its folder name.")
         return [
-            ClaudeTool(name: "vcs_preferences", description: "How the user wants version control done in a repository (or globally): git or jj, rebase or merge to update a branch, how to pull, autostash, base branch, commit and branch conventions. Read before changing a repository.",
+            DashiiTool(name: "vcs_preferences", description: "How the user wants version control done in a repository (or globally): git or jj, rebase or merge to update a branch, how to pull, autostash, base branch, commit and branch conventions. Read before changing a repository.",
                        properties: ["repo": JSONSchema.string("The repository; omit for the global preferences.")]) { [weak self] input in
                 guard let self else { return nil }
                 let url = input["repo"]?.string == nil ? nil : try await VCSRepository.resolve(input["repo"]?.string, host: host)
                 return preferences.json(for: url)
             },
-            ClaudeTool(name: "vcs_identity", description: "Who commits and how: git's user name, email and signing settings (globally or in a repository), the SSH hosts in ~/.ssh/config with their identity files, the SSH public keys, whether an ssh-agent is running, and GPG secret keys when gpg is installed. Private keys are never read. Read-only.",
+            DashiiTool(name: "vcs_identity", description: "Who commits and how: git's user name, email and signing settings (globally or in a repository), the SSH hosts in ~/.ssh/config with their identity files, the SSH public keys, whether an ssh-agent is running, and GPG secret keys when gpg is installed. Private keys are never read. Read-only.",
                        properties: ["repo": JSONSchema.string("A repository, for its own config; omit for the global one.")]) { [weak self] input in
                 guard let self else { return nil }
                 let url = input["repo"]?.string == nil ? nil : try await VCSRepository.resolve(input["repo"]?.string, host: host)
                 return await VCSIdentity.json(repository: url)
             },
-            ClaudeTool(name: "git_status", description: "A git repository's branch, upstream, ahead/behind counts and changed files (staged, unstaged, untracked, conflicted). Read-only.",
+            DashiiTool(name: "git_status", description: "A git repository's branch, upstream, ahead/behind counts and changed files (staged, unstaged, untracked, conflicted). Read-only.",
                        properties: ["repo": repo], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }
                 let url = try await repository(input)
                 return Self.parseStatus(try await git(["status", "--porcelain=v2", "--branch"], in: url)).merging(["repository": .string(url.path)])
             },
-            ClaudeTool(name: "git_log", description: "Commits, newest first: of a revision or range (e.g. main..HEAD), touching a path, by an author, since a date. Read-only.",
+            DashiiTool(name: "git_log", description: "Commits, newest first: of a revision or range (e.g. main..HEAD), touching a path, by an author, since a date. Read-only.",
                        properties: ["repo": repo, "revision": JSONSchema.string("Revision or range (default HEAD)."), "path": JSONSchema.string("Only commits touching this path."),
                                     "author": JSONSchema.string("Author name or email."), "since": JSONSchema.string("e.g. 2.weeks or 2026-11-01."),
                                     "limit": JSONSchema.integer("How many (default 30, max 200).")], required: ["repo"]) { [weak self] input in
@@ -147,7 +147,7 @@ final class GitIntegration: Integration {
                 if let path = input["path"]?.string { arguments += ["--", path] }
                 return .array(Self.parseLog(try await git(arguments, in: url)))
             },
-            ClaudeTool(name: "git_diff", description: "A diff: working tree changes (default), staged changes, or between revisions (e.g. main...HEAD for a branch's changes). Optionally one path, or only the file stats. Read-only.",
+            DashiiTool(name: "git_diff", description: "A diff: working tree changes (default), staged changes, or between revisions (e.g. main...HEAD for a branch's changes). Optionally one path, or only the file stats. Read-only.",
                        properties: ["repo": repo, "revision": JSONSchema.string("A revision or range; omit for uncommitted changes."), "staged": JSONSchema.boolean("Staged changes only."),
                                     "path": JSONSchema.string("Only this path."), "stat": JSONSchema.boolean("Only files and line counts.")], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }
@@ -159,12 +159,12 @@ final class GitIntegration: Integration {
                 if let path = input["path"]?.string { arguments += ["--", path] }
                 return .string(try await git(arguments, in: url))
             },
-            ClaudeTool(name: "git_show", description: "One commit: message, author, files changed and its patch. Read-only.",
+            DashiiTool(name: "git_show", description: "One commit: message, author, files changed and its patch. Read-only.",
                        properties: ["repo": repo, "revision": JSONSchema.string("Commit, tag or branch (default HEAD).")], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }
                 return .string(try await git(["show", "--no-color", "--stat", "--patch", input["revision"]?.string ?? "HEAD"], in: try await repository(input)))
             },
-            ClaudeTool(name: "git_branches", description: "Local and remote branches, most recently committed first, with their last commit and upstream tracking. Read-only.",
+            DashiiTool(name: "git_branches", description: "Local and remote branches, most recently committed first, with their last commit and upstream tracking. Read-only.",
                        properties: ["repo": repo, "remote": JSONSchema.boolean("Include remote branches (default true).")], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }
                 let url = try await repository(input)
@@ -179,7 +179,7 @@ final class GitIntegration: Integration {
                             "current": .bool(f[6] == "*"), "subject": .string(f[7])]
                 })
             },
-            ClaudeTool(name: "git_blame", description: "Who last changed each line of a file (a line range keeps it short), with the commit and date. Read-only.",
+            DashiiTool(name: "git_blame", description: "Who last changed each line of a file (a line range keeps it short), with the commit and date. Read-only.",
                        properties: ["repo": repo, "path": JSONSchema.string("File path in the repository."),
                                     "start": JSONSchema.integer("First line."), "end": JSONSchema.integer("Last line.")], required: ["repo", "path"]) { [weak self] input in
                 guard let self else { return nil }
@@ -187,7 +187,7 @@ final class GitIntegration: Integration {
                 if let start = input["start"]?.int { arguments += ["-L", "\(start),\(input["end"]?.int ?? start + 40)"] }
                 return .string(try await git(arguments + ["--", input["path"]?.string ?? ""], in: try await repository(input)))
             },
-            ClaudeTool(name: "git_grep", description: "Search tracked files for a pattern (git grep), with line numbers. Read-only.",
+            DashiiTool(name: "git_grep", description: "Search tracked files for a pattern (git grep), with line numbers. Read-only.",
                        properties: ["repo": repo, "pattern": JSONSchema.string("Text or regular expression."), "path": JSONSchema.string("Only under this path."),
                                     "ignore_case": JSONSchema.boolean("Case-insensitive.")], required: ["repo", "pattern"]) { [weak self] input in
                 guard let self else { return nil }
@@ -201,13 +201,13 @@ final class GitIntegration: Integration {
                 // git grep exits 1 when nothing matches.
                 return .string(output.status == 1 ? "No matches." : output.ok ? output.stdout : "git grep failed: \(output.stderr)")
             },
-            ClaudeTool(name: "git_fetch", description: "Fetch from the remotes (updates remote branches only; nothing local changes, nothing is pushed).",
+            DashiiTool(name: "git_fetch", description: "Fetch from the remotes (updates remote branches only; nothing local changes, nothing is pushed).",
                        properties: ["repo": repo], required: ["repo"]) { [weak self] input in
                 guard let self else { return nil }
                 _ = try await git(["fetch", "--all", "--prune", "--quiet"], in: try await repository(input), timeout: 180)
                 return "fetched"
             },
-            ClaudeTool(name: "git_update_branch", description: "Bring the current branch up to date with its base the way the user prefers for this repository (rebase onto, or merge, origin/<base>; see vcs_preferences). Fetches first. Stops and reports on conflicts. Nothing is pushed.",
+            DashiiTool(name: "git_update_branch", description: "Bring the current branch up to date with its base the way the user prefers for this repository (rebase onto, or merge, origin/<base>; see vcs_preferences). Fetches first. Stops and reports on conflicts. Nothing is pushed.",
                        properties: ["repo": repo, "base": JSONSchema.string("Base branch; default from the preferences or origin's HEAD.")],
                        required: ["repo"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
@@ -231,7 +231,7 @@ final class GitIntegration: Integration {
                 }
                 return ["ok": true, "strategy": .string(strategy.rawValue), "base": .string(base), "output": .string(output.stdout)]
             },
-            ClaudeTool(name: "git_create_branch", description: "Create a branch and switch to it, from the base or a given revision. Follows the repository's branch conventions (vcs_preferences).",
+            DashiiTool(name: "git_create_branch", description: "Create a branch and switch to it, from the base or a given revision. Follows the repository's branch conventions (vcs_preferences).",
                        properties: ["repo": repo, "name": JSONSchema.string("Branch name."), "from": JSONSchema.string("Start point (default: the current commit).")],
                        required: ["repo", "name"], requiresApproval: true) { [weak self] input in
                 guard let self else { return nil }
@@ -241,7 +241,7 @@ final class GitIntegration: Integration {
                 _ = try await git(arguments, in: try await repository(input))
                 return ["branch": .string(name)]
             },
-            ClaudeTool(name: "git_commit", description: "Commit changes: the given paths, or everything changed (including new files) when none are given. Follows the repository's commit conventions (vcs_preferences). Nothing is pushed. " + VCSAuthorship.rule,
+            DashiiTool(name: "git_commit", description: "Commit changes: the given paths, or everything changed (including new files) when none are given. Follows the repository's commit conventions (vcs_preferences). Nothing is pushed. " + VCSAuthorship.rule,
                        properties: ["repo": repo, "message": JSONSchema.string("The commit message."),
                                     "paths": ["type": "array", "items": ["type": "string"], "description": "Files to commit; omit for all changes."]],
                        required: ["repo", "message"], requiresApproval: true) { [weak self] input in

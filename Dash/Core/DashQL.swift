@@ -1,4 +1,4 @@
-import DashKit
+@_spi(DashHost) import DashKit
 import Foundation
 
 /// DashQL in Dash: the datasets Dash itself offers (activity, pages, widgets, any widget's live
@@ -145,9 +145,9 @@ enum DashQL {
         Stages: where, search "text", sort [-]field, take n, select f [as a], distinct f, count by f, summarize count(), sum(f), avg(f), min(f), max(f), distinct(f) [as a] by f, join dataset ["arg"] on a = b [as alias].
         """
 
-    static func tools(host: ExtensionHost) -> [ClaudeTool] {
+    static func tools(host: ExtensionHost) -> [DashiiTool] {
         [
-            ClaudeTool(
+            DashiiTool(
                 name: "dashql",
                 description: "Run a DashQL query: read, filter, join and summarise Dash's data (pods, tickets, PRs, releases, monitors, activity, notes, knowledge, any widget's live data) in one call. Read-only. Call dashql_schema first for the datasets and their fields.\n\n" + guide,
                 properties: ["query": JSONSchema.string("The DashQL query.")], required: ["query"]
@@ -163,7 +163,7 @@ enum DashQL {
                     throw ToolError(error.message)
                 }
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "dashql_schema",
                 description: "The datasets DashQL can read, with their fields, aliases and arguments, and the query syntax."
             ) { _ in

@@ -46,9 +46,9 @@ struct ProposedWidget: Codable, Equatable, Sendable {
 
 extension ChatSession {
     /// Tools that draw components in the conversation.
-    var componentTools: [ClaudeTool] {
+    var componentTools: [DashiiTool] {
         [
-            ClaudeTool(
+            DashiiTool(
                 name: "ask_user",
                 description: """
                     Ask the user a question with answers to click, shown in the chat. Use it for choices (a page's role, \
@@ -73,7 +73,7 @@ extension ChatSession {
                 transcript.append(ChatEntry(id: choices.id, kind: .choices(choices)))
                 return "Shown to the user. End your turn now; their answer comes as the next message."
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "propose_layouts",
                 description: """
                     Propose 2 or 3 layouts for a new dashboard page, drawn in the chat for the user to pick. Each option \

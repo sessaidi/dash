@@ -24,8 +24,8 @@ struct ClaudeCodeBackendTests {
 
     @Test func serviceReturnsStructuredOutput() async throws {
         let host = try host()
-        #expect(host.claude is ClaudeCodeService)
-        let text = try await host.claude.complete(system: "s", prompt: "ping", outputSchema: ["type": "object"])
+        #expect(host.dashii is ClaudeCodeService)
+        let text = try await host.dashii.complete(system: "s", prompt: "ping", outputSchema: ["type": "object"])
         #expect(try JSONValue.parse(text) == ["echo": "ping"])
     }
 

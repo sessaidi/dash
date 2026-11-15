@@ -4,7 +4,7 @@ import SwiftData
 import SwiftUI
 
 /// A module of Dash: built in, declared in a `.dashext` manifest, or loaded from a `.dashplugin`.
-/// An extension contributes any mix of dashboard widgets, Claude tools, SwiftData models,
+/// An extension contributes any mix of dashboard widgets, Dashii tools, SwiftData models,
 /// background work and a settings pane.
 @MainActor
 public protocol DashExtension: AnyObject {
@@ -14,7 +14,7 @@ public protocol DashExtension: AnyObject {
     var layer: ExtensionLayer { get }
     /// Version, owner, summary, category, links.
     var metadata: ExtensionMetadata { get }
-    /// Integration ids this extension needs. Its tools are hidden from Claude until all are connected.
+    /// Integration ids this extension needs. Its tools are hidden from Dashii until all are connected.
     var requires: [String] { get }
     /// Integrations that add capabilities when connected but aren't needed.
     var optional: [String] { get }
@@ -27,7 +27,7 @@ public protocol DashExtension: AnyObject {
     /// Prefix of its UserDefaults keys ("<prefix>.<name>").
     var storagePrefix: String { get }
     var widgets: [WidgetType] { get }
-    var tools: [ClaudeTool] { get }
+    var tools: [DashiiTool] { get }
     /// What DashQL can read from this extension (pods, tickets, PRs…). Read-only.
     var datasets: [QueryDataset] { get }
     /// Ready-made hooks for this extension's data: watchers, notifications, agent wake-ups.
@@ -40,7 +40,7 @@ public protocol DashExtension: AnyObject {
     var suggestions: [Suggestion] { get }
     /// Components notes can use (`@JiraIssue(key: "PROJ-12")`).
     var components: [MarkdownComponentType] { get }
-    /// Instructions Claude follows whenever this extension's tools or AI tasks are used; the
+    /// Instructions Dashii follows whenever this extension's tools or AI tasks are used; the
     /// user can edit them (Settings › Automation › Rules).
     var defaultRules: String? { get }
     /// `/commands` it offers; the user can customize them.
@@ -85,7 +85,7 @@ extension DashExtension {
     public var widgets: [WidgetType] { [] }
     public var datasets: [QueryDataset] { [] }
     public var hookPresets: [HookPresetSpec] { [] }
-    public var tools: [ClaudeTool] { [] }
+    public var tools: [DashiiTool] { [] }
     public func settingsView() -> AnyView { AnyView(EmptyView()) }
     public func start(host: any ExtensionContext) {}
     public func prepare(host: any ExtensionContext) async throws {}
@@ -151,7 +151,11 @@ public struct IntegrationConnection: Sendable {
     /// True if a full URL stays on this account's hosts.
     public func allows(_ url: URL) -> Bool {
         guard url.scheme == "https", let host = url.host() else { return false }
-        return host == baseURL.host() || hosts.contains { host == $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) || host.hasSuffix($0) }
+        // "googleapis.com" allows googleapis.com and its subdomains, never "evilgoogleapis.com".
+        return host == baseURL.host() || hosts.contains { allowed in
+            let domain = allowed.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return host == domain || host.hasSuffix("." + domain)
+        }
     }
 
     /// Adds headers and signs: what every request through this connection goes through.
@@ -200,45 +204,78 @@ public struct PermissionDetail: Hashable, Sendable {
     }
 }
 
+/// A permission prompt: what's asked, why, and the button labels.
+public struct PermissionPrompt: Sendable, Equatable {
+    public var icon: String
+    public var title: String
+    public var message: String
+    public var details: [PermissionDetail]
+    public var allowLabel: String
+    public var denyLabel: String
+
+    public init(icon: String = "hand.raised", title: String, message: String, details: [PermissionDetail] = [],
+                allowLabel: String = "Allow", denyLabel: String = "Don't Allow") {
+        self.icon = icon
+        self.title = title
+        self.message = message
+        self.details = details
+        self.allowLabel = allowLabel
+        self.denyLabel = denyLabel
+    }
+}
+
 /// Shows a modal permission prompt and returns whether the user allowed it.
 @MainActor
 public protocol PermissionAsking: AnyObject {
-    func ask(icon: String, title: String, message: String, details: [PermissionDetail], allowLabel: String, denyLabel: String) async -> Bool
+    func ask(_ prompt: PermissionPrompt) async -> Bool
 }
 
 extension PermissionAsking {
+    /// The same, with the prompt's parts as arguments.
     public func ask(icon: String = "hand.raised", title: String, message: String, details: [PermissionDetail] = [],
                     allowLabel: String = "Allow", denyLabel: String = "Don't Allow") async -> Bool {
-        await ask(icon: icon, title: title, message: message, details: details, allowLabel: allowLabel, denyLabel: denyLabel)
+        await ask(PermissionPrompt(icon: icon, title: title, message: message, details: details, allowLabel: allowLabel, denyLabel: denyLabel))
     }
 }
 
-/// Claude, as the host is configured (model, effort, refusal fallbacks, API key).
+/// One request to Dashii.
+public struct DashiiRequest: Sendable, Equatable {
+    public var system: String
+    public var prompt: String
+    /// A JSON schema the answer must follow (the answer is then JSON text).
+    public var outputSchema: JSONValue?
+    /// A `DashiiEffort` raw value; nil uses the app's.
+    public var effort: String?
+    /// A `DashiiModel` raw value; nil uses the app's.
+    public var model: String?
+    /// Who's asking ("extension.pull-requests/review"), for usage analytics.
+    public var source: String?
+
+    public init(system: String, prompt: String, outputSchema: JSONValue? = nil, effort: String? = nil, model: String? = nil, source: String? = nil) {
+        self.system = system
+        self.prompt = prompt
+        self.outputSchema = outputSchema
+        self.effort = effort
+        self.model = model
+        self.source = source
+    }
+}
+
+/// Dashii, the app's assistant, as the host has it set up. One requirement: new options arrive as
+/// `DashiiRequest` fields, never as new requirements.
 @MainActor
-public protocol ClaudeService {
-    /// The model id requests use, e.g. "claude-opus-5-5".
+public protocol DashiiService {
+    /// The model the app uses by default (a `DashiiModel` raw value).
     var model: String { get }
-    /// One request; returns the final text, or JSON text matching `outputSchema` when given.
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?) async throws -> String
-    /// The same with a specific model (a `ClaudeModel` raw value); nil uses the app's model.
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?) async throws -> String
-    /// The same, naming who's asking ("extension.pull-requests/review") for usage analytics.
-    func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?, source: String?) async throws -> String
+    /// Answers one request: the text, or JSON text matching `outputSchema` when given.
+    func complete(_ request: DashiiRequest) async throws -> String
 }
 
-extension ClaudeService {
-    public func complete(system: String, prompt: String, outputSchema: JSONValue? = nil, effort: String? = nil) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort)
-    }
-
-    /// Default for services that only have one model (test fakes): ignores `model`.
-    public func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort)
-    }
-
-    /// Default for services that don't track usage: ignores `source`.
-    public func complete(system: String, prompt: String, outputSchema: JSONValue?, effort: String?, model: String?, source: String?) async throws -> String {
-        try await complete(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: model)
+extension DashiiService {
+    /// The same, with the request's parts as arguments.
+    public func complete(system: String, prompt: String, outputSchema: JSONValue? = nil, effort: String? = nil,
+                         model: String? = nil, source: String? = nil) async throws -> String {
+        try await complete(DashiiRequest(system: system, prompt: prompt, outputSchema: outputSchema, effort: effort, model: model, source: source))
     }
 
     /// Structured output decoded into `T`.
@@ -247,20 +284,20 @@ extension ClaudeService {
     }
 }
 
-/// The host an extension runs in: storage, other extensions, permissions, Claude and activity.
+/// The host an extension runs in: storage, other extensions, permissions, Dashii and activity.
 @MainActor
 public protocol ExtensionContext: AnyObject, Sendable {
     /// The shared SwiftData store (models from every extension).
     var context: ModelContext { get }
     var extensions: [any DashExtension] { get }
     var permissions: any PermissionAsking { get }
-    var claude: any ClaudeService { get }
-    /// Report what happens; Claude sees it before its next turn.
+    var dashii: any DashiiService { get }
+    /// Report what happens; Dashii sees it before its next turn.
     var activity: ActivityLog { get }
 
     func isEnabled(_ item: any DashExtension) -> Bool
     /// Sends a prompt to the chat panel and shows it.
-    func askClaude(_ prompt: String)
+    func askDashii(_ prompt: String)
     /// Opens Settings/Extensions on an extension.
     func openManager(_ extensionID: String?)
     /// Adds a widget of `kind` to the dashboard.

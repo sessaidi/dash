@@ -13,7 +13,7 @@ final class AppSettings {
 
     var model: String { didSet { defaults.set(model, forKey: "model") } }
     var effort: String { didSet { defaults.set(effort, forKey: "effort") } }
-    /// Ask before Claude runs a tool that writes to GitHub/Jira or deletes something.
+    /// Ask before Dashii runs a tool that writes to GitHub/Jira or deletes something.
     var confirmWrites: Bool { didSet { defaults.set(confirmWrites, forKey: "confirmWrites") } }
     /// Dashii gets the `dash` statements tool (and the chat's own) instead of every tool:
     /// far fewer tokens per turn; everything stays reachable through it.

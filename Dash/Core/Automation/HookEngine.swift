@@ -212,7 +212,7 @@ final class HookEngine {
         guard let host else { throw ToolError("Dash isn't ready.") }
         let system = "You're running the user's automation “\(hook.name)” in Dash. Answer directly in Markdown, no preamble."
             + (AutomationStore.shared.instructions(for: []).map { "\n\n" + $0 } ?? "")
-        let answer = try await host.claude.complete(system: system, prompt: prompt, outputSchema: nil, effort: nil, model: nil,
+        let answer = try await host.dashii.complete(system: system, prompt: prompt, outputSchema: nil, effort: nil, model: nil,
                                                     source: "hook.\(hook.name)")
         if let noteTitle, !noteTitle.trimmed.isEmpty {
             _ = try host.createNote(title: noteTitle, markdown: answer, folder: "Automations")

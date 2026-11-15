@@ -106,19 +106,19 @@ final class ChatSession {
     }
 
     /// Everything Dashii can do, as tools.
-    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + AppTools.tools(host: host) + Skills.tools(host: host) + componentTools + host.availableTools }
+    private var allTools: [DashiiTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + AppTools.tools(host: host) + Skills.tools(host: host) + componentTools + host.availableTools }
 
     /// What Claude is offered: in compact mode the `dash` statements tool (which reaches all the
     /// others through the same approvals) plus the chat's question and layout tools; otherwise all.
-    private var tools: [ClaudeTool] {
+    private var tools: [DashiiTool] {
         let all = allTools
         let dash = dashTool(over: all)
         return host.settings.compactTools ? [dash] + componentTools : [dash] + all
     }
 
     /// The `dash` tool: DashQL statements run over `tools`, each gated like a direct call.
-    private func dashTool(over tools: [ClaudeTool]) -> ClaudeTool {
-        ClaudeTool(
+    private func dashTool(over tools: [DashiiTool]) -> DashiiTool {
+        DashiiTool(
             name: "dash",
             description: "Read and work in Dash with DashQL statements (one per line): query any data, drive widgets, build pages, notes, memory, and call any other tool. Start with `help` or `schema` when unsure.\n\n" + DashScript.guide + "\n" + DashQL.guide,
             properties: ["script": JSONSchema.string("One or more statements, one per line."),
@@ -134,7 +134,7 @@ final class ChatSession {
 
     /// The checks a tool call passes: hooks, then the user's approval when it changes things.
     /// nil to go ahead, else why not.
-    private func approve(_ tool: ClaudeTool, _ input: JSONValue) async -> String? {
+    private func approve(_ tool: DashiiTool, _ input: JSONValue) async -> String? {
         if case .deny(let reason) = await HookEngine.shared.beforeTool(tool.name, input: input) { return reason }
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
@@ -282,7 +282,7 @@ final class ChatSession {
         return first.count > limit ? String(first.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…" : first
     }
 
-    private func execute(_ call: ToolCall, tools: [ClaudeTool]) async -> (String, Bool) {
+    private func execute(_ call: ToolCall, tools: [DashiiTool]) async -> (String, Bool) {
         guard let tool = tools.first(where: { $0.name == call.name }) else {
             return ("Unknown tool \(call.name).", true)
         }

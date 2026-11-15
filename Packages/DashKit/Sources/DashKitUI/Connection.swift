@@ -54,7 +54,8 @@ public struct ConnectionStatusLabel: View {
 /// A secret input that never shows the stored value: type a new one, Save, or Remove.
 public struct SecretField: View {
     /// What a filled field shows; the host sets it to match where secrets are kept.
-    nonisolated(unsafe) public static var savedLabel = "Saved"
+    /// What a filled field shows; set by the host for its secrets backend.
+    @_spi(DashHost) @MainActor public static var savedLabel = "Saved"
 
     let title: String
     let placeholder: String

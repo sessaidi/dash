@@ -61,7 +61,7 @@ struct KnowledgeImpactTests {
         let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "ki-\(UUID())")!, url: nil)
         let store = try #require(knowledge.store)
         _ = try await KnowledgeExtension.index(root.path, store: store, history: true)
-        func tool(_ name: String) throws -> ClaudeTool { try #require(knowledge.tools.first { $0.name == name }) }
+        func tool(_ name: String) throws -> DashiiTool { try #require(knowledge.tools.first { $0.name == name }) }
 
         let found = try await tool("knowledge_search").run(["query": "Charge", "kind": "symbol"])
         let charge = try #require(found.array?.first { $0["name"] == "Charge" }?["id"]?.string)

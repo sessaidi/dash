@@ -1,5 +1,5 @@
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import Foundation
 import SwiftData
 import Testing
@@ -286,12 +286,12 @@ struct HomeTests {
         home.role = "backend engineer"
         let host = try TestHost([home])
         host.start([home])
-        host.testClaude.reply = #"{"items": [{"title": "Review PR #12", "detail": "Waiting since yesterday", "prompt": "Summarize PR #12"}]}"#
+        host.testDashii.reply = #"{"items": [{"title": "Review PR #12", "detail": "Waiting since yesterday", "prompt": "Summarize PR #12"}]}"#
         await home.writeBrief(context: "- PR #12 waits for you")
         #expect(home.brief?.items.map(\.title) == ["Review PR #12"])
-        let call = try #require(host.testClaude.calls.last)
+        let call = try #require(host.testDashii.calls.last)
         #expect(call.prompt.contains("Ada, backend engineer") && call.prompt.contains("PR #12 waits"))
-        #expect(call.model == ClaudeModel.sonnet.rawValue && call.source == "extension.home/brief")
+        #expect(call.model == DashiiModel.balanced.rawValue && call.source == "extension.home/brief")
         #expect(home.profilePrompt == "The user's name is Ada. They are backend engineer.")
     }
 }

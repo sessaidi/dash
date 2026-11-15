@@ -255,7 +255,7 @@ private struct KnowledgeDetail: View {
             .disabled(learning)
         }
         Button("Ask Dashii", systemImage: "bubble.left") {
-            knowledge.host?.askClaude("Using the knowledge graph (node id \(node.id)), explain \(node.kind == "symbol" ? node.qualified : node.name): what it is, how it fits in, and what's connected to it.")
+            knowledge.host?.askDashii("Using the knowledge graph (node id \(node.id)), explain \(node.kind == "symbol" ? node.qualified : node.name): what it is, how it fits in, and what's connected to it.")
         }
     }
 

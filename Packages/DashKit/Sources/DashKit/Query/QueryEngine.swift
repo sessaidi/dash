@@ -1,16 +1,33 @@
 import Foundation
 
+/// What kind of values a dataset field holds. Write it as a literal (`"number"`) or a constant
+/// (`.number`); the constants are the kinds DashQL knows.
+public struct FieldType: RawRepresentable, ExpressibleByStringLiteral, Hashable, Sendable, CustomStringConvertible {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(stringLiteral value: String) { rawValue = value }
+    public var description: String { rawValue }
+
+    public static let string: FieldType = "string"
+    public static let number: FieldType = "number"
+    public static let date: FieldType = "date"
+    public static let bool: FieldType = "bool"
+    public static let list: FieldType = "list"
+    public static let object: FieldType = "object"
+    /// The kinds above.
+    public static let known: [FieldType] = [.string, .number, .date, .bool, .list, .object]
+}
+
 /// Something DashQL can read from: rows of JSON objects, described by their fields.
 public struct QueryDataset: Sendable {
     public struct Field: Sendable, Equatable {
         public let name: String
-        /// string, number, date, bool, list, object.
-        public let type: String
+        public let type: FieldType
         public let summary: String
         /// Shorter names accepted in queries (`ns` for `namespace`).
         public let aliases: [String]
 
-        public init(_ name: String, _ type: String = "string", _ summary: String = "", aliases: [String] = []) {
+        public init(_ name: String, _ type: FieldType = .string, _ summary: String = "", aliases: [String] = []) {
             self.name = name
             self.type = type
             self.summary = summary
@@ -19,6 +36,8 @@ public struct QueryDataset: Sendable {
     }
 
     public let name: String
+    /// Other words for it in queries (`tickets`, `issues` for `jira`).
+    public let aliases: [String]
     public let summary: String
     public let fields: [Field]
     /// Whether it takes an argument (`from widget "Failing pods"`), and what it means.
@@ -26,9 +45,10 @@ public struct QueryDataset: Sendable {
     /// The rows, read fresh (async: datasets may sync first or read a store).
     public let rows: @MainActor @Sendable (_ argument: String?) async throws -> [JSONValue]
 
-    public init(name: String, summary: String, fields: [Field] = [], argument: String? = nil,
+    public init(name: String, aliases: [String] = [], summary: String, fields: [Field] = [], argument: String? = nil,
                 rows: @escaping @MainActor @Sendable (_ argument: String?) async throws -> [JSONValue]) {
         self.name = name.lowercased()
+        self.aliases = aliases.map { $0.lowercased() }
         self.summary = summary
         self.fields = fields
         self.argument = argument
@@ -36,8 +56,8 @@ public struct QueryDataset: Sendable {
     }
 
     public var schema: JSONValue {
-        ["name": .string(name), "summary": .string(summary), "argument": argument.map(JSONValue.string) ?? .null,
-         "fields": .array(fields.map { ["name": .string($0.name), "type": .string($0.type), "summary": .string($0.summary),
+        ["name": .string(name), "aliases": .array(aliases.map(JSONValue.string)), "summary": .string(summary), "argument": argument.map(JSONValue.string) ?? .null,
+         "fields": .array(fields.map { ["name": .string($0.name), "type": .string($0.type.rawValue), "summary": .string($0.summary),
                                          "aliases": .array($0.aliases.map(JSONValue.string))] })]
     }
 
@@ -48,9 +68,9 @@ public struct QueryDataset: Sendable {
     }
 }
 
-/// Runs DashQL over datasets.
-@MainActor
-public struct QueryEngine {
+/// Runs DashQL over datasets. Rows are fetched on the main actor (where extensions keep them);
+/// filtering, sorting, joins and summaries run off it, so a big query never stalls the UI.
+public struct QueryEngine: Sendable {
     public var datasets: [QueryDataset]
     /// Who `me` is (names, emails, logins): a value matches `me` when it equals any of them.
     public var me: [String]
@@ -114,7 +134,7 @@ public struct QueryEngine {
                     aggregate.field = aggregate.field.map(current.resolve)
                     return aggregate
                 }, by: by.map(current.resolve))
-                current = QueryDataset(name: current.name, summary: current.summary) { _ in [] }
+                current = QueryDataset(name: current.name, aliases: current.aliases, summary: current.summary) { _ in [] }
             case .join(let source, let left, let right, let alias):
                 let other = try self.dataset(source.dataset)
                 let otherRows = try await other.rows(source.argument)
@@ -138,9 +158,10 @@ public struct QueryEngine {
 
     func dataset(_ name: String) throws -> QueryDataset {
         let lower = name.lowercased()
-        if let found = datasets.first(where: { $0.name == lower }) ?? datasets.first(where: { $0.name.hasPrefix(lower) || $0.name.hasSuffix("." + lower) }) {
-            return found
-        }
+        if let exact = datasets.first(where: { $0.name == lower }) ?? datasets.first(where: { $0.aliases.contains(lower) }) { return exact }
+        let partial = datasets.filter { $0.name.hasPrefix(lower) || $0.name.hasSuffix("." + lower) }
+        if partial.count == 1 { return partial[0] }
+        if partial.count > 1 { throw QueryError("`\(name)` could be \(partial.map(\.name).sorted().joined(separator: ", ")); use the full name.") }
         throw QueryError("No dataset `\(name)`. Datasets: \(datasets.map(\.name).sorted().joined(separator: ", ")).")
     }
 
@@ -168,7 +189,7 @@ public struct QueryEngine {
             let value = row.value(at: field)
             return value == nil || value == .null
         case .text(let text):
-            return row.jsonString().localizedCaseInsensitiveContains(text)
+            return Self.leaves(row).contains { $0.localizedCaseInsensitiveContains(text) }
         case .inList(let field, let values):
             return values.contains { compare(row.value(at: field), .equal, $0) }
         case .between(let field, let low, let high):
@@ -180,8 +201,13 @@ public struct QueryEngine {
 
     /// One field value against a literal. Lists match when any element does.
     func compare(_ actual: JSONValue?, _ op: QueryExpr.Comparison, _ expected: QueryValue) -> Bool {
-        if case .array(let items)? = actual, op != .notEqual, op != .notContains {
-            return items.contains { compare($0, op, expected) }
+        if case .array(let items)? = actual {
+            // A list matches when any element does; "not" means no element does.
+            switch op {
+            case .notEqual: return !items.contains { compare($0, .equal, expected) }
+            case .notContains: return !items.contains { compare($0, .contains, expected) }
+            default: return items.contains { compare($0, op, expected) }
+            }
         }
         if case .me = expected {
             let text = actual.flatMap(Self.text) ?? ""
@@ -250,7 +276,7 @@ public struct QueryEngine {
     static func text(_ value: JSONValue) -> String? {
         switch value {
         case .string(let text): text
-        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .number(let number): DashDate.number(number)
         case .bool(let flag): String(flag)
         default: nil
         }
@@ -259,7 +285,7 @@ public struct QueryEngine {
     static func text(_ value: QueryValue) -> String {
         switch value {
         case .string(let text): text
-        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .number(let number): DashDate.number(number)
         case .bool(let flag): String(flag)
         case .date(let date): date.formatted(.iso8601)
         case .null: "null"
@@ -268,16 +294,14 @@ public struct QueryEngine {
     }
 
     /// A row value as a date: ISO 8601 text, or seconds since 1970.
-    public static func date(_ value: JSONValue) -> Date? {
+    public static func date(_ value: JSONValue) -> Date? { DashDate.parse(value) }
+
+    /// A row's values as text (not its field names), for free-text search.
+    static func leaves(_ value: JSONValue) -> [String] {
         switch value {
-        case .string(let text):
-            return ISO8601DateFormatter().date(from: text)
-                ?? (try? Date(text, strategy: .iso8601.year().month().day().dateSeparator(.dash).time(includingFractionalSeconds: true).timeSeparator(.colon)))
-                ?? QueryLexer.day(String(text.prefix(10)))
-        case .number(let seconds) where seconds > 1_000_000_000:
-            return Date(timeIntervalSince1970: seconds > 1_000_000_000_000 ? seconds / 1000 : seconds)
-        default:
-            return nil
+        case .object(let fields): fields.values.flatMap(leaves)
+        case .array(let items): items.flatMap(leaves)
+        default: text(value).map { [$0] } ?? []
         }
     }
 

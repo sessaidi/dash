@@ -11,7 +11,7 @@ struct ViewContextTests {
                           extensions: ExtensionHost.builtInExtensions(), inMemory: true)
     }
 
-    func tool(_ name: String, _ host: ExtensionHost) throws -> ClaudeTool {
+    func tool(_ name: String, _ host: ExtensionHost) throws -> DashiiTool {
         try #require(ViewContext.tools(host: host).first { $0.name == name })
     }
 

@@ -1,5 +1,5 @@
-import DashKit
-import DashKitUI
+@_spi(DashHost) import DashKit
+@_spi(DashHost) import DashKitUI
 import SwiftUI
 
 extension DashExtension {

@@ -2,7 +2,7 @@ import DashKitUI
 import SwiftUI
 
 /// A dashboard widget kind. Each placed widget stores a `Config` as JSON;
-/// Claude can create and reconfigure widgets through that same JSON.
+/// Dashii can create and reconfigure widgets through that same JSON.
 @MainActor
 public protocol DashboardWidget {
     associatedtype Config: Codable & Equatable & Sendable
@@ -12,17 +12,17 @@ public protocol DashboardWidget {
 
     static var kind: String { get }
     static var displayName: String { get }
-    /// One sentence, shown in the add menu and to Claude.
+    /// One sentence, shown in the add menu and to Dashii.
     static var summary: String { get }
     static var systemImage: String { get }
     static var defaultConfig: Config { get }
     static var defaultSize: WidgetSize { get }
     /// How small and large it may be resized, in grid cells (12 columns, 40 pt rows).
     static var sizeLimits: GridLimits { get }
-    /// What it asks Claude to do. Each placed widget gets an AI tab to pick the model, effort
+    /// What it asks Dashii to do. Each placed widget gets an AI tab to pick the model, effort
     /// and prompt templates; read them with `context.ai`.
     static var aiTasks: [AITask] { get }
-    /// JSON schema of `Config`, given to Claude so it can configure the widget.
+    /// JSON schema of `Config`, given to Dashii so it can configure the widget.
     static var configSchema: JSONValue { get }
     /// What Dashii can do with the widget on screen (search, filter, select…); the content view
     /// handles them with `handlesWidgetActions`.
@@ -36,7 +36,7 @@ public protocol DashboardWidget {
     /// Settings. It must not touch the network or the user's accounts. Without one, Dash shows a
     /// neutral placeholder.
     @ViewBuilder static func preview(config: Config) -> Preview
-    /// The widget's current data as JSON, read by Claude with `read_widget`.
+    /// The widget's current data as JSON, read by Dashii with `read_widget`.
     static func snapshot(config: Config, context: WidgetContext) async -> JSONValue
 }
 
@@ -67,11 +67,7 @@ public struct WidgetContext: Sendable {
     /// The widget's DashQL query as typed (its query bar); read it with `query(fields:)`.
     public let queryText: String
 
-    public init(widgetID: UUID, host: any ExtensionContext, aiTasks: [AITask] = []) {
-        self.init(widgetID: widgetID, host: host, aiTasks: aiTasks, queryText: "")
-    }
-
-    public init(widgetID: UUID, host: any ExtensionContext, aiTasks: [AITask] = [], queryText: String) {
+    public init(widgetID: UUID, host: any ExtensionContext, aiTasks: [AITask] = [], queryText: String = "") {
         self.widgetID = widgetID
         self.host = host
         self.aiTasks = aiTasks

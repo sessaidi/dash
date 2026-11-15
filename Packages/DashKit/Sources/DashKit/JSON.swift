@@ -1,6 +1,8 @@
 import Foundation
 
-/// Arbitrary JSON. Used for Claude API payloads, tool inputs and widget configs.
+/// Arbitrary JSON. Used for Dashii API payloads, tool inputs and widget configs.
+/// Frozen: JSON has exactly these cases, so plugins switch over them without `@unknown default`.
+@frozen
 public enum JSONValue: Hashable, Sendable {
     case null
     case bool(Bool)
@@ -126,7 +128,7 @@ extension JSONValue: ExpressibleByNilLiteral, ExpressibleByBooleanLiteral, Expre
 }
 
 extension DecodingError {
-    /// A message Claude (or a person) can act on, instead of Foundation's generic text.
+    /// A message Dashii (or a person) can act on, instead of Foundation's generic text.
     public var readableDescription: String {
         func path(_ context: Context) -> String {
             let keys = context.codingPath.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }

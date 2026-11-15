@@ -1,29 +1,22 @@
 import Foundation
 
-/// A client-side tool exposed to Claude in the chat panel.
+/// Something Dashii can do: a name, a description it reads to decide when to use it, an input
+/// schema, and the function that runs it.
 @MainActor
-public struct ClaudeTool {
+public struct DashiiTool {
     public let name: String
     public let description: String
     public let inputSchema: JSONValue
     /// Tools that write to an outside system or delete data ask the user first.
     public var requiresApproval: Bool
     /// Tools that change a remote system (a forge, a tracker, a cluster). Dash never gives them
-    /// to Claude: remotely it may only read.
+    /// to Dashii: remotely it may only read. They also ask the user first.
     public var writesRemotely: Bool
     public let run: @MainActor (JSONValue) async throws -> JSONValue
 
     public init(
         name: String, description: String, properties: [String: JSONValue] = [:], required: [String] = [],
-        requiresApproval: Bool = false, run: @escaping @MainActor (JSONValue) async throws -> JSONValue
-    ) {
-        self.init(name: name, description: description, properties: properties, required: required,
-                  requiresApproval: requiresApproval, writesRemotely: false, run: run)
-    }
-
-    public init(
-        name: String, description: String, properties: [String: JSONValue] = [:], required: [String] = [],
-        requiresApproval: Bool = false, writesRemotely: Bool, run: @escaping @MainActor (JSONValue) async throws -> JSONValue
+        requiresApproval: Bool = false, writesRemotely: Bool = false, run: @escaping @MainActor (JSONValue) async throws -> JSONValue
     ) {
         self.name = name
         self.description = description
@@ -39,7 +32,7 @@ public struct ClaudeTool {
     }
 }
 
-/// An error whose message is shown to the user and returned to Claude as a tool error.
+/// An error whose message is shown to the user and returned to Dashii as a tool error.
 public struct ToolError: LocalizedError, Equatable {
     public let message: String
     public init(_ message: String) { self.message = message }
@@ -47,7 +40,7 @@ public struct ToolError: LocalizedError, Equatable {
 }
 
 extension JSONValue {
-    /// Decodes a tool input, turning decoding failures into messages Claude can fix.
+    /// Decodes a tool input, turning decoding failures into messages Dashii can fix.
     public func toolInput<T: Decodable>(_ type: T.Type) throws -> T {
         do { return try decode(T.self) } catch let error as DecodingError { throw ToolError(error.readableDescription) }
     }

@@ -96,7 +96,7 @@ final class HomeExtension: DashExtension {
     static let briefTask = AITask(
         id: "brief", title: "Daily brief",
         summary: "Proposes the day's work from your role, your focus and what happened on your dashboard.",
-        models: [.haiku, .sonnet, .opus], defaultModel: .sonnet, efforts: [.low, .medium, .high], defaultEffort: .low,
+        models: [.fast, .balanced, .strong], defaultModel: .balanced, efforts: [.low, .medium, .high], defaultEffort: .low,
         enabledByDefault: true,
         templates: [AITemplate(
             id: "prompt", title: "Brief prompt",
@@ -140,7 +140,7 @@ final class HomeExtension: DashExtension {
             "context": context.isEmpty ? "(nothing yet)" : context,
         ])
         do {
-            let text = try await host.claude.complete(task: Self.briefTask.id, settings: settings,
+            let text = try await host.dashii.complete(task: Self.briefTask.id, settings: settings,
                                                       system: "You help a software developer plan their day. Be concrete and brief.",
                                                       prompt: prompt, outputSchema: Self.briefSchema)
             let items = try JSONValue.parse(text)["items"]?.decode([BriefItem].self) ?? []

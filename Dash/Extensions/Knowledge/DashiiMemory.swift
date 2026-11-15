@@ -221,7 +221,7 @@ final class DashiiMemory {
     /// Pulls durable facts out of the latest exchange and stores them. Returns how many.
     @discardableResult
     func learn(from entries: [ChatEntry]) async -> Int {
-        guard isEnabled, let claude = host()?.claude else { return 0 }
+        guard isEnabled, let claude = host()?.dashii else { return 0 }
         let exchange = Self.transcript(entries)
         guard exchange.count > 40 else { return 0 }
         let known = await recall(exchange, limit: 12).map { "- \($0.signature)" }.joined(separator: "\n")
@@ -229,7 +229,7 @@ final class DashiiMemory {
             let text = try await claude.complete(
                 system: Self.extractionSystem,
                 prompt: "<known>\n\(known)\n</known>\n\n<exchange>\n\(exchange)\n</exchange>",
-                outputSchema: Self.extractionSchema, effort: "low", model: ClaudeModel.haiku.rawValue, source: "knowledge/memory")
+                outputSchema: Self.extractionSchema, effort: "low", model: DashiiModel.fast.rawValue, source: "knowledge/memory")
             let parsed = try JSONValue.parse(Data(text.utf8))
             let facts = ((try parsed["facts"]?.decode([Fact].self)) ?? []).filter { !($0.evidence ?? "").isEmpty }
             var stored = 0

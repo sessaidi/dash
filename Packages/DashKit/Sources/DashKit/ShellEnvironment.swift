@@ -42,7 +42,7 @@ public enum ShellEnvironment {
     }
 
     /// Forgets what was read (after you change your shell config).
-    public static func reload() { lock.withLock { loaded = nil } }
+    @_spi(DashHost) public static func reload() { lock.withLock { loaded = nil } }
 
     static let marker = "__DASH_ENV__"
 

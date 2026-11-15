@@ -1,7 +1,7 @@
 import Foundation
 
 /// A background agent an extension offers, e.g. an SRE agent that checks the clusters every
-/// 15 minutes and reports what's wrong. Dash runs it with Claude Code, giving it only the
+/// 15 minutes and reports what's wrong. Dash runs it with Dashii, giving it only the
 /// tools it names, on its schedule or when one of its events happens, and stores each report
 /// in the database. Widgets show reports with `host.agentReports(_:limit:)`; warning and
 /// critical findings become activity events ("agent.finding") the user's hooks can act on.
@@ -13,7 +13,7 @@ import Foundation
 ///     tools: ["k8s_list_pods", "k8s_get"],
 ///     schedule: AgentSchedule(everyMinutes: 15, events: ["kubernetes.crashloop"]),
 ///     precheck: { host in
-///         // Skip Claude while everything is healthy.
+///         // Skip Dashii while everything is healthy.
 ///         unhealthy.isEmpty ? .skip("All pods healthy.") : .run(context: "Unhealthy: \(unhealthy)")
 ///     })
 /// ```
@@ -29,7 +29,7 @@ public struct AgentDefinition: Sendable, Identifiable {
     public let specialities: [String]
     /// What to look at and how: the core of each run's system prompt.
     public let instructions: String
-    /// Claude tools (from any installed extension) it may call by name…
+    /// Dashii tools (from any installed extension) it may call by name…
     public let tools: [String]
     /// …and every tool of these extensions (integrations or features, by id).
     public let integrations: [String]
@@ -40,14 +40,14 @@ public struct AgentDefinition: Sendable, Identifiable {
     public let schedule: AgentSchedule
     /// Model, effort and on/off, configurable in the extension's AI tab.
     public let task: AITask
-    /// A cheap check before involving Claude (no tokens): skip the run, or run with context.
+    /// A cheap check before involving Dashii (no tokens): skip the run, or run with context.
     public let precheck: (@MainActor @Sendable (any ExtensionContext) async -> AgentPrecheck)?
 
     public init(id: String, name: String, summary: String, systemImage: String = "person.badge.shield.checkmark",
                 role: String = "", specialities: [String] = [],
                 instructions: String, tools: [String] = [], integrations: [String] = [], access: AgentAccess = .readOnly,
                 scope: String = "", schedule: AgentSchedule = AgentSchedule(),
-                models: [ClaudeModel] = [.sonnet, .haiku, .opus], defaultModel: ClaudeModel = .sonnet,
+                models: [DashiiModel] = [.balanced, .fast, .strong], defaultModel: DashiiModel = .balanced,
                 enabledByDefault: Bool = false,
                 precheck: (@MainActor @Sendable (any ExtensionContext) async -> AgentPrecheck)? = nil) {
         self.id = id
@@ -106,7 +106,7 @@ public struct AgentSchedule: Sendable, Hashable, Codable {
 }
 
 public enum AgentPrecheck: Sendable, Equatable {
-    /// Nothing to look at: record a skipped run with this note, without calling Claude.
+    /// Nothing to look at: record a skipped run with this note, without calling Dashii.
     case skip(String)
     /// Run, with this text added to the prompt (what the check saw).
     case run(context: String)
@@ -179,7 +179,7 @@ public struct AgentReport: Codable, Sendable, Hashable, Identifiable {
     /// The most severe finding's severity.
     public var severity: AgentFinding.Severity? { findings.map(\.severity).max() }
 
-    /// The JSON schema of the report Claude returns at the end of a run.
+    /// The JSON schema of the report Dashii returns at the end of a run.
     public static let outputSchema: JSONValue = [
         "type": "object", "additionalProperties": false,
         "required": ["summary", "findings"],
@@ -202,10 +202,16 @@ public struct AgentReport: Codable, Sendable, Hashable, Identifiable {
         ],
     ]
 
-    /// Builds a report from Claude's structured answer.
+    /// Builds a report from Dashii's structured answer.
     public static func parse(_ text: String, agentID: String, startedAt: Date, reason: String, costUSD: Double = 0) throws -> AgentReport {
         let json = try JSONValue.parse(text)
-        let findings = (try? json["findings"]?.decode([AgentFinding].self)) ?? []
+        // Each finding on its own: one malformed finding mustn't hide the others or read as "all good".
+        let raw = json["findings"]?.array ?? []
+        let findings = raw.compactMap { try? $0.decode(AgentFinding.self) }
+        if !raw.isEmpty, findings.isEmpty {
+            return AgentReport(agentID: agentID, startedAt: startedAt, reason: reason, status: .failed,
+                               summary: "The agent reported findings Dash couldn't read.", findings: [], costUSD: costUSD)
+        }
         return AgentReport(agentID: agentID, startedAt: startedAt, reason: reason, status: findings.isEmpty ? .ok : .findings,
                            summary: json["summary"]?.string ?? "", findings: findings, costUSD: costUSD)
     }

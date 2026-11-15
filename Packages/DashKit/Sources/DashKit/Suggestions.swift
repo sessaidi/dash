@@ -1,7 +1,7 @@
 import Foundation
 
 /// Something an extension proposes on the Home page: "3 PRs wait for your review",
-/// "Agent on PROJ-12 is waiting for you". Clicking it asks Claude (`prompt`), opens `link`,
+/// "Agent on PROJ-12 is waiting for you". Clicking it asks Dashii (`prompt`), opens `link`,
 /// or opens the extension's settings when neither is set.
 public struct Suggestion: Identifiable, Hashable, Sendable {
     public enum Priority: Int, Comparable, Sendable {
@@ -38,7 +38,7 @@ public struct Suggestion: Identifiable, Hashable, Sendable {
     }
 
     public init(id: String, title: String, detail: String? = nil, icon: String = "sparkles", priority: Priority = .normal,
-                prompt: String? = nil, link: URL? = nil, source: String? = nil) {
+                prompt: String? = nil, link: URL? = nil, items: [Item] = [], source: String? = nil) {
         self.id = id
         self.title = title
         self.detail = detail
@@ -47,11 +47,6 @@ public struct Suggestion: Identifiable, Hashable, Sendable {
         self.prompt = prompt
         self.link = link
         self.source = source
-    }
-
-    public init(id: String, title: String, detail: String? = nil, icon: String = "sparkles", priority: Priority = .normal,
-                prompt: String? = nil, link: URL? = nil, items: [Item], source: String? = nil) {
-        self.init(id: id, title: title, detail: detail, icon: icon, priority: priority, prompt: prompt, link: link, source: source)
         self.items = items
     }
 }

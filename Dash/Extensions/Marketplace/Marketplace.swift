@@ -415,9 +415,9 @@ final class MarketplaceFeature: DashExtension {
 
     private struct InstallInput: Decodable { let id: String }
 
-    var tools: [ClaudeTool] {
+    var tools: [DashiiTool] {
         [
-            ClaudeTool(name: "marketplace_list", description: "List extensions (integrations and features) available in the configured registries, and which are installed.") { [weak self] _ in
+            DashiiTool(name: "marketplace_list", description: "List extensions (integrations and features) available in the configured registries, and which are installed.") { [weak self] _ in
                 guard let self else { return [] }
                 var items: [JSONValue] = []
                 for (label, catalog) in catalogs {
@@ -425,7 +425,7 @@ final class MarketplaceFeature: DashExtension {
                 }
                 return .array(items)
             },
-            ClaudeTool(
+            DashiiTool(
                 name: "marketplace_install",
                 description: "Install or update an extension from a registry. Its own permission prompt follows.",
                 properties: ["id": JSONSchema.string("Extension id from marketplace_list.")], required: ["id"], requiresApproval: true
