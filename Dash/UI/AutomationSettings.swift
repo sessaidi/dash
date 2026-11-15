@@ -54,6 +54,9 @@ struct RulesEditor: View {
                     .tag(scope.id)
                 }
                 .listStyle(.sidebar)
+                // Opaque: the window behind shouldn't show through these panes.
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .controlBackgroundColor))
                 .frame(width: 200)
                 .id(revision)
                 Divider()
@@ -213,6 +216,9 @@ struct CommandsEditor: View {
                     .tag(command.name)
                 }
                 .listStyle(.sidebar)
+                // Opaque: the window behind shouldn't show through these panes.
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .controlBackgroundColor))
                 .id(revision)
                 Divider()
                 Button("New Command", systemImage: "plus") { newCommand() }
@@ -312,6 +318,9 @@ struct HooksEditor: View {
                     .tag(hook.id)
                 }
                 .listStyle(.sidebar)
+                // Opaque: the window behind shouldn't show through these panes.
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .controlBackgroundColor))
                 Divider()
                 Menu {
                     Button("Blank Hook") { add(name: "New hook", trigger: .event(kind: "*", source: nil, contains: nil, criticalOnly: true),

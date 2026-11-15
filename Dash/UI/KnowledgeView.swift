@@ -34,6 +34,9 @@ struct KnowledgeView: View {
                     KnowledgeRow(node: node).tag(node.id)
                 }
                 .listStyle(.sidebar)
+                // Opaque: the window behind shouldn't show through these panes.
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .controlBackgroundColor))
                 .overlay {
                     if results.isEmpty { overview }
                 }

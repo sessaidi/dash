@@ -114,6 +114,9 @@ struct NotesView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Opaque: the window behind shouldn't show through these panes.
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .controlBackgroundColor))
             // A drag that ends anywhere (or changes the tree) leaves no stale drop marker.
             .onChange(of: store.notes) { dropTarget = nil }
             .onDrop(of: [.text], isTargeted: Binding(get: { false }, set: { if !$0 { dropTarget = nil } })) { providers in
