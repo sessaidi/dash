@@ -60,6 +60,8 @@ final class WidgetRecord {
     var gridY: Int = 0
     var gridW: Int = 4
     var gridH: Int = 6
+    /// Its DashQL query (the query bar): filter, sort, take on its rows.
+    var query: String = ""
     /// The page it sits on; nil only in stores that predate pages.
     var pageID: UUID?
 
@@ -248,6 +250,17 @@ final class DashboardStore {
     }
 
     /// Deletes a page and its widgets. The last page can't be deleted.
+    /// Sets a widget's DashQL query (empty clears it). Throws when it doesn't parse or the widget
+    /// has no query bar.
+    func setQuery(_ id: UUID, _ text: String) throws {
+        let record = try widget(id)
+        guard let type = host.widgetType(record.kind) else { throw ToolError("Unknown widget kind \"\(record.kind)\".") }
+        guard !type.queryFields.isEmpty || text.isEmpty else { throw ToolError("\(type.displayName) has no query bar.") }
+        do { _ = try WidgetQuery(text, fields: type.queryFields) } catch let error as QueryError { throw ToolError(error.message) }
+        record.query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        try context.save()
+    }
+
     /// A page for a suggested layout, marked as a draft until the user keeps it.
     func createDraftPage(name: String, systemImage: String, rationale: String) -> DashboardPage {
         let page = createPage(name: name, systemImage: systemImage)
@@ -415,7 +428,8 @@ final class DashboardStore {
         ["id": .string(record.id.uuidString), "page_id": record.pageID.map { .string($0.uuidString) } ?? .null,
          "kind": .string(record.kind), "title": .string(record.title),
          "size": .string(record.sizeRaw), "x": .number(Double(record.gridX)), "y": .number(Double(record.gridY)),
-         "w": .number(Double(record.gridW)), "h": .number(Double(record.gridH)), "config": record.config]
+         "w": .number(Double(record.gridW)), "h": .number(Double(record.gridH)), "config": record.config,
+         "query": record.query.isEmpty ? .null : .string(record.query)]
     }
 
     func describe(_ page: DashboardPage) -> JSONValue {
@@ -429,7 +443,7 @@ final class DashboardStore {
         guard let type = host.widgetType(record.kind) else { throw ToolError("Unknown widget kind \"\(record.kind)\".") }
         let live = host.live(id)
         live.attention = .now
-        let data = await type.snapshot(record.config, WidgetContext(widgetID: id, host: host, aiTasks: type.aiTasks))
+        let data = await type.snapshot(record.config, WidgetContext(widgetID: id, host: host, aiTasks: type.aiTasks, queryText: record.query))
         // What it is, what's on screen beyond its config, and what Dashii can do with it.
         return describe(record).merging([
             "type": ["name": .string(type.displayName), "summary": .string(type.summary)],
@@ -437,6 +451,7 @@ final class DashboardStore {
             "on_screen": .bool(live.handler != nil || live.state != .null),
             "ui_state": live.state,
             "actions": .array(type.actions.map(\.json)),
+            "query_fields": .array(type.queryFields.map { .string($0.name + ($0.aliases.isEmpty ? "" : " (" + $0.aliases.joined(separator: ", ") + ")")) }),
         ])
     }
 

@@ -146,6 +146,8 @@ final class ExtensionHost: ExtensionContext {
     }
 
     func start() {
+        // Who `me` is in widgets' DashQL queries.
+        WidgetQuery.me = DashQL.me(host: self)
         extensionErrors = dependencyErrors()
         for item in startOrder where isEnabled(item) {
             DashLog.info("Starting \(item.id) \(item.metadata.version)", category: "extensions")

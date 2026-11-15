@@ -7,7 +7,8 @@ import Foundation
 @MainActor
 enum DashQL {
     static func engine(host: ExtensionHost) -> QueryEngine {
-        QueryEngine(datasets: builtIn(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap(\.datasets), me: me(host: host))
+        WidgetQuery.me = me(host: host)
+        return QueryEngine(datasets: builtIn(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap(\.datasets), me: me(host: host))
     }
 
     /// Who `me` is: the name on Home and the logins the integrations report.

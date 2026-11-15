@@ -92,4 +92,20 @@ struct DashQLTests {
         let schema = try await DashQL.tools(host: host)[1].run([:])
         #expect(schema["datasets"]?.array?.contains { $0["name"] == "activity" } == true)
     }
+
+    @Test func widgetQueriesFilterTypedRows() async throws {
+        struct Pod { let name: String; let restarts: Int; let namespace: String }
+        let items = [Pod(name: "a", restarts: 9, namespace: "eu"), Pod(name: "b", restarts: 0, namespace: "eu"), Pod(name: "c", restarts: 4, namespace: "us")]
+        let fields: [QueryDataset.Field] = [.init("name"), .init("restarts", "number"), .init("namespace", aliases: ["ns"])]
+        let row: (Pod) -> JSONValue = { ["name": .string($0.name), "restarts": .number(Double($0.restarts)), "namespace": .string($0.namespace)] }
+
+        let query = try #require(try WidgetQuery("restarts>0 | sort -restarts", fields: fields))
+        #expect(await query.apply(to: items, row: row).map(\.name) == ["a", "c"])
+        let structured = try #require(try WidgetQuery("where ns = eu and restarts < 5", fields: fields))
+        #expect(await structured.apply(to: items, row: row).map(\.name) == ["b"])
+        let piped = try #require(try WidgetQuery("| take 1", fields: fields))
+        #expect(await piped.apply(to: items, row: row).map(\.name) == ["a"])
+        #expect(try WidgetQuery("  ", fields: fields) == nil)
+        #expect(throws: QueryError.self) { try WidgetQuery("restarts >", fields: fields) }
+    }
 }

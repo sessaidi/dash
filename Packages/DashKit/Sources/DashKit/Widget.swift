@@ -27,6 +27,8 @@ public protocol DashboardWidget {
     /// What Dashii can do with the widget on screen (search, filter, select…); the content view
     /// handles them with `handlesWidgetActions`.
     static var actions: [WidgetAction] { get }
+    /// The fields its DashQL query bar can filter on (its rows' fields). Empty: no query bar.
+    static var queryFields: [QueryDataset.Field] { get }
 
     @ViewBuilder static func content(config: Binding<Config>, context: WidgetContext) -> Content
     @ViewBuilder static func settings(config: Binding<Config>, context: WidgetContext) -> Settings
@@ -51,6 +53,7 @@ extension DashboardWidget {
     public static var sizeLimits: GridLimits { GridLimits() }
     public static var aiTasks: [AITask] { [] }
     public static var actions: [WidgetAction] { [] }
+    public static var queryFields: [QueryDataset.Field] { [] }
     public static func snapshot(config: Config, context: WidgetContext) async -> JSONValue {
         (try? JSONValue(encoding: config)) ?? .null
     }
@@ -61,11 +64,18 @@ public struct WidgetContext: Sendable {
     public let host: any ExtensionContext
     /// The widget type's AI tasks (set by Dash).
     public let aiTasks: [AITask]
+    /// The widget's DashQL query as typed (its query bar); read it with `query(fields:)`.
+    public let queryText: String
 
     public init(widgetID: UUID, host: any ExtensionContext, aiTasks: [AITask] = []) {
+        self.init(widgetID: widgetID, host: host, aiTasks: aiTasks, queryText: "")
+    }
+
+    public init(widgetID: UUID, host: any ExtensionContext, aiTasks: [AITask] = [], queryText: String) {
         self.widgetID = widgetID
         self.host = host
         self.aiTasks = aiTasks
+        self.queryText = queryText
     }
 
     /// This widget's AI choices (model, effort, templates), read fresh each time.
@@ -102,6 +112,8 @@ public struct WidgetType: Identifiable {
     public let configSchema: JSONValue
     /// What Dashii can do with it on screen.
     public let actions: [WidgetAction]
+    /// The fields its query bar filters on; empty when it has none.
+    public let queryFields: [QueryDataset.Field]
     public let hasSettings: Bool
     /// Decodes and re-encodes a config, throwing if it does not fit the widget's `Config`.
     public let normalize: (JSONValue) throws -> JSONValue
@@ -130,6 +142,7 @@ public struct WidgetType: Identifiable {
         defaultConfig = .object([:])
         configSchema = ["type": "object", "properties": .object([:])]
         actions = []
+        queryFields = []
         hasSettings = false
         normalize = { $0 }
         self.content = { _, context in content(context) }
@@ -149,6 +162,7 @@ public struct WidgetType: Identifiable {
         defaultConfig = (try? JSONValue(encoding: fallback)) ?? .object([:])
         configSchema = W.configSchema
         actions = W.actions
+        queryFields = W.queryFields
         hasSettings = W.Settings.self != EmptyView.self
         normalize = { raw in
             do { return try JSONValue(encoding: raw.decode(W.Config.self)) } catch let error as DecodingError {

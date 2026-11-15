@@ -15,6 +15,7 @@ enum CoreTools {
     private struct PageIDInput: Decodable { let id: String }
     private struct ListInput: Decodable { let page_id: String? }
     private struct DraftInput: Decodable { let name: String; let icon: String?; let rationale: String }
+    private struct QueryInput: Decodable { let id: String; let query: String }
     private struct ActInput: Decodable { let id: String; let action: String; let input: JSONValue? }
 
     private static func uuid(_ text: String) throws -> UUID {
@@ -115,6 +116,18 @@ enum CoreTools {
                 description: "Read one widget's live data (for example the issues on a Jira board widget or the PRs in a pull request widget), what the widget type is, what it shows right now beyond its config (ui_state: search, selection, visible range) and the actions you can run on it with widget_act.",
                 properties: ["id": JSONSchema.string("Widget id from list_widgets.")], required: ["id"]
             ) { input in try await store.snapshot(uuid(input.toolInput(WidgetID.self).id)) },
+            ClaudeTool(
+                name: "widget_query",
+                description: "Set a widget's DashQL query (its query bar): what it shows, filtered, sorted and cut, e.g. `ns:papi-eu status:failing | sort -restarts | take 20`. Empty clears it. read_widget lists the widget's query_fields; the user sees and can edit the query.",
+                properties: ["id": JSONSchema.string("Widget id."), "query": JSONSchema.string("DashQL without a source (filter | sort | take), or empty.")],
+                required: ["id", "query"]
+            ) { input in
+                let request = try input.toolInput(QueryInput.self)
+                let id = try uuid(request.id)
+                try store.setQuery(id, request.query)
+                host.live(id).attention = .now
+                return store.describe(try store.widget(id))
+            },
             ClaudeTool(
                 name: "widget_act",
                 description: "Do something with a widget on screen, as the user would: search, filter, select a row, jump to a date… The actions a widget offers are listed by read_widget. They only change what the widget shows. The widget must be on the current page (view_show opens its page).",
