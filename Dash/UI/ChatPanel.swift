@@ -191,19 +191,7 @@ struct ChatEntryView: View {
                 Label("Thinking", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
             }
         case .tool(let name, let input, let result, let isError):
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 6) {
-                    CodeText(input)
-                    if let result { CodeText(result).foregroundStyle(isError ? .red : .primary) }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: result == nil ? "hammer" : isError ? "xmark.octagon" : "checkmark.circle")
-                        .foregroundStyle(result == nil ? Color.secondary : isError ? .red : .green)
-                    Text(name).font(.caption.monospaced())
-                    if result == nil { ProgressView().controlSize(.mini) }
-                }
-            }
+            ToolCallView(name: name, input: input, result: result, isError: isError)
         case .notice(let text, let isError):
             Label(text, systemImage: isError ? "exclamationmark.triangle" : "info.circle")
                 .font(.callout)
