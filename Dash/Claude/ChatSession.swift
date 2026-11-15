@@ -139,7 +139,7 @@ final class ChatSession {
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
                 icon: "sparkles", title: "Dashii wants to run \(tool.name)", message: Self.summary(of: tool.description),
-                details: [.init(title: "Input", text: input.jsonString(pretty: true))])
+                input: input, remember: PermissionCenter.rememberKey("dashii", tool: tool))
             if !approved { return "The user declined this action." }
         }
         return nil
@@ -292,7 +292,7 @@ final class ChatSession {
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
                 icon: "sparkles", title: "Dashii wants to run \(call.name)", message: Self.summary(of: tool.description),
-                details: [.init(title: "Input", text: call.input.jsonString(pretty: true))])
+                input: call.input, remember: PermissionCenter.rememberKey("dashii", tool: tool))
             guard approved else { return ("The user declined this action.", true) }
         }
         do {

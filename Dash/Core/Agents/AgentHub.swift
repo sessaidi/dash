@@ -242,8 +242,8 @@ final class AgentHub {
             var runner = DashScript(host: host, tools: allowed) { tool, input in
                 guard tool.requiresApproval else { return nil }
                 let approved = await host.permissions.ask(icon: "hammer", title: "\(agent.name) wants to run \(tool.name)",
-                                                          message: ChatSession.summary(of: tool.description),
-                                                          details: [.init(title: "Input", text: input.jsonString(pretty: true))])
+                                                          message: ChatSession.summary(of: tool.description), input: input,
+                                                          remember: PermissionCenter.rememberKey("agent.\(agent.id)", tool: tool))
                 return approved ? nil : "The user declined this action."
             }
             runner.plan = input["plan"]?.bool ?? false
@@ -258,8 +258,8 @@ final class AgentHub {
         if case .deny(let reason) = await HookEngine.shared.beforeTool(name, input: arguments) { return MCPToolResult(reason, isError: true) }
         if tool.requiresApproval {
             let approved = await host.permissions.ask(
-                icon: "person.badge.shield.checkmark", title: "\(agent) wants to run \(name)", message: tool.description,
-                details: [.init(title: "Input", text: arguments.jsonString(pretty: true))])
+                icon: "person.badge.shield.checkmark", title: "\(agent) wants to run \(name)", message: ChatSession.summary(of: tool.description),
+                input: arguments, remember: PermissionCenter.rememberKey("agent.\(agent)", tool: tool))
             guard approved else { return MCPToolResult("The user declined this action.", isError: true) }
         }
         do {

@@ -141,7 +141,7 @@ final class HookEngine {
             case .requireApproval(let message):
                 let allowed = await host.permissions.ask(
                     icon: "bolt.shield", title: "Hook “\(hook.name)”: allow \(name)?", message: HookTemplate.fill(message, values),
-                    details: [.init(title: "Input", text: input.jsonString(pretty: true))], allowLabel: "Allow", denyLabel: "Refuse")
+                    allowLabel: "Allow", denyLabel: "Refuse", input: input)
                 record(hook, succeeded: true, output: allowed ? "Allowed \(name)" : "Refused \(name)")
                 if !allowed { return .deny("The user's hook “\(hook.name)” refused this.") }
             default:
@@ -187,7 +187,8 @@ final class HookEngine {
                 let json = try JSONValue.parse(fill(input).isEmpty ? "{}" : fill(input))
                 if tool.requiresApproval {
                     let allowed = await host.permissions.ask(icon: "bolt", title: "Hook “\(hook.name)” wants to run \(name)",
-                                                             message: tool.description, details: [.init(title: "Input", text: json.jsonString(pretty: true))])
+                                                             message: tool.description, input: json,
+                                                             remember: PermissionCenter.rememberKey("hook.\(hook.name)", tool: tool))
                     guard allowed else { throw ToolError("You refused it.") }
                 }
                 output = try await tool.run(json).jsonString()

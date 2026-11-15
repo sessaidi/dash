@@ -111,6 +111,7 @@ final class ExtensionHost: ExtensionContext {
         container = try Self.makeContainer(models: extensions.flatMap(\.models), inMemory: inMemory)
         if !inMemory { DatabaseVault.shared.attach(container) }
         dashboard = DashboardStore(host: self)
+        permissionCenter.store = container.mainContext
         if !inMemory { ClaudeUsage.shared.host = self }
         AutomationStore.shared.host = self
     }
@@ -119,7 +120,7 @@ final class ExtensionHost: ExtensionContext {
     /// store is a lightweight migration, so hot-installed plugins can grow the schema.
     static func makeContainer(models: [any PersistentModel.Type], inMemory: Bool) throws -> ModelContainer {
         let schema = Schema([WidgetRecord.self, DashboardPage.self, SidebarSection.self, ClaudeCall.self,
-                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self, SyncedRecordModel.self, DashSkill.self] + models)
+                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self, SyncedRecordModel.self, DashSkill.self, PermissionGrant.self] + models)
         let configuration = inMemory
             ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             : ModelConfiguration(schema: schema, url: try storeURL())

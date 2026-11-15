@@ -2,6 +2,7 @@ import ClaudeCodeKit
 @_spi(DashHost) import DashKit
 @_spi(DashHost) import DashKitUI
 import AppKit
+import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
@@ -92,6 +93,7 @@ private struct ClaudeSettings: View {
                     Text("Results reach Dashii in a token-lean form instead of JSON (tables with field names once). Turn off to debug.")
                 }
             }
+            AlwaysAllowedSection()
             ClaudeStatusSection(executable: settings.claudeExecutable)
         }
         .formStyle(.grouped)
@@ -358,6 +360,39 @@ private struct DebugSettings: View {
 }
 
 /// Claude Code's version and login, `/usage`, and what Dash itself spent.
+/// What the user answered "Always Allow" to, with a way to take it back.
+struct AlwaysAllowedSection: View {
+    @Query(sort: \PermissionGrant.grantedAt, order: .reverse) private var grants: [PermissionGrant]
+    @Environment(\.modelContext) private var context
+
+    var body: some View {
+        Section {
+            if grants.isEmpty {
+                Text("Nothing yet. Choose “Always Allow” in a permission prompt to stop being asked for that action.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(grants) { grant in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(grant.label)
+                        Text(grant.grantedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Revoke", role: .destructive) {
+                        context.delete(grant)
+                        try? context.save()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        } header: {
+            Text("Always allowed")
+        } footer: {
+            Text("Deleting, running commands and anything that writes to another service always asks.")
+        }
+    }
+}
+
 struct ClaudeStatusSection: View {
     let executable: URL?
     private var usage: ClaudeUsage { .shared }

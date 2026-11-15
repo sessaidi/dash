@@ -220,15 +220,22 @@ public struct PermissionPrompt: Sendable, Equatable {
     public var details: [PermissionDetail]
     public var allowLabel: String
     public var denyLabel: String
+    /// What will run with, shown field by field (a tool's input).
+    public var input: JSONValue?
+    /// When set, the user may answer "Always Allow" and the host remembers it under this key
+    /// ("tool:notes_create"); later prompts with the same key are allowed without asking.
+    public var remember: String?
 
     public init(icon: String = "hand.raised", title: String, message: String, details: [PermissionDetail] = [],
-                allowLabel: String = "Allow", denyLabel: String = "Don't Allow") {
+                allowLabel: String = "Allow", denyLabel: String = "Don't Allow", input: JSONValue? = nil, remember: String? = nil) {
         self.icon = icon
         self.title = title
         self.message = message
         self.details = details
         self.allowLabel = allowLabel
         self.denyLabel = denyLabel
+        self.input = input
+        self.remember = remember
     }
 }
 
@@ -241,8 +248,9 @@ public protocol PermissionAsking: AnyObject {
 extension PermissionAsking {
     /// The same, with the prompt's parts as arguments.
     public func ask(icon: String = "hand.raised", title: String, message: String, details: [PermissionDetail] = [],
-                    allowLabel: String = "Allow", denyLabel: String = "Don't Allow") async -> Bool {
-        await ask(PermissionPrompt(icon: icon, title: title, message: message, details: details, allowLabel: allowLabel, denyLabel: denyLabel))
+                    allowLabel: String = "Allow", denyLabel: String = "Don't Allow", input: JSONValue? = nil, remember: String? = nil) async -> Bool {
+        await ask(PermissionPrompt(icon: icon, title: title, message: message, details: details, allowLabel: allowLabel, denyLabel: denyLabel,
+                                   input: input, remember: remember))
     }
 }
 
