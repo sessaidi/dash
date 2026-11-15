@@ -176,6 +176,10 @@ struct HotInstallTests {
         kept.title = "Still usable"
         #expect(kept.title == "Still usable")
         #expect(host.extensions.contains { $0.id == "hot-notes" })
+        // A new plugin arrives turned off; the user turns it on.
+        #expect(!host.isEnabled(notes) && !host.availableTools.contains { $0.name == "hot-notes_run" })
+        #expect(host.activity.events.contains { $0.kind == "plugin.installed_off" })
+        host.setEnabled(notes, true)
         #expect(host.availableTools.contains { $0.name == "hot-notes_run" })
         host.context.insert(FakeNote(text: "hello"))
         try host.context.save()
@@ -334,5 +338,26 @@ struct VaultTests {
         // The key file holds only the Secure Enclave handle or the fallback key, owner-only.
         let attributes = try FileManager.default.attributesOfItem(atPath: vault.keyURL.path)
         #expect((attributes[.posixPermissions] as? Int) == 0o600)
+    }
+}
+
+@MainActor
+struct NewPluginsStartOffTests {
+    @Test func firstLaunchKeepsWhatIsInstalledThenNewOnesStartOff() throws {
+        DashDefaults.shared.removeObject(forKey: "dash.knownExtensions")
+        defer { DashDefaults.shared.removeObject(forKey: "dash.knownExtensions") }
+        let existing = FakeFeature(id: "already-here")
+        let host = try ExtensionHost(settings: AppSettings(defaults: UserDefaults(suiteName: "dash-tests-\(UUID())")!),
+                                     extensions: ExtensionHost.builtInExtensions() + [existing], inMemory: true)
+        host.disableNewPlugins(host.extensions)
+        #expect(host.isEnabled(existing))  // known from the first run: left as it was
+
+        let later = FakeFeature(id: "brand-new")
+        host.disableNewPlugins([later])
+        #expect(!host.isEnabled(later))
+        host.setEnabled(later, true)
+        host.disableNewPlugins([later])  // already known: never switched off again
+        #expect(host.isEnabled(later))
+        host.setEnabled(later, true)
     }
 }

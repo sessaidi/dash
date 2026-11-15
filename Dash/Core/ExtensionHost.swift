@@ -146,6 +146,7 @@ final class ExtensionHost: ExtensionContext {
     }
 
     func start() {
+        disableNewPlugins(extensions)
         // Who `me` is in widgets' DashQL queries.
         WidgetQuery.me = DashQL.me(host: self)
         Skills.seed(in: context)
@@ -198,6 +199,28 @@ final class ExtensionHost: ExtensionContext {
     /// write remotely: Claude only ever reads from remote systems.
     var availableTools: [ClaudeTool] {
         extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools).filter { !$0.writesRemotely }
+    }
+
+    /// Plugins arrive turned off: the user turns each one on (Settings › Plugins) before it runs,
+    /// syncs or offers tools. The first time this runs, what's already installed is taken as known,
+    /// so nothing the user uses gets switched off.
+    func disableNewPlugins(_ items: [any DashExtension]) {
+        let builtIn = Set(Self.builtInExtensions().map(\.id))
+        let key = "dash.knownExtensions"
+        guard var known = DashDefaults.shared.stringArray(forKey: key).map(Set.init) else {
+            DashDefaults.shared.set(extensions.map(\.id).sorted(), forKey: key)
+            return
+        }
+        let new = items.filter { !builtIn.contains($0.id) && !known.contains($0.id) }
+        guard !new.isEmpty else { return }
+        for item in new {
+            disabled.insert(item.id)
+            known.insert(item.id)
+        }
+        DashDefaults.shared.set(disabled.sorted(), forKey: "dash.disabledExtensions")
+        DashDefaults.shared.set(known.sorted(), forKey: key)
+        activity.emit("plugin.installed_off", source: "dashboard", title: "Installed \(new.map(\.name).joined(separator: ", ")), turned off",
+                      detail: "Turn it on in Settings › Plugins when you want to use it.", importance: .notable)
     }
 
     func isEnabled(_ item: any DashExtension) -> Bool {
@@ -262,6 +285,7 @@ final class ExtensionHost: ExtensionContext {
             DashLog.info("Store schema grown for \(items.map(\.id).joined(separator: ", "))", category: "plugins")
         }
         extensions += items
+        disableNewPlugins(items)
         extensionErrors = dependencyErrors()
         let ordered = items.filter { $0.layer == .integration } + items.filter { $0.layer == .feature }
         for item in ordered where isEnabled(item) {
