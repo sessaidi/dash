@@ -74,3 +74,38 @@ struct RemoteRepositoryTests {
         await #expect(throws: ToolError.self) { try await RemoteRepository(provider: .gitlab, slug: "grp/proj").sync(host: host) }
     }
 }
+
+/// Watched repositories reach Knowledge through Dash's database.
+@MainActor
+@Suite(.serialized)
+struct WatchedRepositoryTests {
+    @Test func knowledgeFollowsWhatIntegrationsWatch() async throws {
+        let server = "gh-\(UUID().uuidString.prefix(8)).test"
+        let tarball = try RemoteRepositoryTests.archive()
+        StubHTTP.serve(server) { request in
+            switch request.url?.path() ?? "" {
+            case "/repos/acme/web": (200, Data(#"{"default_branch":"main","html_url":"https://github.com/acme/web"}"#.utf8), [:])
+            case "/repos/acme/web/commits/main": (200, Data(#"{"sha":"def456"}"#.utf8), [:])
+            case "/repos/acme/web/tarball/def456": (200, tarball, [:])
+            default: (404, Data(), [:])
+            }
+        }
+        let github = TestIntegration(id: "github", baseURL: URL(string: "https://\(server)")!)
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "watched-\(UUID())")!, url: nil)
+        let host = try ExtensionHost(settings: AppSettings(defaults: UserDefaults(suiteName: "watched-\(UUID())")!),
+                                     extensions: [knowledge, github], inMemory: true)
+        knowledge.start(host: host)
+        let mirror = RemoteRepository(provider: .github, slug: "acme/web").mirror
+        try? FileManager.default.removeItem(at: mirror)
+
+        WatchedRepositories.publish(["acme/web"], provider: "github", web: "https://github.com", in: host.synced)
+        #expect(WatchedRepositories.all(in: host.synced) == [.init(provider: "github", slug: "acme/web", webURL: "https://github.com/acme/web")])
+        await knowledge.followWatchedRepositories()
+        #expect(knowledge.repositories == [mirror.standardizedFileURL.path])
+
+        // Unwatched in the integration: dropped from the graph.
+        WatchedRepositories.publish([], provider: "github", web: nil, in: host.synced)
+        await knowledge.followWatchedRepositories()
+        #expect(knowledge.repositories.isEmpty && knowledge.followed.isEmpty)
+    }
+}

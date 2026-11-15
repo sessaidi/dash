@@ -72,3 +72,44 @@ public final class MemorySyncedStore: SyncedStore {
 enum DefaultSynced {
     static let store = MemorySyncedStore()
 }
+
+/// The repositories a source-control integration watches (picked in its settings), kept in the
+/// synced store so any extension reads them from the database instead of from the integration:
+/// Knowledge indexes them, features list them.
+public enum WatchedRepositories {
+    public static let kind = "git.watched"
+    /// The integrations that publish them (each one is a scope).
+    public static let providers = ["github", "gitlab"]
+
+    public struct Repository: Sendable, Hashable {
+        /// "github" or "gitlab".
+        public let provider: String
+        /// "owner/name" or "group/sub/project".
+        public let slug: String
+        public let webURL: String?
+
+        public init(provider: String, slug: String, webURL: String? = nil) {
+            self.provider = provider
+            self.slug = slug
+            self.webURL = webURL
+        }
+    }
+
+    /// Replaces what `provider` watches with `slugs`. `web` is the site ("https://github.com").
+    @MainActor
+    public static func publish(_ slugs: [String], provider: String, web: String?, in store: any SyncedStore) {
+        let records = slugs.map { slug in
+            SyncedRecord(kind: kind, scope: provider, key: slug,
+                         value: ["slug": .string(slug), "url": web.map { .string("\($0)/\(slug)") } ?? .null], source: provider)
+        }
+        store.replace(kind: kind, scope: provider, with: records)
+    }
+
+    /// Everything the integrations watch.
+    @MainActor
+    public static func all(in store: any SyncedStore) -> [Repository] {
+        providers.flatMap { provider in
+            store.records(kind: kind, scope: provider).map { Repository(provider: provider, slug: $0.key, webURL: $0.value["url"]?.string) }
+        }
+    }
+}

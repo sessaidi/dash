@@ -297,6 +297,10 @@ struct KnowledgeSettings: View {
                 }
                 Stepper("Re-index changed files every \(knowledge.refreshMinutes) min", value: $knowledge.refreshMinutes, in: 5...240, step: 5)
                 Toggle("Read git history (authors, files changed together, tickets in commits)", isOn: $knowledge.readHistory)
+                Toggle(isOn: $knowledge.followWatched) {
+                    Text("Index the repositories GitHub and GitLab watch")
+                    Text("The ones picked in those integrations' settings: a local checkout if you have one, else read through the integration without cloning.")
+                }
             } header: {
                 Text("Repositories")
             } footer: {

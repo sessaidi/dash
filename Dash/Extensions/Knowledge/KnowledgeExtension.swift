@@ -21,6 +21,10 @@ final class KnowledgeExtension: DashExtension {
     var repositories: [String] { didSet { defaults.set(repositories, forKey: "knowledge.repos") } }
     var refreshMinutes: Int { didSet { defaults.set(refreshMinutes, forKey: "knowledge.refreshMinutes") } }
     var readHistory: Bool { didSet { defaults.set(readHistory, forKey: "knowledge.history") } }
+    /// Index the repositories the GitHub and GitLab integrations watch (read from Dash's database).
+    var followWatched: Bool { didSet { defaults.set(followWatched, forKey: "knowledge.followWatched") } }
+    /// Watched repositories this extension added ("github:owner/name" → path), so it drops them when unwatched.
+    private(set) var followed: [String: String] { didSet { defaults.set(followed, forKey: "knowledge.followed") } }
     /// Let Claude study directories in the background.
     var understand: Bool { didSet { defaults.set(understand, forKey: "knowledge.understand") } }
     /// Directories Claude studies per background pass, and how often a pass runs.
@@ -57,6 +61,8 @@ final class KnowledgeExtension: DashExtension {
         repositories = defaults.stringArray(forKey: "knowledge.repos") ?? []
         refreshMinutes = defaults.object(forKey: "knowledge.refreshMinutes") as? Int ?? 30
         readHistory = defaults.object(forKey: "knowledge.history") as? Bool ?? true
+        followWatched = defaults.object(forKey: "knowledge.followWatched") as? Bool ?? true
+        followed = defaults.dictionary(forKey: "knowledge.followed") as? [String: String] ?? [:]
         understand = defaults.object(forKey: "knowledge.understand") as? Bool ?? true
         understandBudget = defaults.object(forKey: "knowledge.budget") as? Int ?? 6
         understandHours = defaults.object(forKey: "knowledge.understandHours") as? Int ?? 4
@@ -98,6 +104,7 @@ final class KnowledgeExtension: DashExtension {
         isWorking = true
         lastError = nil
         defer { isWorking = false; status = "" }
+        await followWatchedRepositories()
         for path in repositories {
             status = "Indexing \((path as NSString).lastPathComponent)…"
             do {
@@ -209,6 +216,44 @@ final class KnowledgeExtension: DashExtension {
 
     /// Resolves what the user named: a path, a folder name found under the search roots, or
     /// "owner/name" (a local checkout of it, else a fresh clone into the code folder).
+    /// Adds what the GitHub and GitLab integrations watch (the list they keep in Dash's database)
+    /// and drops what they stopped watching, if this extension added it. A local checkout of a
+    /// watched repository is used when there is one; otherwise it's read through the integration.
+    func followWatchedRepositories() async {
+        guard let host else { return }
+        let watched = followWatched ? WatchedRepositories.all(in: host.synced) : []
+        let wanted = Set(watched.map { "\($0.provider):\($0.slug)" })
+        for (key, path) in followed where !wanted.contains(key) {
+            followed[key] = nil
+            if repositories.contains(path) { removeRepository(path) }
+        }
+        for repository in watched {
+            let key = "\(repository.provider):\(repository.slug)"
+            guard followed[key] == nil else { continue }
+            do {
+                let path = try await locate(repository).standardizedFileURL.path
+                // Already indexed by hand: leave it the user's.
+                guard !repositories.contains(path) else { continue }
+                repositories.append(path)
+                followed[key] = path
+            } catch {
+                lastError = "\(repository.slug): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// A local checkout whose origin is the repository, else a mirror read through its integration.
+    func locate(_ repository: WatchedRepositories.Repository) async throws -> URL {
+        let name = String(repository.slug.split(separator: "/").last ?? "")
+        let roots = Self.searchRoots
+        let checkouts = await Task.detached { Self.findCheckouts(matching: name, roots: roots) }.value
+        if let local = checkouts.first(where: { (Self.originURL($0) ?? "").lowercased().contains(repository.slug.lowercased()) }) {
+            return local
+        }
+        guard let provider = RemoteRepository.Provider(rawValue: repository.provider) else { throw ToolError("Unknown provider \(repository.provider).") }
+        return try await mirror(RemoteRepository(provider: provider, slug: repository.slug))
+    }
+
     /// The remote a mirror folder stands for, nil for a local checkout.
     static func remote(at path: String) -> RemoteRepository? {
         guard path.hasPrefix(RemoteRepository.mirrorsRoot.path), let marker = RemoteRepository.marker(in: URL(fileURLWithPath: path)) else { return nil }
