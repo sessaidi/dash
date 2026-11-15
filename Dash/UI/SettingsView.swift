@@ -28,6 +28,7 @@ struct SettingsView: View {
                     marketplace.settingsView().formStyle(.grouped)
                 }
             }
+            Tab("Updates", systemImage: "arrow.down.circle", value: "updates") { UpdateSettings() }
             Tab("Debug", systemImage: "ladybug", value: "debug") { DebugSettings() }
         }
         .frame(width: 860, height: 640)
@@ -335,6 +336,65 @@ private struct PersonaSettings: View {
 }
 
 /// Settings › Debug: turn on debug mode, then open the Debug window.
+/// The installed version, the latest release, and installing it.
+private struct UpdateSettings: View {
+    @State private var updater = Updater.shared
+
+    var body: some View {
+        @Bindable var updater = updater
+        Form {
+            Section {
+                LabeledContent("Installed", value: updater.currentVersion)
+                LabeledContent("Repository", value: updater.repository)
+                status
+                HStack {
+                    Button("Check Now") { Task { await updater.check() } }
+                        .disabled(updater.state == .checking || isInstalling)
+                    if case .available(let release) = updater.state {
+                        Button("Install \(release.version) and Relaunch") { Task { await updater.install(release) } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!updater.canInstall)
+                    }
+                }
+            } footer: {
+                Text(updater.canInstall
+                     ? "Dash downloads the release, checks it, quits, replaces itself and opens again."
+                     : "This is a debug build: it checks for releases but doesn't replace itself. Install a release build from scripts/release.sh.")
+            }
+            Section {
+                Toggle("Check automatically", isOn: $updater.automaticChecks)
+                if let last = updater.lastCheck {
+                    LabeledContent("Last checked", value: last.formatted(date: .abbreviated, time: .shortened))
+                }
+            } footer: {
+                Text("At launch and every six hours. Private repositories use the GitHub CLI's login (`gh auth login`).")
+            }
+            if case .available(let release) = updater.state, !release.notes.isEmpty {
+                Section("What's new in \(release.version)") {
+                    Text(LocalizedStringKey(release.notes)).textSelection(.enabled)
+                    if let page = release.page { Link("Open the release on GitHub", destination: page) }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var isInstalling: Bool {
+        if case .installing = updater.state { true } else { false }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch updater.state {
+        case .idle: LabeledContent("Latest", value: "Not checked yet")
+        case .checking: LabeledContent("Latest") { ProgressView().controlSize(.small) }
+        case .upToDate: LabeledContent("Latest") { Label("Dash is up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+        case .available(let release): LabeledContent("Latest") { Label("\(release.version) is available", systemImage: "arrow.down.circle.fill").foregroundStyle(.blue) }
+        case .installing(let step): LabeledContent("Installing") { HStack { ProgressView().controlSize(.small); Text(step) } }
+        case .failed(let message): LabeledContent("Latest") { Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+        }
+    }
+}
+
 private struct DebugSettings: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.openWindow) private var openWindow

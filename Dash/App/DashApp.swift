@@ -47,6 +47,7 @@ struct DashApp: App {
         // The token trusted dash://ask links carry (created once, readable by the user only).
         if !testing { _ = AskLink.token() }
         if !testing { Notifier.shared.start(activity: host.activity, persona: host.persona) }
+        if !testing { Updater.shared.start() }
     }
 
     private let testing: Bool
@@ -84,6 +85,9 @@ struct DashApp: App {
         .handlesExternalEvents(matching: ["*"])
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton(host: host)
+            }
             // The Debug menu only exists while debug mode is on (Settings › Debug).
             if host.settings.debugMode {
                 CommandMenu("Debug") {
@@ -120,6 +124,21 @@ struct DashApp: App {
     }
 }
 
+/// Checks for an update and shows the answer on Settings › Updates.
+private struct CheckForUpdatesButton: View {
+    let host: ExtensionHost
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Check for Updates…") {
+            host.settingsTab = "updates"
+            NSApp.activate()
+            openSettings()
+            Task { await Updater.shared.check() }
+        }
+    }
+}
+
 private struct OpenDebugWindowButton: View {
     @Environment(\.openWindow) private var openWindow
 
@@ -139,6 +158,9 @@ private struct DotMenu: View {
         @Bindable var persona = host.persona
         Button("Ask \(persona.name)…  \(GlobalHotKey.description)") { summon() }
         Button("Open Dash") { DesktopMascot.shared.bringDashForward() }
+        if case .available(let release) = Updater.shared.state {
+            Button("Install Dash \(release.version) and Relaunch") { Task { await Updater.shared.install(release) } }
+        }
         Divider()
         Toggle("Show \(persona.name) on the Desktop", isOn: Binding(
             get: { persona.mascotVisible && persona.place == .desktop },
