@@ -162,3 +162,24 @@ public struct ProvidedWidget<Provider: WidgetDataProvider, Content: View>: View 
         }
     }
 }
+
+// MARK: - Header
+
+/// Controls a widget puts in its card's header, next to the title (and clear of the card's menu).
+public struct WidgetHeaderKey: PreferenceKey {
+    public struct Item: Identifiable {
+        public let id = UUID()
+        public let view: AnyView
+    }
+
+    public static var defaultValue: [Item] { [] }
+    public static func reduce(value: inout [Item], nextValue: () -> [Item]) { value += nextValue() }
+}
+
+extension View {
+    /// Puts `content` (a mode picker, an add button…) in the widget card's header row, instead of
+    /// inside the widget where it would cost a row of space.
+    public func widgetHeader<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        preference(key: WidgetHeaderKey.self, value: [WidgetHeaderKey.Item(view: AnyView(content()))])
+    }
+}

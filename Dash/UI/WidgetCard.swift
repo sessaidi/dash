@@ -65,6 +65,14 @@ struct WidgetCard: View {
             // While editing, the whole card is a drag handle and its content doesn't take clicks.
             .allowsHitTesting(!editing)
         }
+        // Controls the widget puts in its header (`widgetHeader`): on the title row, left of the menu.
+        .overlayPreferenceValue(WidgetHeaderKey.self, alignment: .topTrailing) { items in
+            if !editing, !items.isEmpty {
+                HStack(spacing: 8) { ForEach(items) { $0.view } }
+                    .frame(height: 22)
+                    .padding(.trailing, 30)
+            }
+        }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Outside edit mode widgets sit on the page itself (no card); the card appears while
