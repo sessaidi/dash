@@ -25,12 +25,14 @@ From the registry repository:
 ```sh
 scripts/new-plugin.py Weather --feature                         # or --integration
 scripts/new-plugin.py Standup --feature --requires atlassian,github --author "Ada <ada@example.com>"
-TEST=1 scripts/build-plugins.sh Weather                         # build, test, zip, index
+TEST=1 scripts/try-plugin.sh Weather                            # test, build, install in Dash
+TEST=1 scripts/build-plugins.sh Weather                         # publish: zip and index
 ```
 
-**Try it live:** copy `build/<Name>/Build/Products/Release/<Name>Plugin.dashplugin` into
-`~/Library/Application Support/Dash/Plugins`. Dash notices it, asks you to load it, and starts
-it right away. Its widgets appear in the widget gallery and its tools reach Dashii.
+**Try it live:** `try-plugin.sh` copies the bundle into `~/Library/Application Support/Dash/Plugins`.
+Dash notices it, asks you to load it, and starts it right away (turn it on in Settings ›
+Plugins). Its widgets appear in the widget gallery and its tools reach Dashii. Loaded code can't
+be swapped, so relaunch Dash to pick up a new build.
 
 ## Layout
 
@@ -265,14 +267,16 @@ newest API you use.
 
 ## Publishing
 
-1. `TEST=1 scripts/build-plugins.sh <Name>` writes `dist/<id>-<version>.dashplugin.zip`.
-2. `python3 scripts/build-index.py` regenerates `registry.json` with its SHA-256.
-3. Commit `plugins/<Name>`, the zip and `registry.json` together.
+1. Bump `DashPluginVersion` in `project.yml` (and `Info.plist`).
+2. `TEST=1 scripts/build-plugins.sh <Name>` writes `dist/<id>-<version>.dashplugin.zip` and
+   regenerates `registry.json` with its SHA-256 (`python3 scripts/build-index.py` does only that).
+3. Commit `plugins/<Name>`, the zip and `registry.json` together. If a global gitignore
+   excludes `dist/`, add the zip with `git add -f`.
 4. Anyone can add the repository as a registry in Settings › Marketplace (`owner/name`,
    `owner/name@branch`, or a local folder).
 
-Bump `DashPluginVersion` in `project.yml` for every release; the Marketplace offers an update
-when the registry's version differs from the installed one.
+Bump the version for every release; the Marketplace offers an update when the registry's
+version differs from the installed one.
 
 ## Contracts of the first-party integrations
 
