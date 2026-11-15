@@ -276,6 +276,10 @@ public enums are switched with `@unknown default`, stored value types decode old
 DashKit 2.1 added the widget's grid span to `WidgetLayout` (`columns`, `rows`): plugins that read
 them need `2.1.0`.
 
+DashKit 2.2 added `host.markdown(_:)`: Markdown drawn like a Dash note (headings, lists, tables,
+code, callouts, Mermaid diagrams), with GitHub's HTML comments left out. Plugins that call it
+need `2.2.0`.
+
 A new **major** version may break the API. Dash refuses a plugin built for another major (the
 user is told to update it from the Marketplace) and one needing a newer minor than it has. Set
 `DashKitMinimumVersion` (and `metadata.minimumDashKit`) to `2.0.0` or the minor that added the
