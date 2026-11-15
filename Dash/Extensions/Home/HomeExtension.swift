@@ -149,6 +149,10 @@ final class HomeExtension: DashExtension {
             briefError = nil
             defaults.set(try? JSONEncoder().encode(brief), forKey: "home.lastBrief")
             host.activity.emit("home.brief", source: id, title: "Wrote today's brief (\(items.count) items)")
+            // Kept in Notes with the other generated reports (rewritten if planned again today).
+            let day = Date.now.formatted(.iso8601.year().month().day())
+            let markdown = "# Brief \(day)\n\n" + items.map { "- [ ] **\($0.title)**" + ($0.detail.map { ": \($0)" } ?? "") }.joined(separator: "\n")
+            _ = try? host.createNote(title: "Brief \(day)", markdown: markdown, folder: "Reports")
         } catch {
             briefError = error.localizedDescription
         }

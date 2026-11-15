@@ -307,6 +307,11 @@ final class ExtensionHost: ExtensionContext {
 
     func createNote(title: String, markdown: String, folder: String?) throws -> URL {
         guard let notes = ext(NotesExtension.self) else { throw ToolError("Notes isn't available.") }
+        // A report generated again (same title, same folder) replaces its note instead of adding a copy.
+        if let existing = notes.store.note(titled: title), existing.folder == (folder ?? "") {
+            try notes.store.write(markdown, to: existing)
+            return existing.url
+        }
         let note = try notes.store.create(title: title, markdown: markdown, folder: folder)
         activity.emit("note.created", source: "notes", title: "Note “\(note.title)” created", importance: .info)
         return note.url
