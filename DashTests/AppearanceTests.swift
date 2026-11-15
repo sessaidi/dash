@@ -43,3 +43,11 @@ struct AppearanceTests {
         #expect(Color(hex: "#ff5257")?.hexString == "#ff5257")
     }
 }
+
+/// GitHub Markdown from plugins, cleaned for the note renderer.
+struct HostMarkdownTests {
+    @Test func templateCommentsAndDetailsAreCleaned() {
+        let body = "<!-- Tips:\n1. add a label\n-->\n# What\n\n<details><summary>Logs</summary>\n\nline<br>next\n</details>"
+        #expect(HostMarkdown.clean(body) == "# What\n\n**Logs**\n\nline  \nnext")
+    }
+}
