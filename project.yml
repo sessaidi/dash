@@ -67,6 +67,8 @@ targets:
         # in your repositories, which the App Sandbox forbids.
         com.apple.security.app-sandbox: false
         com.apple.security.device.audio-input: true
+        # The Zoom plugin reads upcoming meetings from the Mac's calendars (it runs in Dash's process).
+        com.apple.security.personal-information.calendars: true
         # Plugins are built separately; Dash pins approved ones to their SHA-256 instead.
         com.apple.security.cs.disable-library-validation: true
     settings:
@@ -83,6 +85,7 @@ targets:
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Dash records your microphone during meetings you choose to transcribe.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Dash transcribes meeting audio on this Mac.
         INFOPLIST_KEY_NSScreenCaptureUsageDescription: Dash captures Zoom's audio to transcribe meetings.
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Dash shows your upcoming Zoom meetings and names recordings after their calendar event.
   DashTests:
     type: bundle.unit-test
     platform: macOS
