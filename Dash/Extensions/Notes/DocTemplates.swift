@@ -6,7 +6,7 @@ import Foundation
 /// connected integrations. Each kind has a structure and the sources to gather it from; Dashii
 /// gets them with `doc_template`, researches, then writes the note with `notes_create`.
 enum DocKind: String, CaseIterable, Identifiable, Sendable {
-    case howto, runbook, postmortem, meetingNotes = "meeting_notes", dailyNote = "daily_note", serviceOverview = "service_overview", decision
+    case howto, runbook, postmortem, bugReport = "bug_report", meetingNotes = "meeting_notes", dailyNote = "daily_note", serviceOverview = "service_overview", decision
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
         case .howto: "How-to"
         case .runbook: "Runbook"
         case .postmortem: "Postmortem"
+        case .bugReport: "Bug Report"
         case .meetingNotes: "Meeting Notes"
         case .dailyNote: "Daily Note"
         case .serviceOverview: "Service Overview"
@@ -27,6 +28,7 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
         case .howto: "list.number"
         case .runbook: "cross.case"
         case .postmortem: "flame"
+        case .bugReport: "ladybug"
         case .meetingNotes: "person.3"
         case .dailyNote: "calendar"
         case .serviceOverview: "shippingbox"
@@ -40,6 +42,7 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
         case .howto: "Which task? e.g. add a localization key in PAPI"
         case .runbook: "Which symptom? e.g. gateway returns 528 for one backend"
         case .postmortem: "Which incident, and when?"
+        case .bugReport: "What goes wrong, and where? e.g. papi-eu pods crash after the W43 release"
         case .meetingNotes: "Which meeting? Leave empty for the latest"
         case .dailyNote: "Which day? Leave empty for today"
         case .serviceOverview: "Which service or repository?"
@@ -52,6 +55,7 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
         case .howto: "How to <task>"
         case .runbook: "Runbook: <symptom>"
         case .postmortem: "Postmortem YYYY-MM-DD: <incident>"
+        case .bugReport: "Bug: <component> — <observable symptom>"
         case .meetingNotes: "<Meeting> — YYYY-MM-DD"
         case .dailyNote: "Daily YYYY-MM-DD"
         case .serviceOverview: "<service>"
@@ -91,6 +95,22 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
             ## Resolution — what fixed it
             ## Lessons
             ## Action items — - [ ] item, owner (proposals only: nothing is filed in Jira)
+            """
+        case .bugReport:
+            """
+            # Bug: <component> — <observable symptom>
+            (title: what breaks where, as seen; never “it doesn't work”)
+            **Severity** S1 critical (down, data loss, security) · S2 high (major feature broken, no workaround) · S3 medium (workaround exists) · S4 low (cosmetic) — with one line why.
+            **Priority** P0–P3 (business urgency; may differ from severity) — say who decides.
+            ## Environment — service and version/release, cluster/namespace or platform, region (EU/US), when it started
+            ## Steps to reproduce — numbered, exact; preconditions and test data; what does NOT trigger it
+            ## Expected result
+            ## Actual result — what happens, with frequency (every time / 3 of 10)
+            ## Impact — who is affected and how much
+            ## Workaround — if any
+            ## Evidence — the real log lines, metrics, pod statuses, request/response, release or deploy that introduced it (links, no secrets)
+            ## Related — tickets, PRs, releases, past incidents
+            One bug per report: if the evidence shows two problems, write two.
             """
         case .meetingNotes:
             """
@@ -141,6 +161,8 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
             "memory_recall and knowledge_search for the service, past incidents and fixes; the Kubernetes, GCP, Datadog and AWS read tools for the real commands and dashboards; notes_search for related runbooks."
         case .postmortem:
             "dashboard_activity over the incident window, Datadog/GCP logs and metrics, PRs and deploys around it, Jira tickets, meeting transcripts, memory_recall."
+        case .bugReport:
+            "dashql across pods, monitors and deploys (from pods where … ; from monitors where status = Alert; from deploys where at > -24h); the GCP and Datadog log and metric tools for the exact errors; releases and builds around when it started; jira and prs for duplicates and suspects; knowledge_search for the code involved; memory_recall."
         case .meetingNotes:
             "the meeting tools (transcript, speakers, summary), Jira tickets and PRs mentioned, memory_recall for context."
         case .dailyNote:
@@ -159,7 +181,8 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
         Only verified facts: every command, path and name comes from a tool result, not from memory of how \
         such things usually look. Say "unverified" where you could not check. Use the note components \
         (notes_components) where they help: callouts, tables, task lists. Link related notes with [[Title]] \
-        and sources with Markdown links. No secrets. Write it with notes_create (or notes_update if a note \
+        and sources with Markdown links. No secrets (tokens, passwords, keys are never copied into a document). A bug \
+        report is written to Notes only: never file it in Jira or post it anywhere; the user does that. Write it with notes_create (or notes_update if a note \
         with that title exists), then open it with view_show and say in one line what you wrote.
         """
 
