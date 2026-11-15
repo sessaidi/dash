@@ -36,7 +36,9 @@ struct WidgetGallery: View {
             .padding(20)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                // Not lazy: a lazy list of lazy grids drops tiles that scroll back into view (and
+                // the gallery holds a few dozen widgets at most).
+                VStack(alignment: .leading, spacing: 22) {
                     ForEach(sections, id: \.name) { section in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(section.name).font(.headline).foregroundStyle(.secondary)
