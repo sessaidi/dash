@@ -332,6 +332,6 @@ private struct DataWidgetView: View {
     }
 
     static func number(_ value: Double) -> String {
-        value.rounded() == value ? Int(value).formatted() : value.formatted(.number.precision(.fractionLength(1)))
+        Int(exactly: value).map { $0.formatted() } ?? value.formatted(.number.precision(.fractionLength(1)))
     }
 }

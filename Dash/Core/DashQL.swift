@@ -122,7 +122,7 @@ enum DashQL {
     static func literal(_ value: JSONValue) -> String {
         switch value {
         case .string(let text): "\"" + text.replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .number(let number): DashDate.number(number)
         case .bool(let flag): String(flag)
         case .array(let items): "(" + items.map(literal).joined(separator: ", ") + ")"
         default: "null"
