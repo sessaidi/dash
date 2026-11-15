@@ -143,8 +143,8 @@ enum PluginLoader {
             .flatMap { try? JSONDecoder().decode(PluginInfo.self, from: $0) }
         if bundle == nil || executable == nil {
             record.state = .failed("Not a loadable bundle (no executable).")
-        } else if let minimum = info[DashPluginKeys.minimumDashKit] as? String, ExtensionMetadata.compare(DashKitInfo.version, minimum) == .orderedAscending {
-            record.state = .failed("Needs DashKit \(minimum); this Dash has \(DashKitInfo.version).")
+        } else if let reason = DashKitInfo.incompatibility(minimum: info[DashPluginKeys.minimumDashKit] as? String) {
+            record.state = .failed(reason)
         }
         return record
     }

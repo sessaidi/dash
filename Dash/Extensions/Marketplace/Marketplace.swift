@@ -335,8 +335,8 @@ final class MarketplaceFeature: DashExtension {
         guard let expected = plugin.sha256?.lowercased(), !expected.isEmpty else {
             throw ToolError("\(entry.name) has no SHA-256 in the registry; refusing to install an unverified plugin.")
         }
-        if let minimum = plugin.minimumDashKit, ExtensionMetadata.compare(DashKitInfo.version, minimum) == .orderedAscending {
-            throw ToolError("\(entry.name) needs DashKit \(minimum); this Dash has \(DashKitInfo.version). Update Dash first.")
+        if let reason = DashKitInfo.incompatibility(minimum: plugin.minimumDashKit) {
+            throw ToolError("\(entry.name): \(reason)")
         }
         let zip = try await read(plugin.download, from: registry, commit: commit)
         let actual = SHA256.hash(data: zip).map { String(format: "%02x", $0) }.joined()

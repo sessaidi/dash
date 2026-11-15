@@ -2,7 +2,20 @@ import Foundation
 
 /// The SDK version plugins are built against. Plugins declare the minimum they need.
 public enum DashKitInfo {
-    public static let version = "1.5.0"
+    public static let version = "2.0.0"
+
+    /// The major version: a plugin must be built for this one (a new major breaks the ABI).
+    public static var major: Int { Int(version.split(separator: ".").first ?? "") ?? 0 }
+
+    /// Why a plugin needing DashKit `minimum` can't run in this Dash, or nil when it can: it must
+    /// target this major version, at this minor or older.
+    public static func incompatibility(minimum: String?) -> String? {
+        guard let minimum else { return "Built for an older DashKit; update it from the Marketplace." }
+        let needed = Int(minimum.split(separator: ".").first ?? "") ?? 0
+        if needed < major { return "Built for DashKit \(minimum); this Dash has \(version). Update it from the Marketplace." }
+        if ExtensionMetadata.compare(version, minimum) == .orderedAscending { return "Needs DashKit \(minimum); this Dash has \(version). Update Dash." }
+        return nil
+    }
 }
 
 /// Extensions come in two layers:
@@ -85,11 +98,8 @@ public struct ExtensionMetadata: Codable, Hashable, Sendable {
         self.minimumDashKit = minimumDashKit
     }
 
-    /// True when this DashKit is at least `minimumDashKit`.
-    public var isCompatible: Bool {
-        guard let minimumDashKit else { return true }
-        return Self.compare(DashKitInfo.version, minimumDashKit) != .orderedAscending
-    }
+    /// True when this targets this DashKit's major version, at this minor or older (or declares none: built in).
+    public var isCompatible: Bool { minimumDashKit.map { DashKitInfo.incompatibility(minimum: $0) == nil } ?? true }
 
     /// Compares dotted numeric versions ("1.10.0" > "1.9.3").
     public static func compare(_ a: String, _ b: String) -> ComparisonResult {
