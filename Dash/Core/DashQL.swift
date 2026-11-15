@@ -93,6 +93,42 @@ enum DashQL {
         return data == .null ? [] : [data]
     }
 
+    // MARK: Linked widgets
+
+    /// `$selected("Jira board").key` → the value of `key` in what's selected in that widget, as a
+    /// DashQL literal ("LAF-1", 3, ("a", "b") for a list). `waiting` names the widgets with
+    /// nothing selected: the query should then not filter at all.
+    static func resolveSelections(_ text: String, host: ExtensionHost) -> (text: String, waiting: [String]) {
+        var waiting: [String] = []
+        let resolved = text.replacing(/\$selected\("([^"]+)"\)(?:\.([\w.]+))?/) { match in
+            let title = String(match.output.1)
+            let field = match.output.2.map(String.init)
+            let widgets = host.dashboard.widgets(on: nil)
+            guard let record = widgets.first(where: { $0.title.caseInsensitiveCompare(title) == .orderedSame || $0.id.uuidString == title }),
+                  let selection = host.live(record.id).selection else {
+                waiting.append(title)
+                return "null"
+            }
+            let value = field.flatMap { selection.value(at: $0) } ?? selection
+            return literal(value)
+        }
+        return (resolved, waiting)
+    }
+
+    /// Whether a query refers to another widget's selection.
+    static func isLinked(_ text: String) -> Bool { text.contains("$selected(") }
+
+    /// A value as DashQL source.
+    static func literal(_ value: JSONValue) -> String {
+        switch value {
+        case .string(let text): "\"" + text.replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .bool(let flag): String(flag)
+        case .array(let items): "(" + items.map(literal).joined(separator: ", ") + ")"
+        default: "null"
+        }
+    }
+
     static let guide = """
         DashQL reads, filters, joins and summarises what Dash knows. A query is a source then stages separated by |:
           from pods | where namespace = "papi-eu" and restarts > 3 | sort -restarts | take 10 | select name, node, restarts
@@ -104,6 +140,8 @@ enum DashQL {
         Conditions: = != > >= < <= ~ (contains) !~ =~ (regex) in (…) not in (…) between a and b, is null, and/or/not, ( ).
         Values: "text", numbers, true/false, null, me, now, today, yesterday, dates (2026-10-12), durations from now (-24h, -7d, -30m).
         Fields: dotted paths (assignee.name); lists match when any element does.
+        Linked widgets: $selected("Widget title").field is what the user selected in that widget (e.g. a widget's filter \
+        `tickets ~ $selected("Jira board").key` follows the ticket picked on the board); with nothing selected the filter is off.
         Stages: where, search "text", sort [-]field, take n, select f [as a], distinct f, count by f, summarize count(), sum(f), avg(f), min(f), max(f), distinct(f) [as a] by f, join dataset ["arg"] on a = b [as alias].
         """
 
@@ -116,7 +154,11 @@ enum DashQL {
             ) { input in
                 guard let query = input["query"]?.string else { throw ToolError("Give a query.") }
                 do {
-                    return try await engine(host: host).run(query).json
+                    let linked = resolveSelections(query, host: host)
+                    guard linked.waiting.isEmpty else {
+                        throw ToolError("Nothing is selected in \(linked.waiting.joined(separator: ", ")) yet.")
+                    }
+                    return try await engine(host: host).run(linked.text).json
                 } catch let error as QueryError {
                     throw ToolError(error.message)
                 }

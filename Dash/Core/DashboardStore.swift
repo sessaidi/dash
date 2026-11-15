@@ -256,7 +256,9 @@ final class DashboardStore {
         let record = try widget(id)
         guard let type = host.widgetType(record.kind) else { throw ToolError("Unknown widget kind \"\(record.kind)\".") }
         guard !type.queryFields.isEmpty || text.isEmpty else { throw ToolError("\(type.displayName) has no query bar.") }
-        do { _ = try WidgetQuery(text, fields: type.queryFields) } catch let error as QueryError { throw ToolError(error.message) }
+        // Links to other widgets' selections are checked with a stand-in value.
+        let checked = text.replacing(/\$selected\("[^"]+"\)(?:\.[\w.]+)?/) { _ in "\"x\"" }
+        do { _ = try WidgetQuery(checked, fields: type.queryFields) } catch let error as QueryError { throw ToolError(error.message) }
         record.query = text.trimmingCharacters(in: .whitespacesAndNewlines)
         try context.save()
     }

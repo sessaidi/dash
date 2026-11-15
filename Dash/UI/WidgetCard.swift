@@ -14,7 +14,11 @@ struct WidgetCard: View {
 
     var body: some View {
         let type = host.widgetType(widget.kind)
-        let context = WidgetContext(widgetID: widget.id, host: host, aiTasks: type?.aiTasks ?? [], queryText: widget.query)
+        // A filter linked to another widget's selection runs with the selected values, and not at
+        // all while nothing is selected there.
+        let linked = DashQL.resolveSelections(widget.query, host: host)
+        let context = WidgetContext(widgetID: widget.id, host: host, aiTasks: type?.aiTasks ?? [],
+                                    queryText: linked.waiting.isEmpty ? linked.text : "")
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 // The header is the drag handle; the content keeps its own gestures.
@@ -202,7 +206,10 @@ private struct FilterChip: View {
     @Environment(ExtensionHost.self) private var host
 
     var body: some View {
-        let summary = (try? WidgetQuery(widget.query, fields: fields))??.summary ?? widget.query
+        let linked = DashQL.resolveSelections(widget.query, host: host)
+        let summary = !linked.waiting.isEmpty
+            ? "Select something in \(linked.waiting.joined(separator: ", "))"
+            : (try? WidgetQuery(linked.text, fields: fields))??.summary ?? widget.query
         Menu {
             Button("Change Filter…", systemImage: "bubble.left") {
                 host.draftForClaude("Change the filter on “\(widget.title)” (now: \(summary)) to show ")

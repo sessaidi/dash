@@ -26,6 +26,9 @@ public struct WidgetAction: Sendable {
 public final class WidgetLiveState {
     public fileprivate(set) var handler: (@MainActor (String, JSONValue) async throws -> JSONValue)?
     public fileprivate(set) var state: JSONValue = .null
+    /// The item the user selected in the widget (a ticket, a PR, a pod), as a row: other widgets
+    /// can filter on it with `$selected("Title").field`. Temporary, like the rest of the UI state.
+    public fileprivate(set) var selection: JSONValue?
     /// Set by Dash while Dashii reads or drives the widget, so the card can show it.
     public var attention: Date?
 
@@ -55,6 +58,12 @@ extension View {
     public func reportsWidgetState(_ state: JSONValue) -> some View {
         modifier(WidgetStateModifier(state: state))
     }
+
+    /// Publishes the item the user selected (nil when none), as a row with the same fields as the
+    /// widget's dataset: linked widgets filter on it.
+    public func reportsSelection(_ row: JSONValue?) -> some View {
+        modifier(WidgetSelectionModifier(row: row))
+    }
 }
 
 private struct WidgetActionsModifier: ViewModifier {
@@ -76,5 +85,16 @@ private struct WidgetStateModifier: ViewModifier {
         content
             .onChange(of: state, initial: true) { live?.state = state }
             .onDisappear { live?.state = .null }
+    }
+}
+
+private struct WidgetSelectionModifier: ViewModifier {
+    let row: JSONValue?
+    @Environment(\.widgetLive) private var live
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: row, initial: true) { live?.selection = row }
+            .onDisappear { live?.selection = nil }
     }
 }
