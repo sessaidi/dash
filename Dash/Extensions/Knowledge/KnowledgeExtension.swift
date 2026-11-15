@@ -101,7 +101,11 @@ final class KnowledgeExtension: DashExtension {
         for path in repositories {
             status = "Indexing \((path as NSString).lastPathComponent)…"
             do {
-                _ = try await Self.index(path, store: store, history: readHistory)
+                if let remote = Self.remote(at: path) {
+                    status = "Fetching \(remote.slug)…"
+                    if let host, try await remote.sync(host: host) == .unchanged, lastRefresh != nil { continue }
+                }
+                _ = try await Self.index(path, store: store, history: readHistory && Self.remote(at: path) == nil)
             } catch {
                 lastError = "\((path as NSString).lastPathComponent): \(error.localizedDescription)"
             }
@@ -205,8 +209,31 @@ final class KnowledgeExtension: DashExtension {
 
     /// Resolves what the user named: a path, a folder name found under the search roots, or
     /// "owner/name" (a local checkout of it, else a fresh clone into the code folder).
+    /// The remote a mirror folder stands for, nil for a local checkout.
+    static func remote(at path: String) -> RemoteRepository? {
+        guard path.hasPrefix(RemoteRepository.mirrorsRoot.path), let marker = RemoteRepository.marker(in: URL(fileURLWithPath: path)) else { return nil }
+        return RemoteRepository(provider: marker.provider, slug: marker.slug, ref: marker.ref)
+    }
+
+    /// GitLab hosts the GitLab integration points at (for recognising its URLs).
+    var gitlabHosts: [String] {
+        ["gitlab.com"] + [host?.integration("gitlab")?.connection?.baseURL.host()].compactMap { $0 }
+    }
+
+    /// Reads a GitHub or GitLab repository through its integration into a mirror (no checkout).
+    func mirror(_ remote: RemoteRepository) async throws -> URL {
+        guard let host else { throw ToolError("Knowledge isn't running.") }
+        status = "Fetching \(remote.slug)…"
+        defer { status = "" }
+        _ = try await remote.sync(host: host)
+        return remote.mirror
+    }
+
     func resolveRepository(_ text: String) async throws -> (url: URL, cloned: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let remote = RemoteRepository.parse(trimmed, gitlabHosts: gitlabHosts), trimmed.contains(":") {
+            return (try await mirror(remote), false)
+        }
         let expanded = (trimmed as NSString).expandingTildeInPath
         if expanded.hasPrefix("/") {
             guard FileManager.default.fileExists(atPath: (expanded as NSString).appendingPathComponent(".git")) else {
@@ -229,6 +256,10 @@ final class KnowledgeExtension: DashExtension {
         }
         guard parts.count == 2, parts.allSatisfy({ $0.allSatisfy { $0.isLetter || $0.isNumber || "-_.".contains($0) } }) else {
             throw ToolError("Give a path, a folder name or owner/name.")
+        }
+        // No checkout: read it through the GitHub integration when connected, else clone it.
+        if host?.integration("github")?.connection != nil {
+            return (try await mirror(RemoteRepository(provider: .github, slug: trimmed)), false)
         }
         return (try await Self.clone(owner: parts[0], name: parts[1], into: Self.codeRoot), true)
     }
@@ -275,6 +306,8 @@ final class KnowledgeExtension: DashExtension {
 
     func removeRepository(_ path: String) {
         repositories.removeAll { $0 == path }
+        // A mirror is Dash's own copy: it goes too (a checkout is left alone).
+        if Self.remote(at: path) != nil { try? FileManager.default.removeItem(atPath: path) }
         Task {
             try? await store?.removeRepo("repo:" + path)
             counts = (try? await store?.counts()) ?? [:]
@@ -615,8 +648,8 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_add_repository",
-                description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Dashii usage). Give a local path, a folder name found by knowledge_find_repos, or GitHub owner/name: a local checkout is used if there is one, otherwise it's cloned into the code folder with the user's git credentials. Then knowledge_learn can study it.",
-                properties: ["repository": JSONSchema.string("A path, a folder name, or owner/name.")],
+                description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Dashii usage). Give a local path, a folder name found by knowledge_find_repos, GitHub owner/name, or github:owner/name / gitlab:group/project (optionally @branch) or their web URL: a local checkout is used if there is one, otherwise the repository is read through the GitHub or GitLab integration (no clone; refreshed when the branch moves). Then knowledge_learn can study it.",
+                properties: ["repository": JSONSchema.string("A path, a folder name, owner/name, github:owner/name, gitlab:group/project[@ref], or a repository URL.")],
                 required: ["repository"], requiresApproval: true
             ) { [weak self] input in
                 guard let self else { return nil }
@@ -639,7 +672,8 @@ final class KnowledgeExtension: DashExtension {
             ) { [weak self] input in
                 guard let self else { return nil }
                 let wanted = try input.toolInput(RepositoryInput.self).repository
-                guard let path = repositories.first(where: { $0 == (wanted as NSString).expandingTildeInPath || ($0 as NSString).lastPathComponent == wanted }) else {
+                guard let path = repositories.first(where: { $0 == (wanted as NSString).expandingTildeInPath || ($0 as NSString).lastPathComponent == wanted
+                    || Self.remote(at: $0).map { wanted.hasSuffix($0.slug) } == true }) else {
                     throw ToolError("Knowledge doesn't index “\(wanted)”. Indexed: \(repositories.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")).")
                 }
                 removeRepository(path)

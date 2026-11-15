@@ -26,9 +26,12 @@ struct CodeIndexer: Sendable {
 
     func index() async throws -> Report {
         var report = Report()
-        let remote = Self.remoteSlug(root)
-        let repoNode = KnowledgeNode(id: repoID, kind: "repo", name: root.lastPathComponent, qualified: remote ?? "",
-                                     repo: repoID, path: "", url: remote.map { "https://github.com/\($0)" } ?? "", source: "code")
+        // A mirror of a remote repository says where it comes from; a checkout has its origin.
+        let mirror = RemoteRepository.marker(in: root)
+        let remote = mirror?.slug ?? Self.remoteSlug(root)
+        let repoNode = KnowledgeNode(id: repoID, kind: "repo", name: mirror.map { String($0.slug.split(separator: "/").last ?? "") } ?? root.lastPathComponent,
+                                     qualified: remote ?? "", repo: repoID, path: "",
+                                     url: mirror?.webURL ?? remote.map { "https://github.com/\($0)" } ?? "", source: "code")
         let files = listFiles()
         report.files = files.count
         let known = try await store.fileHashes(repo: repoID)

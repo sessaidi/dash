@@ -275,8 +275,13 @@ struct KnowledgeSettings: View {
                 if knowledge.repositories.isEmpty { Text("No repositories yet.").foregroundStyle(.secondary) }
                 ForEach(knowledge.repositories, id: \.self) { path in
                     HStack {
-                        Label((path as NSString).lastPathComponent, systemImage: "shippingbox")
-                        Text((path as NSString).abbreviatingWithTildeInPath).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        if let remote = KnowledgeExtension.remote(at: path) {
+                            Label(remote.slug, systemImage: "cloud")
+                            Text(remote.provider == .github ? "GitHub, no checkout" : "GitLab, no checkout").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Label((path as NSString).lastPathComponent, systemImage: "shippingbox")
+                            Text((path as NSString).abbreviatingWithTildeInPath).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                         Spacer()
                         Button("Remove", systemImage: "minus.circle") { knowledge.removeRepository(path) }
                             .labelStyle(.iconOnly).buttonStyle(.borderless)
@@ -343,11 +348,12 @@ private struct RepositoryRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "shippingbox").foregroundStyle(.tint).frame(width: 18)
+            Image(systemName: KnowledgeExtension.remote(at: path) == nil ? "shippingbox" : "cloud").foregroundStyle(.tint).frame(width: 18)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Button(action: open) {
-                        Text((path as NSString).lastPathComponent).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                        Text(KnowledgeExtension.remote(at: path)?.slug ?? (path as NSString).lastPathComponent)
+                            .font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
                     }
                     .buttonStyle(.plain)
                     .help(path)
