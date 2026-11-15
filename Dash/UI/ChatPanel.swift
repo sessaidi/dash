@@ -201,6 +201,171 @@ struct ChatEntryView: View {
             Label(text, systemImage: isError ? "exclamationmark.triangle" : "info.circle")
                 .font(.callout)
                 .foregroundStyle(isError ? .red : .secondary)
+        case .choices(let choices):
+            ChoicesView(choices: choices)
+        case .layouts(let proposal):
+            LayoutProposalView(proposal: proposal)
+        }
+    }
+}
+
+/// A question Dashii asked, with answers to click (or type).
+private struct ChoicesView: View {
+    let choices: ChatChoices
+    @Environment(ChatSession.self) private var chat
+    @State private var picked: Set<String> = []
+    @State private var other = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(choices.question).font(.callout.weight(.semibold))
+            FlowLayout(spacing: 6) {
+                ForEach(choices.options, id: \.self) { option in
+                    let selected = picked.contains(option) || choices.answer?.contains(option) == true
+                    Button {
+                        if choices.multiple { picked.formSymmetricDifference([option]) } else { chat.answer(choices.id, with: [option]) }
+                    } label: {
+                        Text(option)
+                            .font(.callout)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary.opacity(0.6)), in: .capsule)
+                            .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(answered || chat.isRunning)
+                }
+            }
+            if !answered {
+                HStack(spacing: 8) {
+                    if choices.allowOther {
+                        TextField("Something else…", text: $other)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(sendOther)
+                    }
+                    if choices.multiple {
+                        Button("Send") { chat.answer(choices.id, with: choices.options.filter(picked.contains) + otherAnswer) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(picked.isEmpty && otherAnswer.isEmpty)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.25), in: .rect(cornerRadius: 12))
+        .opacity(answered ? 0.7 : 1)
+    }
+
+    private var answered: Bool { choices.answer != nil }
+    private var otherAnswer: [String] { other.trimmingCharacters(in: .whitespaces).isEmpty ? [] : [other.trimmingCharacters(in: .whitespaces)] }
+    private func sendOther() { if !otherAnswer.isEmpty { chat.answer(choices.id, with: choices.options.filter(picked.contains) + otherAnswer) } }
+}
+
+/// Layouts Dashii proposed, each drawn as a miniature of the 12-column grid.
+private struct LayoutProposalView: View {
+    let proposal: LayoutProposal
+    @Environment(ChatSession.self) private var chat
+    @Environment(ExtensionHost.self) private var host
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Layouts for “\(proposal.pageName)”", systemImage: proposal.icon).font(.callout.weight(.semibold))
+            ForEach(proposal.options) { option in
+                let chosen = proposal.chosen == option.id
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(option.title).font(.callout.weight(.semibold))
+                        Spacer()
+                        if chosen {
+                            Label("Built", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                        } else if proposal.chosen == nil {
+                            Button("Use This Layout") { chat.choose(option.id, in: proposal.id) }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                                .disabled(chat.isRunning)
+                        }
+                    }
+                    if !option.rationale.isEmpty {
+                        Text(option.rationale).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    LayoutMiniature(widgets: option.widgets) { kind in host.widgetType(kind)?.systemImage ?? "square" }
+                }
+                .padding(10)
+                .background(.background.secondary, in: .rect(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(chosen ? AnyShapeStyle(.green.opacity(0.7)) : AnyShapeStyle(.separator.opacity(0.6))))
+                .opacity(proposal.chosen != nil && !chosen ? 0.5 : 1)
+            }
+            if let pageID = proposal.pageID {
+                Button("Open the Page", systemImage: "arrow.right.circle") {
+                    host.selectedPageID = pageID
+                    host.mainView = "page"
+                }
+                .buttonStyle(.borderless).font(.callout)
+            }
+        }
+    }
+}
+
+/// The 12-column grid in small: each widget a tile with its icon and title.
+struct LayoutMiniature: View {
+    let widgets: [ProposedWidget]
+    let icon: (String) -> String
+
+    private var rows: Int { max(widgets.map { $0.y + $0.h }.max() ?? 1, 1) }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let column = geometry.size.width / 12
+            let row = geometry.size.height / CGFloat(rows)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(widgets.enumerated()), id: \.offset) { index, widget in
+                    VStack(spacing: 2) {
+                        Image(systemName: icon(widget.kind)).font(.caption)
+                        if CGFloat(widget.h) * row > 34 {
+                            Text(widget.title).font(.system(size: 9, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                        }
+                    }
+                    .foregroundStyle(Self.color(index))
+                    .padding(3)
+                    .frame(width: max(CGFloat(widget.w) * column - 3, 4), height: max(CGFloat(widget.h) * row - 3, 4))
+                    .background(Self.color(index).opacity(0.16), in: .rect(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Self.color(index).opacity(0.5)))
+                    .offset(x: CGFloat(widget.x) * column, y: CGFloat(widget.y) * row)
+                    .help("\(widget.title) · \(widget.w)×\(widget.h)")
+                }
+            }
+        }
+        .aspectRatio(12 / (CGFloat(rows) * 0.55), contentMode: .fit)
+        .frame(maxHeight: 220)
+    }
+
+    static func color(_ index: Int) -> Color { [Color.blue, .orange, .purple, .teal, .pink, .green, .indigo, .red][index % 8] }
+}
+
+/// Wraps its children onto new lines, like words.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += line + spacing; line = 0 }
+            x += size.width + spacing
+            line = max(line, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + line)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            line = max(line, size.height)
         }
     }
 }

@@ -12,6 +12,10 @@ struct ChatEntry: Identifiable, Equatable, Codable {
         case thinking(String)
         case tool(name: String, input: String, result: String?, isError: Bool)
         case notice(String, isError: Bool)
+        /// A question with answers to click (`ask_user`).
+        case choices(ChatChoices)
+        /// Layouts drawn for the user to pick (`propose_layouts`).
+        case layouts(LayoutProposal)
     }
 
     let id: String
@@ -65,7 +69,8 @@ struct ClaudeTraceEntry: Identifiable {
 @MainActor
 @Observable
 final class ChatSession {
-    private(set) var transcript: [ChatEntry] = []
+    // Set from ChatComponents too (questions and layouts drawn in the chat).
+    var transcript: [ChatEntry] = []
     /// Recent requests with token usage, for the Debug window.
     private(set) var trace: [ClaudeTraceEntry] = []
     private(set) var live: [ChatEntry] = []
@@ -96,7 +101,7 @@ final class ChatSession {
         host.chat = self
     }
 
-    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + host.availableTools }
+    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + componentTools + host.availableTools }
 
     static let systemPrompt = """
         Dash is a macOS work dashboard. It shows the user's Jira board, \
@@ -116,10 +121,12 @@ final class ChatSession {
         its data, what it shows right now) and lists its actions; widget_act drives one on screen (search, \
         filter, select, jump to a date) like the user would.
 
-        When the user wants a layout suggested, call layout_context, ask a few short questions about their \
-        needs unless you know them, then build a draft with suggest_layout and place configured widgets on \
-        it (most important top-left). They keep, change or discard it from the draft's banner. Mention \
-        Marketplace plugins that would help, but don't install them.
+        When the user wants a new page, call layout_context, then ask what the page is for with ask_user \
+        (its role first, then one or two more questions when they matter: which services, teams or repos, \
+        what to see first), one question per turn. Then draw 2 or 3 options with propose_layouts, each with \
+        configured widgets. The user picks one in the chat and Dash builds it; then check the widgets' \
+        settings. To rework an existing page instead, use suggest_layout (a draft with Keep / Change / \
+        Discard). Mention Marketplace plugins that would help, but don't install them.
 
         Dashboard activity since your previous turn (new and reviewed PRs, ticket moves, agent progress, \
         meetings, workspace changes, layout edits) arrives in <dashboard-activity> tags at the start of a \
