@@ -12,6 +12,8 @@ struct KnowledgeHome: View {
     struct RepoOverview: Identifiable {
         let node: KnowledgeNode
         let concepts: [KnowledgeNode]
+        /// Confluence pages about it.
+        let docs: [KnowledgeNode]
         var id: String { node.id }
         var title: String { node.qualified.isEmpty ? node.name : node.qualified }
     }
@@ -29,7 +31,7 @@ struct KnowledgeHome: View {
                                            description: Text("Add repositories on the left, then Study More: Dashii reads them and writes what it understood."))
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 14, alignment: .top)], spacing: 14) {
-                        ForEach(repos) { repo in RepoCard(repo: repo, open: open, ask: ask) }
+                        ForEach(repos) { repo in RepoCard(repo: repo, open: open, ask: ask) { Task { await knowledge.fetchDocs(force: true); await knowledge.ingestEntities(); await load() } } }
                     }
                     AskStrip(repos: repos.map(\.title), ask: ask)
                 }
@@ -51,7 +53,8 @@ struct KnowledgeHome: View {
         for path in knowledge.repositories {
             guard let node = try? await store.node("repo:" + path) else { continue }
             let concepts = (try? await store.nodes(kind: "concept", repo: node.id, limit: 8)) ?? []
-            result.append(RepoOverview(node: node, concepts: concepts))
+            let docs = ((try? await store.neighbors(node.id, kinds: ["documents"], limit: 50)) ?? []).filter(\.incoming).map(\.node)
+            result.append(RepoOverview(node: node, concepts: concepts, docs: docs))
         }
         repos = result
     }
@@ -62,6 +65,8 @@ private struct RepoCard: View {
     let repo: KnowledgeHome.RepoOverview
     let open: (KnowledgeNode) -> Void
     let ask: (String) -> Void
+    /// Fetches the Confluence pages about the repositories now.
+    let findDocs: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -78,6 +83,14 @@ private struct RepoCard: View {
             if !repo.concepts.isEmpty {
                 FlowChips(items: repo.concepts, open: open)
             }
+            if !repo.docs.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("\(repo.docs.count) Confluence page\(repo.docs.count == 1 ? "" : "s")", systemImage: "doc.text").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(repo.docs.prefix(4)) { doc in
+                        Button(doc.name) { open(doc) }.buttonStyle(.link).font(.caption).lineLimit(1)
+                    }
+                }
+            }
             Spacer(minLength: 0)
             HStack {
                 Button("Explain Its Architecture", systemImage: "sparkles") {
@@ -86,6 +99,10 @@ private struct RepoCard: View {
                 .buttonStyle(.borderless)
                 .controlSize(.small)
                 Spacer()
+                Button("Find Docs", systemImage: "doc.text.magnifyingglass", action: findDocs)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Fetch the Confluence pages that mention it (through the Atlassian integration)")
             }
         }
         .padding(14)

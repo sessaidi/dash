@@ -1,3 +1,4 @@
+import DashKit
 import Foundation
 import SwiftUI
 import Testing
@@ -77,5 +78,18 @@ struct MarkdownLineEndingTests {
     @Test func directivesAreParsedOnlyWhenPresent() {
         #expect(NoteDocument.hasDirective("text\n  @Callout(type: note) {"))
         #expect(!NoteDocument.hasDirective("mail me at a@b.test\n`@escaping`"))
+    }
+}
+
+/// Confluence pages arrive as `doc` entities: searchable in full, linked to their repository.
+struct KnowledgeDocTests {
+    @Test func docsKeepTheirWholeTextAndAreSearchable() async throws {
+        let store = try KnowledgeStore(url: nil)
+        let body = String(repeating: "lorem ", count: 1500) + "restart the epg cache"
+        try await KnowledgeLinker.ingest([KnowledgeEntity(id: "doc:confluence:1", kind: "doc", title: "EPG runbook", text: body)],
+                                         source: "atlassian", into: store)
+        let node = try #require(try await store.node("doc:confluence:1"))
+        #expect(node.signature.count == body.count)
+        #expect(try await store.search("epg runbook", kinds: ["doc"], limit: 5).first?.id == "doc:confluence:1")
     }
 }

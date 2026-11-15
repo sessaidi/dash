@@ -120,7 +120,8 @@ final class KnowledgeExtension: DashExtension {
             }
             revision += 1
         }
-        status = "Linking tickets, PRs and notes…"
+        await fetchDocs()
+        status = "Linking tickets, PRs, docs and notes…"
         await ingestEntities()
         counts = (try? await store.counts()) ?? [:]
         lastRefresh = .now
@@ -147,6 +148,27 @@ final class KnowledgeExtension: DashExtension {
     /// integration is "git") must not replace their links when its entities are re-read.
     nonisolated static func entitySource(_ extensionID: String) -> String {
         ["code", "code-tests", "git", "claude"].contains(extensionID) ? "ext:" + extensionID : extensionID
+    }
+
+    /// Asks the Atlassian integration for the Confluence pages that mention each repository, at
+    /// most once a day per repository (`force` now). They come back as `doc` entities at the next
+    /// ingest, linked to the repository.
+    func fetchDocs(force: Bool = false) async {
+        guard let host, let store, host.fetchers.contains(where: { $0.name == "confluence.pages" }) else { return }
+        for path in repositories {
+            guard let node = try? await store.node("repo:" + path) else { continue }
+            let slug = node.qualified.contains("/") ? node.qualified : nil
+            let name = slug.map { String($0.split(separator: "/").last ?? "") } ?? (path as NSString).lastPathComponent
+            let key = "knowledge.docsFetched." + path
+            if !force, let last = DashDefaults.shared.object(forKey: key) as? Date, Date.now.timeIntervalSince(last) < 86_400 { continue }
+            status = "Fetching Confluence pages about \(name)…"
+            do {
+                _ = try await host.fetch("confluence.pages", ["query": .string(name), "repo": slug.map(JSONValue.string) ?? .null])
+                DashDefaults.shared.set(Date.now, forKey: key)
+            } catch {
+                lastError = "Confluence: \(error.localizedDescription)"
+            }
+        }
     }
 
     func ingestEntities() async {
@@ -596,9 +618,9 @@ final class KnowledgeExtension: DashExtension {
         memoryTools + analysisTools + [
             DashiiTool(
                 name: "knowledge_search",
-                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
+                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, concepts, docs (Confluence pages about the repositories), tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
                 properties: ["query": JSONSchema.string("Words or a name, e.g. \"renew subscription\" or \"UserService\"."),
-                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "cluster", "flow", "decision", "env", "concept", "ticket", "pr", "agent", "meeting", "note", "person"]),
+                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "cluster", "flow", "decision", "env", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person"]),
                              "limit": JSONSchema.integer("Max results (default 20).")],
                 required: ["query"]
             ) { [weak self] input in
@@ -873,7 +895,7 @@ final class KnowledgeExtension: DashExtension {
         // Studied things first (concepts, directories with notes), then code.
         var seen = Set<String>()
         var picked: [KnowledgeNode] = []
-        for kinds in [["concept"], ["directory", "repo"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
+        for kinds in [["concept"], ["directory", "repo"], ["doc"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
             for node in try await store.search(question, kinds: kinds, limit: limit) where seen.insert(node.id).inserted {
                 picked.append(node)
             }

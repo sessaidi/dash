@@ -12,7 +12,7 @@ struct KnowledgeView: View {
     @State private var selected: KnowledgeNode?
     @State private var history: [KnowledgeNode] = []
 
-    static let kinds = ["", "repo", "directory", "file", "symbol", "concept", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
+    static let kinds = ["", "repo", "directory", "file", "symbol", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
 
     var body: some View {
         HStack(spacing: 0) {
