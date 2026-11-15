@@ -19,6 +19,22 @@ struct MarketplaceTests {
         #expect(index.extensions[1].plugin?.sha256 == nil)
     }
 
+    @Test func entriesTakeTheRegistryLabelUnlessTheyHaveTheirOwn() throws {
+        let json = """
+        {"format": 2, "name": "Work", "label": "Acme", "extensions": [
+          {"id": "deploys", "name": "Deploys", "version": "1.0.0"},
+          {"id": "jira", "name": "Jira", "version": "1.0.0", "label": "Community"}
+        ]}
+        """
+        let index = try JSONDecoder().decode(RegistryIndex.self, from: Data(json.utf8))
+        #expect(index.label(of: index.extensions[0]) == "Acme")
+        #expect(index.label(of: index.extensions[1]) == "Community")
+        // Installs from before labels still decode.
+        let old = try JSONDecoder().decode(InstallRecord.self, from: Data(#"{"registry":"r","commit":"c","version":"1","installedAt":0}"#.utf8))
+        #expect(old.label == nil)
+        #expect(MarketplaceFeature.tone(ofLabel: "Community") == .success && MarketplaceFeature.tone(ofLabel: "Acme") == .accent)
+    }
+
     @Test func localRegistriesAreFolderPaths() {
         let marketplace = MarketplaceFeature()
         let saved = marketplace.registriesText

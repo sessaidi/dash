@@ -155,6 +155,16 @@ private struct ExtensionList: View {
             .onChange(of: host.managerSelection) { openRequested() }
     }
 
+    /// Where a plugin's extension came from ("Community", a company's registry, "Local");
+    /// nil for what's built into Dash.
+    private func source(of item: any DashExtension) -> String? {
+        let plugin = host.plugins.first { record in
+            if case .loaded(let ids) = record.state { ids.contains(item.id) } else { false }
+        }
+        guard let plugin else { return nil }
+        return host.ext(MarketplaceFeature.self)?.sourceLabel(ofPlugin: plugin.id) ?? "Local"
+    }
+
     private func openRequested() {
         guard let id = host.managerSelection, host.extensions.contains(where: { $0.id == id }) else { return }
         shown = id
@@ -183,7 +193,10 @@ private struct ExtensionList: View {
                 HStack {
                     row {
                         VStack(alignment: .leading, spacing: 2) {
-                            SidebarRow(item: item)
+                            HStack(spacing: 6) {
+                                SidebarRow(item: item)
+                                if let source = source(of: item) { Badge(source, tone: MarketplaceFeature.tone(ofLabel: source)) }
+                            }
                             Text("by \(item.author.name)\(item.summary.isEmpty ? "" : " · \(item.summary)")")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }

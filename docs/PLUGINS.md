@@ -294,6 +294,12 @@ newest API you use.
 Bump the version for every release; the Marketplace offers an update when the registry's
 version differs from the installed one.
 
+**Labels.** A registry says who publishes it with a top-level `"label"` in `registry.json`
+(`"Community"` for the public registry, a company name for a private one); `build-index.py`
+keeps it. A plugin can override it with `"label"` in its `plugin.json`. The Marketplace and
+Settings › Plugins show it as a badge on each plugin, so you can tell community plugins from
+work-only ones at a glance. Plugins copied into the Plugins folder by hand show as "Local".
+
 ## Contracts of the first-party integrations
 
 Features can rely on these ids, connections and exports:

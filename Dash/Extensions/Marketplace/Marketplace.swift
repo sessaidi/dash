@@ -10,7 +10,12 @@ import SwiftUI
 struct RegistryIndex: Codable, Equatable {
     var format: Int
     var name: String
+    /// Who publishes the registry ("Community", a company name): shown as a badge on its plugins.
+    var label: String?
     var extensions: [Entry]
+
+    /// An entry's badge: its own label, else the registry's.
+    func label(of entry: Entry) -> String? { entry.label ?? label }
 
     struct Entry: Codable, Equatable, Identifiable {
         var id: String
@@ -20,6 +25,8 @@ struct RegistryIndex: Codable, Equatable {
         var description: String?
         var icon: String?
         var author: ExtensionAuthor?
+        /// Overrides the registry's label for this plugin.
+        var label: String?
         var requires: [String]?
         var optional: [String]?
         /// Path of its README in the registry.
@@ -47,6 +54,8 @@ struct InstallRecord: Codable, Equatable {
     var commit: String
     var version: String
     var installedAt: Date
+    /// The registry's label for it when it was installed (nil for installs before labels).
+    var label: String?
 }
 
 /// Installs `.dashplugin` bundles from git repositories used as registries ("marketplaces"):
@@ -264,6 +273,25 @@ final class MarketplaceFeature: DashExtension {
         return record
     }
 
+    /// The badge of an installed plugin: the label saved at install, else its registry's current
+    /// one (installs from before labels), else "Local" for a bundle dropped in by hand.
+    func sourceLabel(ofPlugin id: String) -> String {
+        guard let record = installed(id) else { return "Local" }
+        if let label = record.label { return label }
+        guard let index = catalogs[record.registry]?.index, let entry = index.extensions.first(where: { $0.id == id }) else { return "Local" }
+        return index.label(of: entry) ?? "Local"
+    }
+
+    /// A label's colour: the same label always looks the same.
+    static func tone(ofLabel label: String) -> Tone {
+        switch label.lowercased() {
+        case "official", "dash": .info
+        case "community": .success
+        case "local": .neutral
+        default: .accent
+        }
+    }
+
     /// Installs (or updates) a plugin from the registry's pinned commit.
     /// An entry's README from its registry (nil when it has none).
     func readme(_ entry: RegistryIndex.Entry, from registryLabel: String) async -> String? {
@@ -355,7 +383,8 @@ final class MarketplaceFeature: DashExtension {
         if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
         try FileManager.default.moveItem(at: bundle, to: destination)
         PluginLoader.approve(PluginLoader.inspect(destination, bundled: false))
-        Self.pluginInstalls[entry.id] = InstallRecord(registry: registry.label, commit: commit, version: entry.version, installedAt: .now)
+        Self.pluginInstalls[entry.id] = InstallRecord(registry: registry.label, commit: commit, version: entry.version, installedAt: .now,
+                                                      label: catalogs[registry.label]?.index.label(of: entry))
         if wasLoaded {
             // The old build stays in memory until Dash relaunches.
             needsRelaunch = true
@@ -404,12 +433,13 @@ final class MarketplaceFeature: DashExtension {
     // MARK: Claude tools
 
     private func describe(_ entry: RegistryIndex.Entry, registry: String) -> JSONValue {
+        let label: JSONValue = catalogs[registry]?.index.label(of: entry).map { .string($0) } ?? .null
         let requires: [JSONValue] = (entry.requires ?? []).map { .string($0) }
         let installedVersion: JSONValue = installed(entry.id).map { .string($0.version) } ?? .null
         return [
             "id": .string(entry.id), "name": .string(entry.name), "kind": .string((entry.kind ?? .feature).rawValue),
             "version": .string(entry.version), "description": .string(entry.description ?? ""), "registry": .string(registry),
-            "author": .string(entry.author?.name ?? ""), "requires": .array(requires), "built_in": .bool(entry.builtIn == true), "installed_version": installedVersion,
+            "author": .string(entry.author?.name ?? ""), "label": label, "requires": .array(requires), "built_in": .bool(entry.builtIn == true), "installed_version": installedVersion,
         ]
     }
 
@@ -520,8 +550,13 @@ private struct MarketplaceView: View {
             }
             ForEach(marketplace.catalogs.keys.sorted(), id: \.self) { label in
                 if let catalog = marketplace.catalogs[label] {
-                    Section("\(catalog.index.name) · \(label) @ \(catalog.commit.prefix(7))") {
+                    Section {
                         ForEach(catalog.index.extensions) { entry in row(entry, label: label) }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Text("\(catalog.index.name) · \(label) @ \(catalog.commit.prefix(7))")
+                            if let source = catalog.index.label { Badge(source, tone: MarketplaceFeature.tone(ofLabel: source)) }
+                        }
                     }
                 }
             }
@@ -557,6 +592,9 @@ private struct MarketplaceView: View {
                     Text(entry.name).bold()
                     Text((entry.kind ?? .feature).rawValue).font(.caption2).padding(.horizontal, 5).background(.quaternary, in: .capsule)
                     Text(entry.version).font(.caption).foregroundStyle(.secondary)
+                    if let source = marketplace.catalogs[label]?.index.label(of: entry) {
+                        Badge(source, tone: MarketplaceFeature.tone(ofLabel: source))
+                    }
                     if entry.plugin != nil {
                         Text("plugin").font(.caption2).padding(.horizontal, 5).background(.tint.opacity(0.18), in: .capsule)
                     }
@@ -854,6 +892,9 @@ struct PluginDetailSheet: View {
                     HStack(spacing: 6) {
                         Text(entry.name).font(.title2.bold())
                         Badge((entry.kind ?? .feature).rawValue, tone: .info)
+                        if let source = marketplace.catalogs[registry]?.index.label(of: entry) {
+                            Badge(source, tone: MarketplaceFeature.tone(ofLabel: source))
+                        }
                         Text(entry.version).font(.callout).foregroundStyle(.secondary)
                     }
                     if let author = entry.author { Text("by \(author.name)").font(.callout).foregroundStyle(.secondary) }
