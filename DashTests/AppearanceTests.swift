@@ -51,3 +51,31 @@ struct HostMarkdownTests {
         #expect(HostMarkdown.clean(body) == "# What\n\n**Logs**\n\nline  \nnext")
     }
 }
+
+/// swift-markdown traps on Windows line endings in its directive parser: notes and plugin
+/// Markdown must never reach it with them.
+struct MarkdownLineEndingTests {
+    static let sample = """
+        ### 1. Check the list
+
+        - [ ] **Before:** the button opens the old page.
+          ```bash
+          curl -s "$BASE/home" "${A[@]}" | jq -r "$URL"
+          ```
+        - [ ] **After:** nothing else changes.
+          ```bash
+          diff <(curl -s "$BASE/home" | jq -S .) \\
+               <(curl -s "$BASE/away" | jq -S .) && echo SAME
+          ```
+        """
+
+    @Test func windowsLineEndingsParse() {
+        let document = NoteDocument(Self.sample.replacingOccurrences(of: "\n", with: "\r\n") + "\r\n@Callout(type: note) {\r\nHi\r\n}")
+        #expect(document.blocks.count >= 3)
+    }
+
+    @Test func directivesAreParsedOnlyWhenPresent() {
+        #expect(NoteDocument.hasDirective("text\n  @Callout(type: note) {"))
+        #expect(!NoteDocument.hasDirective("mail me at a@b.test\n`@escaping`"))
+    }
+}

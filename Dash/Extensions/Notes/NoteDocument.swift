@@ -14,8 +14,17 @@ struct NoteDocument: Equatable {
         let (values, body, offset) = Self.splitFrontmatter(source)
         self.values = values
         bodyLineOffset = offset
-        let document = Document(parsing: DashiiBlocks.normalized(NotesStore.linkified(body)), options: [.parseBlockDirectives])
+        // Windows line endings (GitHub sends PR descriptions with them) make swift-markdown's
+        // directive parser index out of range, a trap that can't be caught: plain newlines only,
+        // and directive parsing only when there's a directive.
+        let text = DashiiBlocks.normalized(NotesStore.linkified(body.replacingOccurrences(of: "\r\n", with: "\n")))
+        let document = Document(parsing: text, options: Self.hasDirective(text) ? [.parseBlockDirectives] : [])
         blocks = document.children.compactMap { NoteBlock($0, values: values, source: body) }
+    }
+
+    /// A line starting with `@Name`: a block directive (`@Component(…)`).
+    static func hasDirective(_ text: String) -> Bool {
+        text.contains(/(?m)^\s*@[A-Za-z]/)
     }
 
     static func splitFrontmatter(_ source: String) -> (values: [String: String], body: String, offset: Int) {
