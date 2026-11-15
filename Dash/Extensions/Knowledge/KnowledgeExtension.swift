@@ -46,6 +46,8 @@ final class KnowledgeExtension: DashExtension {
     @ObservationIgnored private(set) weak var host: (any ExtensionContext)?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var lastUnderstood: Date?
+    /// Search vectors, loaded once per graph revision.
+    @ObservationIgnored var vectorCache: (revision: Int, items: [(id: String, vector: [Float])]) = (-1, [])
 
     static var defaultURL: URL {
         if NSClassFromString("XCTestCase") != nil {
@@ -130,7 +132,13 @@ final class KnowledgeExtension: DashExtension {
         try await Task.detached(priority: .utility) {
             var indexer = CodeIndexer(root: URL(fileURLWithPath: path), store: store)
             indexer.readHistory = history
-            return try await indexer.index()
+            let report = try await indexer.index()
+            // Modules, flows and vectors follow the code: recomputed when files changed (or never were).
+            let analyzed = try await store.meta("analysis-v1:" + indexer.repoID) != nil
+            if report.parsed > 0 || report.removed > 0 || !analyzed {
+                try await KnowledgeAnalysis.analyze(repo: indexer.repoID, root: path, store: store)
+            }
+            return report
         }.value
     }
 
@@ -585,19 +593,28 @@ final class KnowledgeExtension: DashExtension {
     private struct RecallInput: Decodable { let query: String? }
 
     var tools: [DashiiTool] {
-        memoryTools + [
+        memoryTools + analysisTools + [
             DashiiTool(
                 name: "knowledge_search",
-                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes. Start here to locate anything.",
+                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
                 properties: ["query": JSONSchema.string("Words or a name, e.g. \"renew subscription\" or \"UserService\"."),
-                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "concept", "ticket", "pr", "agent", "meeting", "note", "person"]),
+                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "cluster", "flow", "decision", "env", "concept", "ticket", "pr", "agent", "meeting", "note", "person"]),
                              "limit": JSONSchema.integer("Max results (default 20).")],
                 required: ["query"]
             ) { [weak self] input in
                 guard let store = self?.store else { return [] }
                 let request = try input.toolInput(SearchInput.self)
-                let nodes = try await store.search(request.query, kinds: request.kind.map { [$0] } ?? [], limit: min(request.limit ?? 20, 60))
-                return .array(nodes.map { Self.json($0) })
+                let limit = min(request.limit ?? 20, 60)
+                let kinds = request.kind.map { [$0] } ?? []
+                let lexical = try await store.search(request.query, kinds: kinds, limit: limit)
+                // By meaning too (on-device vectors), fused with the name/word matches.
+                let semantic = await self?.semanticSearch(request.query, limit: limit) ?? []
+                guard !semantic.isEmpty else { return .array(lexical.map { Self.json($0) }) }
+                let ranked = KnowledgeAnalysis.fuse([lexical.map(\.id), semantic])
+                var byID = Dictionary(lexical.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+                for node in try await store.nodes(ids: semantic.filter { byID[$0] == nil }) { byID[node.id] = node }
+                let nodes = ranked.compactMap { byID[$0] }.filter { kinds.isEmpty || kinds.contains($0.kind) }
+                return .array(nodes.prefix(limit).map { Self.json($0) })
             },
             DashiiTool(
                 name: "knowledge_node",
@@ -792,6 +809,20 @@ final class KnowledgeExtension: DashExtension {
         ]
     }
 
+    /// Ids closest in meaning to `query` (on-device sentence vectors), best first; empty when the
+    /// embedding isn't available or nothing is embedded yet. Vectors are cached until the graph changes.
+    func semanticSearch(_ query: String, limit: Int) async -> [String] {
+        guard let store, let vector = KnowledgeAnalysis.embed(KnowledgeAnalysis.words(query)) else { return [] }
+        if vectorCache.revision != revision || vectorCache.items.isEmpty {
+            vectorCache = (revision, (try? await store.vectors()) ?? [])
+        }
+        let items = vectorCache.items
+        let scored = await Task.detached(priority: .userInitiated) {
+            items.map { ($0.id, KnowledgeAnalysis.cosine(vector, $0.vector)) }.filter { $0.1 > 0.35 }.sorted { $0.1 > $1.1 }.prefix(limit).map(\.0)
+        }.value
+        return Array(scored)
+    }
+
     // MARK: Impact and context
 
     func impact(of id: String, store: KnowledgeStore) async throws -> JSONValue {
@@ -829,7 +860,10 @@ final class KnowledgeExtension: DashExtension {
             }
         }
         let experts = node.repo.isEmpty ? [] : try await store.experts(repo: node.repo, path: node.path, limit: 5)
+        let flows = node.kind == "symbol" ? try await store.neighbors(node.id, kinds: ["step"], limit: 20).filter(\.incoming).map { JSONValue.string($0.node.name + ": " + $0.node.signature) } : []
+        let decisions = fileID.isEmpty ? [] : try await store.neighbors(fileID, kinds: ["about"], limit: 10).filter(\.incoming).map { JSONValue.string($0.node.name) }
         return ["target": Self.json(node), "callers": .array(callers), "importers": .array(Array(importers.prefix(40))),
+                "flows": .array(flows), "decisions": .array(decisions),
                 "tests": .array(tests), "tests_of_callers": .array(indirectTests.sorted().prefix(30).map { .string($0) }),
                 "changes_with": .array(Array(coChanging.sorted { ($0["times"]?.double ?? 0) > ($1["times"]?.double ?? 0) }.prefix(15))),
                 "experts": .array(experts.map { ["name": .string($0.person.name), "commits": .number(Double($0.commits))] })]

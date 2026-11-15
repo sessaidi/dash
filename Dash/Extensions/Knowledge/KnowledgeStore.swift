@@ -161,7 +161,7 @@ actor KnowledgeStore {
     /// Replaces a file's nodes and outgoing edges. Symbols that vanished lose their incoming
     /// edges too; the ones that stay keep edges other files point at them.
     func replaceFile(repo: String, path: String, nodes: [KnowledgeNode], edges: [KnowledgeEdge]) throws {
-        let old = try strings("SELECT id FROM nodes WHERE repo = ?1 AND path = ?2 AND kind IN ('file', 'symbol')", [repo, path])
+        let old = try strings("SELECT id FROM nodes WHERE repo = ?1 AND path = ?2 AND kind IN ('file', 'symbol', 'decision')", [repo, path])
         let kept = Set(nodes.map(\.id))
         for id in old {
             try run("DELETE FROM edges WHERE src = ?1 AND source = 'code'", [id])

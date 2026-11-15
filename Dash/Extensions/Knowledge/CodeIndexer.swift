@@ -55,7 +55,10 @@ struct CodeIndexer: Sendable {
             if known[path] == hash { continue }
             if known[path] != nil { touchedNames.formUnion(try await store.symbolNames(repo: repoID, path: path)) }
             let parsed = CodeParser.parse(text, language: language)
-            let (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
+            var (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
+            let extra = configAndDecisions(text, path: path, language: language, files: files)
+            nodes += extra.nodes
+            edges += extra.edges
             batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges))
             if batch.count >= 200 {
                 try await store.replaceFiles(repo: repoID, batch)
@@ -161,6 +164,35 @@ struct CodeIndexer: Sendable {
             }
         }
         return edges
+    }
+
+    /// Environment variables the file reads or sets, and, for a decision record, a `decision`
+    /// node `about` the files it names. Replaced with the file, like its symbols.
+    func configAndDecisions(_ text: String, path: String, language: String, files: [String]) -> (nodes: [KnowledgeNode], edges: [KnowledgeEdge]) {
+        var nodes: [KnowledgeNode] = [], edges: [KnowledgeEdge] = []
+        let file = fileID(path)
+        let reads = CodeParser.structured.contains(language) ? [] : KnowledgeAnalysis.environmentReads(text)
+        let sets = ["yaml", "toml", "terraform", "makefile"].contains(language) || (path as NSString).lastPathComponent.hasPrefix(".env")
+            ? KnowledgeAnalysis.environmentSets(text, path: path) : []
+        for name in reads.union(sets) { nodes.append(KnowledgeNode(id: "env:" + name, kind: "env", name: name, qualified: name, source: "code")) }
+        for name in reads { edges.append(KnowledgeEdge(src: file, dst: "env:" + name, kind: "reads_env", source: "code")) }
+        for name in sets { edges.append(KnowledgeEdge(src: file, dst: "env:" + name, kind: "sets_env", source: "code")) }
+        if language == "markdown", KnowledgeAnalysis.isDecision(path: path, text: text) {
+            let record = KnowledgeAnalysis.decision(text)
+            let id = "decision:" + root.path + "/" + path
+            nodes.append(KnowledgeNode(id: id, kind: "decision", name: record.title, qualified: record.title, repo: repoID, path: path,
+                                       signature: [record.status, record.date].filter { !$0.isEmpty }.joined(separator: " · "),
+                                       summary: String(text.prefix(600)), source: "code"))
+            edges.append(KnowledgeEdge(src: id, dst: file, kind: "documented_in", source: "code"))
+            for mention in record.mentions {
+                if let match = files.first(where: { $0 == mention || $0.hasSuffix("/" + mention) }) {
+                    edges.append(KnowledgeEdge(src: id, dst: fileID(match), kind: "about", source: "code"))
+                } else if files.contains(where: { $0.hasPrefix(mention.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/") }) {
+                    edges.append(KnowledgeEdge(src: id, dst: directoryID(mention.trimmingCharacters(in: CharacterSet(charactersIn: "/"))), kind: "about", source: "code"))
+                }
+            }
+        }
+        return (nodes, edges)
     }
 
     // MARK: Nodes for one file
