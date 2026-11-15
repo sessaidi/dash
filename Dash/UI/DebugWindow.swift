@@ -305,17 +305,15 @@ private struct ExtensionsPane: View {
                 SidebarRow(item: item).tag(item.id)
             }
             .frame(minWidth: 220)
-            ScrollView {
+            Group {
                 if let item = host.extensions.first(where: { $0.id == selected }) {
-                    Text(Diagnostics.extensionInfo(item, host: host).jsonString(pretty: true))
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
+                    ExtensionInspector(item: item).id(item.id)
                 } else {
-                    Text("Select an extension.").foregroundStyle(.secondary).padding()
+                    ContentUnavailableView("Select an extension", systemImage: "puzzlepiece.extension",
+                                           description: Text("Its tools, DashQL vocabulary, widgets, agents and diagnostics."))
                 }
             }
+            .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
