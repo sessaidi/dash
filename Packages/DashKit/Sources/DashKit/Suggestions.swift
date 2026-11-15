@@ -21,6 +21,21 @@ public struct Suggestion: Identifiable, Hashable, Sendable {
     public let link: URL?
     /// The extension that proposed it (set by Dash).
     public var source: String?
+    /// What it's about, listed when the card is opened (tickets, PRs, pods…).
+    public var items: [Item] = []
+
+    /// One thing a suggestion is about.
+    public struct Item: Hashable, Sendable {
+        public let title: String
+        public let subtitle: String?
+        public let link: URL?
+
+        public init(title: String, subtitle: String? = nil, link: URL? = nil) {
+            self.title = title
+            self.subtitle = subtitle
+            self.link = link
+        }
+    }
 
     public init(id: String, title: String, detail: String? = nil, icon: String = "sparkles", priority: Priority = .normal,
                 prompt: String? = nil, link: URL? = nil, source: String? = nil) {
@@ -32,5 +47,11 @@ public struct Suggestion: Identifiable, Hashable, Sendable {
         self.prompt = prompt
         self.link = link
         self.source = source
+    }
+
+    public init(id: String, title: String, detail: String? = nil, icon: String = "sparkles", priority: Priority = .normal,
+                prompt: String? = nil, link: URL? = nil, items: [Item], source: String? = nil) {
+        self.init(id: id, title: title, detail: detail, icon: icon, priority: priority, prompt: prompt, link: link, source: source)
+        self.items = items
     }
 }

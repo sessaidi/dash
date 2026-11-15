@@ -22,7 +22,7 @@ struct HomeHeader: View {
                 UsageCard()
                 if home?.showsSuggestions != false {
                     ForEach(Array(host.homeSuggestions.prefix(4))) { item in
-                        SuggestionCard(suggestion: item, onOpen: { open(item) }, onDismiss: { home?.dismiss(item) })
+                        SuggestionCard(suggestion: item, onOpen: { open(item) }, onAsk: ask, onDismiss: { home?.dismiss(item) })
                     }
                 }
             }
@@ -82,8 +82,9 @@ struct HomeHeader: View {
     }
 
     private func ask(_ text: String) {
-        guard !chat.isRunning else { return }
+        // Busy: at least show the conversation, so the click isn't lost.
         chat.isPanelVisible = true
+        guard !chat.isRunning else { return }
         chat.send(text)
     }
 }
@@ -219,11 +220,14 @@ private struct UsageCard: View {
 private struct SuggestionCard: View {
     let suggestion: Suggestion
     let onOpen: () -> Void
+    let onAsk: (String) -> Void
     let onDismiss: () -> Void
     @State private var hovering = false
+    @State private var showingDetails = false
 
     var body: some View {
-        HomeCard(icon: suggestion.icon, title: header, action: onOpen) {
+        // Suggestions open their details first (what it's about, then ask or open); setup cards act directly.
+        HomeCard(icon: suggestion.icon, title: header, action: suggestion.id.hasPrefix("setup.") ? onOpen : { showingDetails = true }) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(suggestion.title)
                     .font(.system(size: 19, weight: .semibold))
@@ -242,7 +246,16 @@ private struct SuggestionCard: View {
             }
         }
         .onHover { hovering = $0 }
-        .help(suggestion.prompt.map { "Ask: \($0)" } ?? suggestion.title)
+        .help(suggestion.id.hasPrefix("setup.") ? suggestion.title : "Show details")
+        .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+            SuggestionDetails(suggestion: suggestion, onAsk: { prompt in
+                showingDetails = false
+                onAsk(prompt)
+            }, onOpen: {
+                showingDetails = false
+                onOpen()
+            })
+        }
     }
 
     private var header: String {
@@ -344,5 +357,129 @@ private struct BriefRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(item.prompt.map { "Ask: \($0)" } ?? "")
+    }
+}
+
+/// A suggestion's items (tickets, PRs…), each opening its page or asked about, and asking Dashii
+/// about all of them.
+private struct SuggestionDetails: View {
+    let suggestion: Suggestion
+    let onAsk: (String) -> Void
+    let onOpen: () -> Void
+    @Environment(ExtensionHost.self) private var host
+
+    /// The items, or, from older plugins that send one line, its " · " parts.
+    private var rows: [Suggestion.Item] {
+        if !suggestion.items.isEmpty { return suggestion.items }
+        return (suggestion.detail ?? "").components(separatedBy: " · ").filter { !$0.isEmpty }.map { Suggestion.Item(title: $0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: suggestion.icon)
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .frame(width: 34, height: 34)
+                    .background(tint.opacity(0.15), in: .circle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(suggestion.title).font(.headline)
+                    Text(kicker).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if !rows.isEmpty {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
+                            ItemRow(item: item, tint: tint) { key in
+                                onAsk("Tell me about \(key): where it stands, what's blocking it and the next step.")
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 340)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                if suggestion.link != nil || suggestion.prompt == nil {
+                    Button("Open", systemImage: "arrow.up.forward.square", action: onOpen)
+                }
+                if let prompt = suggestion.prompt {
+                    Button("Ask \(host.persona.name)", systemImage: "sparkles") { onAsk(prompt) }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .controlSize(.large)
+        }
+        .padding(18)
+        .frame(width: 480)
+    }
+
+    private var tint: Color {
+        switch suggestion.priority {
+        case .urgent: .red
+        case .high: .orange
+        default: .accentColor
+        }
+    }
+
+    private var kicker: String {
+        let count = rows.count
+        let what = suggestion.priority == .urgent ? "Needs you now" : suggestion.priority == .high ? "Important" : "Suggested"
+        return count > 1 ? "\(what) · \(count) items" : what
+    }
+
+    private struct ItemRow: View {
+        let item: Suggestion.Item
+        let tint: Color
+        let ask: (String) -> Void
+        @State private var hovering = false
+
+        /// "LAF-6173 Backend: …" splits into the key and the rest.
+        private var parts: (key: String?, title: String) {
+            if let match = item.title.firstMatch(of: /^([A-Z][A-Z0-9]+-\d+|[\w.-]+\/[\w.-]+#\d+)\s+(.*)$/) {
+                return (String(match.output.1), String(match.output.2))
+            }
+            return (nil, item.title)
+        }
+
+        var body: some View {
+            let parts = parts
+            HStack(alignment: .center, spacing: 10) {
+                if let key = parts.key {
+                    Text(key)
+                        .font(.caption.monospaced().weight(.semibold))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(tint.opacity(0.14), in: .capsule)
+                        .fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(parts.title).font(.callout).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    if let subtitle = item.subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 6)
+                HStack(spacing: 4) {
+                    if let key = parts.key {
+                        Button("Ask about \(key)", systemImage: "bubble.left") { ask(key) }
+                    }
+                    if let link = item.link {
+                        Button("Open", systemImage: "arrow.up.forward.square") { NSWorkspace.shared.open(link) }
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .opacity(hovering ? 1 : 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.8)) : AnyShapeStyle(.quaternary.opacity(0.4)), in: .rect(cornerRadius: 10))
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+            .onTapGesture { if let link = item.link { NSWorkspace.shared.open(link) } }
+        }
     }
 }
