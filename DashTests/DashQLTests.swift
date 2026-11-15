@@ -106,6 +106,8 @@ struct DashQLTests {
         let piped = try #require(try WidgetQuery("| take 1", fields: fields))
         #expect(await piped.apply(to: items, row: row).map(\.name) == ["a"])
         #expect(try WidgetQuery("  ", fields: fields) == nil)
+        let bare = try #require(try WidgetQuery("ns = us or restarts = 0", fields: fields))
+        #expect(await bare.apply(to: items, row: row).map(\.name) == ["b", "c"])
         #expect(throws: QueryError.self) { try WidgetQuery("restarts >", fields: fields) }
     }
 }

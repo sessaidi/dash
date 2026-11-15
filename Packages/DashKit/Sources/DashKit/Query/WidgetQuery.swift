@@ -15,8 +15,20 @@ public struct WidgetQuery: Sendable {
         self.text = trimmed
         self.fields = fields
         // The widget is the source: the query starts with its filter (or a stage after `|`).
-        let source = trimmed.hasPrefix("|") ? "rows \(trimmed)" : (trimmed.lowercased().hasPrefix("where ") ? "from rows \(trimmed)" : "rows \(trimmed)")
-        query = try DashQuery.parse(source, now: now)
+        if trimmed.hasPrefix("|") {
+            query = try DashQuery.parse("rows \(trimmed)", now: now)
+        } else if trimmed.lowercased().hasPrefix("where ") {
+            query = try DashQuery.parse("from rows \(trimmed)", now: now)
+        } else {
+            // Shorthand first (`ns:prod restarts>3`); else a structured condition without `where`
+            // (`assignee is null or status = Done`). The shorthand error explains best when both fail.
+            do {
+                query = try DashQuery.parse("rows \(trimmed)", now: now)
+            } catch {
+                guard let structured = try? DashQuery.parse("from rows where \(trimmed)", now: now) else { throw error }
+                query = structured
+            }
+        }
         if case .join? = query.stages.first(where: { if case .join = $0 { true } else { false } }) {
             throw QueryError("A widget's query can't join; use dashql for that.")
         }
