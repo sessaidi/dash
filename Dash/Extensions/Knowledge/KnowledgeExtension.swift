@@ -36,6 +36,8 @@ final class KnowledgeExtension: DashExtension {
     private(set) var revision = 0
 
     let store: KnowledgeStore?
+    /// What Dashii learns from its conversations, kept in this graph.
+    @ObservationIgnored private(set) lazy var memory: DashiiMemory? = store.map { store in DashiiMemory(store: store) { [weak self] in self?.host } }
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private(set) weak var host: (any ExtensionContext)?
     @ObservationIgnored private var loop: Task<Void, Never>?
@@ -457,8 +459,54 @@ final class KnowledgeExtension: DashExtension {
         return .object(object)
     }
 
-    var tools: [ClaudeTool] {
+    /// Dashii's memory: remember what the user asks it to, recall, forget.
+    private var memoryTools: [ClaudeTool] {
         [
+            ClaudeTool(
+                name: "memory_remember",
+                description: "Remember a fact for later conversations (the user asked you to, or corrected you): one specific sentence, with the tickets, repos, people or concepts it's about. Never secrets.",
+                properties: ["fact": JSONSchema.string("The fact, one sentence."),
+                             "about": ["type": "array", "items": ["type": "string"], "description": "Names or keys it's about (LAF-123, owner/repo, a person)."]],
+                required: ["fact"]
+            ) { [weak self] input in
+                guard let memory = self?.memory else { throw ToolError("Knowledge isn't available.") }
+                let request = try input.toolInput(RememberInput.self)
+                let id = try await memory.remember(.init(text: request.fact, about: request.about ?? [], confidence: .stated, durability: .stable))
+                self?.bump()
+                return ["remembered": .string(id)]
+            },
+            ClaudeTool(
+                name: "memory_recall",
+                description: "What you learned in earlier conversations about something (facts with confidence, date and id). <what-i-know> already brings the most relevant ones; use this to look further.",
+                properties: ["query": JSONSchema.string("What to recall; omit for the most recent facts.")]
+            ) { [weak self] input in
+                guard let memory = self?.memory else { throw ToolError("Knowledge isn't available.") }
+                let query = try input.toolInput(RecallInput.self).query ?? ""
+                let nodes = query.isEmpty ? Array(await memory.all(limit: 40).prefix(40)) : await memory.recall(query, limit: 20)
+                return .array(nodes.map { ["id": .string($0.id), "fact": .string($0.signature), "how": .string($0.qualified), "updated": .string($0.updated.formatted(.iso8601))] })
+            },
+            ClaudeTool(
+                name: "memory_forget",
+                description: "Forget a fact you learned (it was wrong or the user asked). Ids come from <what-i-know> or memory_recall.",
+                properties: ["id": JSONSchema.string("obs:… id.")], required: ["id"]
+            ) { [weak self] input in
+                guard let memory = self?.memory else { throw ToolError("Knowledge isn't available.") }
+                try await memory.forget(try input.toolInput(ForgetInput.self).id)
+                self?.bump()
+                return "forgotten"
+            },
+        ]
+    }
+
+    /// Views reload after a memory change.
+    func bump() { revision += 1 }
+
+    private struct RememberInput: Decodable { let fact: String; let about: [String]? }
+    private struct ForgetInput: Decodable { let id: String }
+    private struct RecallInput: Decodable { let query: String? }
+
+    var tools: [ClaudeTool] {
+        memoryTools + [
             ClaudeTool(
                 name: "knowledge_search",
                 description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Claude's notes. Start here to locate anything.",

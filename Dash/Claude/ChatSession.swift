@@ -127,6 +127,10 @@ final class ChatSession {
         current and mention what matters to the question; don't recite them. Call dashboard_activity to look \
         further back.
 
+        What you learned in earlier conversations arrives in <what-i-know>: use it, but the user's word and \
+        live data win. When the user tells you to remember something or corrects you, call memory_remember \
+        (and memory_forget for what was wrong).
+
         What the user is looking at (the page and its widgets, or the open note) arrives in <current-view> \
         tags with each message. "This", "here", "this note", "these pods" refer to it: act on it without asking \
         which one. Call view_current to read the view's live data or the open note, and view_show to open a page \
@@ -261,7 +265,10 @@ final class ChatSession {
             saveConversation()
         }
         let previousActivityID = lastActivityID
+        let turnStart = transcript.count
+        let memory = host.ext(KnowledgeExtension.self)?.memory
         var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"
+        if let known = await memory?.context(for: text + "\n" + ViewContext.summary(host: host)) { prompt = known + "\n" + prompt }
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
             prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }
@@ -278,6 +285,11 @@ final class ChatSession {
             }
             transcript += live
             live = []
+            // Learn from the exchange in the background (a cheap model, only durable facts).
+            if !result.isError, let memory {
+                let exchange = Array(transcript[max(0, turnStart - 1)...])
+                Task { if await memory.learn(from: exchange) > 0 { self.host.ext(KnowledgeExtension.self)?.bump() } }
+            }
             if result.isError, result.subtype != "error_during_execution" {
                 notice("Claude Code: \(result.result ?? result.subtype)", isError: true)
             } else if result.subtype == "error_during_execution" {

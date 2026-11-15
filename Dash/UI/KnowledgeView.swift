@@ -92,6 +92,7 @@ struct KnowledgeView: View {
                     .padding(.top, 4)
                 }
             }
+            if knowledge.memory != nil { LearnedSection(knowledge: knowledge) }
             if knowledge.isWorking { ProgressView(knowledge.status).controlSize(.small).font(.caption) }
             Spacer()
         }
@@ -496,3 +497,68 @@ private struct RelationTile: View {
     }
 }
 
+/// What Dashii learned from conversations: each fact with how sure it is, forgettable one by one.
+private struct LearnedSection: View {
+    let knowledge: KnowledgeExtension
+    @State private var facts: [KnowledgeNode] = []
+    @State private var enabled = true
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("What \(DashDefaults.shared.string(forKey: "persona.name") ?? "Dashii") learned").font(.caption.bold()).foregroundStyle(.secondary)
+                Text("\(facts.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.horizontal, 5).background(.quaternary, in: .capsule)
+                Spacer()
+                Toggle("Learn", isOn: $enabled)
+                    .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                    .help(enabled ? "Learning from conversations is on" : "Learning is paused")
+                    .onChange(of: enabled) { _, on in knowledge.memory?.isEnabled = on }
+            }
+            if facts.isEmpty {
+                Text(enabled ? "Facts from your conversations show up here." : "Learning is paused.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            ForEach(facts.prefix(expanded ? 200 : 5), id: \.id) { fact in
+                LearnedRow(fact: fact) {
+                    Task {
+                        try? await knowledge.memory?.forget(fact.id)
+                        knowledge.bump()
+                    }
+                }
+            }
+            if facts.count > 5 {
+                Button(expanded ? "Show less" : "Show all \(facts.count)") { withAnimation(.snappy) { expanded.toggle() } }
+                    .buttonStyle(.borderless).font(.caption)
+            }
+        }
+        .padding(.top, 8)
+        .task(id: knowledge.revision) {
+            enabled = knowledge.memory?.isEnabled ?? false
+            facts = await knowledge.memory?.all() ?? []
+        }
+    }
+}
+
+private struct LearnedRow: View {
+    let fact: KnowledgeNode
+    let forget: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon).font(.caption).foregroundStyle(.tint).frame(width: 14)
+                .help(confidence == "stated" ? "You said it" : confidence == "observed" ? "Seen in your data" : "Inferred")
+            Text(fact.signature).font(.caption).lineLimit(3).textSelection(.enabled)
+            Spacer(minLength: 4)
+            Button("Forget", systemImage: "xmark.circle", action: forget)
+                .labelStyle(.iconOnly).buttonStyle(.borderless).font(.caption)
+                .opacity(hovering ? 1 : 0)
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private var confidence: String { fact.qualified.split(separator: "|").first.map(String.init) ?? "inferred" }
+    private var icon: String { confidence == "stated" ? "person.fill.checkmark" : confidence == "observed" ? "eye" : "sparkle" }
+}
