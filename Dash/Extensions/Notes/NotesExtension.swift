@@ -146,6 +146,7 @@ final class NotesExtension: DashExtension {
         let components = host.map { host in host.extensions.filter { host.isEnabled($0) }.flatMap(\.components) } ?? CoreComponents.all
         let guide = Self.writingGuide(components)
         return [
+            DocKind.tool,
             ClaudeTool(name: "notes_search", description: "Search the user's notes by title and text; returns titles, folders and dates (newest first).",
                        properties: ["query": JSONSchema.string("Words to look for; empty lists recent notes.")]) { [weak self] input in
                 guard let self else { return nil }

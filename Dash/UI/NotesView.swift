@@ -12,6 +12,8 @@ struct NotesView: View {
     @Environment(ChatSession.self) private var chat
     @State private var selection: NoteFile?
     @State private var search = ""
+    /// The document kind being asked for (its topic sheet is open).
+    @State private var drafting: DocKind?
     @State private var text = ""
     @State private var title = ""
     @State private var preview = false
@@ -73,11 +75,28 @@ struct NotesView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search notes", text: $search).textFieldStyle(.plain)
+                Menu {
+                    ForEach(DocKind.allCases) { kind in
+                        Button(kind.title, systemImage: kind.systemImage) { drafting = kind }
+                    }
+                } label: {
+                    Image(systemName: "sparkles.rectangle.stack")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Write a how-to, runbook, postmortem, meeting notes or daily note from what Dash knows")
                 Button("New Note", systemImage: "square.and.pencil") { newNote() }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .keyboardShortcut("n", modifiers: [.command, .option])
                     .help("New note (⌥⌘N)")
+            }
+            .sheet(item: $drafting) { kind in
+                DocRequestSheet(kind: kind) { topic in
+                    drafting = nil
+                    host.askClaude(kind.prompt(topic: topic))
+                } cancel: { drafting = nil }
             }
             .padding(10)
             Divider()
@@ -514,4 +533,38 @@ private struct NoteDropDelegate: DropDelegate {
         }
         return true
     }
+}
+
+/// Asks what a generated document should be about, then hands it to Dashii.
+private struct DocRequestSheet: View {
+    let kind: DocKind
+    let start: (String) -> Void
+    let cancel: () -> Void
+    @State private var topic = ""
+    @Environment(ExtensionHost.self) private var host
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("New \(kind.title)", systemImage: kind.systemImage).font(.title3.weight(.semibold))
+            Text("\(host.persona.name) gathers the facts from the knowledge graph, what it learned, your activity and the connected integrations, then writes the note.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextField(kind.topicPrompt, text: $topic, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...4)
+                .onSubmit { if canStart { start(topic) } }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel).keyboardShortcut(.cancelAction)
+                Button("Write It", systemImage: "sparkles") { start(topic) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canStart)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    /// Meeting and daily notes default to the latest; the others need a topic.
+    private var canStart: Bool { [.meetingNotes, .dailyNote].contains(kind) || !topic.trimmingCharacters(in: .whitespaces).isEmpty }
 }
