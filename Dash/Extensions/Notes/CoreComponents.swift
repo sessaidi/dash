@@ -39,7 +39,7 @@ enum CoreComponents {
     static let children = MarkdownComponentType(
         name: "Children", summary: "Lists this note's sub-notes as links.",
         example: "@Children") { context in
-        AnyView(ChildrenComponent(title: context.noteTitle))
+        AnyView(ChildrenComponent(title: context.noteTitle, printing: context.isPrinting))
     }
 
     static let callout = MarkdownComponentType(
@@ -256,6 +256,8 @@ private struct WidgetComponent: View {
 
 private struct ChildrenComponent: View {
     let title: String?
+    /// On paper links can't be drawn (they'd render as placeholders): plain titles instead.
+    var printing = false
     @Environment(ExtensionHost.self) private var host
 
     var body: some View {
@@ -268,8 +270,12 @@ private struct ChildrenComponent: View {
                 Text("No sub-notes yet. Right-click the note in the list › New Sub-note.").font(.callout).foregroundStyle(.secondary)
             }
             ForEach(children) { child in
-                Link(destination: URL(string: "dash-note://" + (child.title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? child.title))!) {
-                    Label(child.title, systemImage: "doc.text")
+                if printing {
+                    Label(child.title, systemImage: "doc.text").foregroundStyle(.primary)
+                } else {
+                    Link(destination: URL(string: "dash-note://" + (child.title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? child.title))!) {
+                        Label(child.title, systemImage: "doc.text")
+                    }
                 }
             }
         }
