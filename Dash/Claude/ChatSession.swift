@@ -76,6 +76,8 @@ final class ChatSession {
     private(set) var live: [ChatEntry] = []
     private(set) var isRunning = false
     var isPanelVisible = true
+    /// Tool results that arrived before Claude Code's message naming the call, by tool name.
+    @ObservationIgnored private var earlyResults: [String: [(String, Bool)]] = [:]
     /// Text put in the composer for the user to finish (a started request); the panel takes it.
     var pendingDraft: String?
     /// The conversation on screen, saved after every turn.
@@ -211,6 +213,7 @@ final class ChatSession {
         saveConversation()
         transcript = []
         live = []
+        earlyResults = [:]
         code?.terminate()
         code = nil
         codeSessionID = nil
@@ -420,7 +423,10 @@ final class ChatSession {
                     transcript.append(ChatEntry(id: UUID().uuidString, kind: .thinking(text)))
                 case .toolUse(let id, let name, let input):
                     let short = name.replacingOccurrences(of: "mcp__dash__", with: "")
-                    transcript.append(ChatEntry(id: UUID().uuidString, kind: .tool(name: short, input: input.dash.jsonString(pretty: true), result: nil, isError: false), toolUseID: id))
+                    var early: (String, Bool)?
+                    if var queue = earlyResults[short], !queue.isEmpty { early = queue.removeFirst(); earlyResults[short] = queue }
+                    transcript.append(ChatEntry(id: UUID().uuidString, kind: .tool(name: short, input: input.dash.jsonString(pretty: true),
+                                                                                  result: early?.0, isError: early?.1 ?? false), toolUseID: id))
                 default:
                     break
                 }
@@ -446,9 +452,16 @@ final class ChatSession {
 
     /// An MCP tools/call from Claude Code: same approval rules as the API backend.
     private func callDashTool(_ name: String, arguments: JSONValue) async -> MCPToolResult {
-        let call = ToolCall(id: pendingToolUseID(for: name) ?? UUID().uuidString, name: name, input: arguments)
+        let pending = pendingToolUseID(for: name)
+        let call = ToolCall(id: pending ?? UUID().uuidString, name: name, input: arguments)
         let (content, isError) = await execute(call, tools: tools)
-        setToolResult(call.id, content: content, isError: isError)
+        // Claude Code can run the tool before its message naming it arrives: keep the result for
+        // that entry, so its spinner stops when it shows up.
+        if let id = pendingToolUseID(for: name) ?? pending {
+            setToolResult(id, content: content, isError: isError)
+        } else {
+            earlyResults[name, default: []].append((content, isError))
+        }
         return MCPToolResult(content, isError: isError)
     }
 
