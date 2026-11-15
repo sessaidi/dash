@@ -12,6 +12,66 @@ struct MermaidGraph: Equatable {
         var label: String
         var shape: Shape
         var group: String?
+        /// Colours from `style`, `classDef`/`class` or `:::class` (hex, e.g. "#f9f").
+        var fill: String?
+        var stroke: String?
+        var text: String?
+
+        /// What it stands for, guessed from its shape and words: picks an icon and an accent,
+        /// like an architecture diagram (database, queue, client, gateway…).
+        var category: Category { Category.of(self) }
+    }
+
+    enum Category: String, CaseIterable {
+        case database, queue, client, gateway, cache, storage, monitoring, external, user, decision, service
+
+        static func of(_ node: Node) -> Category {
+            if node.shape == .diamond { return .decision }
+            let text = (node.label + " " + node.id).lowercased()
+            func has(_ words: [String]) -> Bool { words.contains { text.contains($0) } }
+            if has(["queue", "pub/sub", "pubsub", "kafka", "sqs", "rabbit", "nats", "topic", "event bus", "stream"]) { return .queue }
+            if has(["cache", "redis", "memcache", "cdn", "varnish"]) { return .cache }
+            if has(["gcs", "s3", "bucket", "blob", "storage", "object store", "files"]) { return .storage }
+            if node.shape == .cylinder || has(["database", " db", "db ", "postgres", "mysql", "sql", "mongo", "spanner", "bigquery", "dynamo", "store"]) { return .database }
+            if has(["datadog", "monitor", "grafana", "prometheus", "logging", "metrics", "sentry", "alert"]) { return .monitoring }
+            if has(["gateway", "load balancer", "ingress", "proxy", "router", "nginx", "envoy", "api gw"]) { return .gateway }
+            if has(["user", "customer", "person", "actor", "admin"]) { return .user }
+            if has(["client", "web", "mobile", "ios", "android", "tv", "roku", "browser", "app", "device"]) { return .client }
+            if has(["launchdarkly", "stripe", "auth0", "okta", "third", "external", "saas", "vendor", "twilio"]) { return .external }
+            return .service
+        }
+
+        var systemImage: String {
+            switch self {
+            case .database: "cylinder.split.1x2"
+            case .queue: "tray.2"
+            case .client: "macbook.and.iphone"
+            case .gateway: "point.3.connected.trianglepath.dotted"
+            case .cache: "bolt.horizontal"
+            case .storage: "archivebox"
+            case .monitoring: "chart.xyaxis.line"
+            case .external: "cloud"
+            case .user: "person.2"
+            case .decision: "questionmark.diamond"
+            case .service: "server.rack"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .database: .orange
+            case .queue: .purple
+            case .client: .teal
+            case .gateway: .indigo
+            case .cache: .yellow
+            case .storage: .brown
+            case .monitoring: .pink
+            case .external: .gray
+            case .user: .green
+            case .decision: .mint
+            case .service: .blue
+            }
+        }
     }
 
     struct Edge: Equatable {
@@ -52,7 +112,28 @@ struct MermaidGraph: Equatable {
         lines.removeFirst()
 
         var stack: [String] = []
+        var classes: [String: (fill: String?, stroke: String?, text: String?)] = [:]
+        var applied: [(ids: [String], name: String)] = []
+        var direct: [(id: String, fill: String?, stroke: String?, text: String?)] = []
+        func colours(_ text: String) -> (fill: String?, stroke: String?, text: String?) {
+            var result: (fill: String?, stroke: String?, text: String?) = (nil, nil, nil)
+            for part in text.split(separator: ",") {
+                let pair = part.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                guard pair.count == 2 else { continue }
+                switch pair[0] {
+                case "fill": result.fill = pair[1]
+                case "stroke": result.stroke = pair[1]
+                case "color": result.text = pair[1]
+                default: break
+                }
+            }
+            return result
+        }
         for line in lines {
+            let words = line.split(separator: " ", maxSplits: 2).map(String.init)
+            if line.lowercased().hasPrefix("classdef "), words.count == 3 { classes[words[1]] = colours(words[2]); continue }
+            if line.lowercased().hasPrefix("class "), words.count == 3 { applied.append((words[1].split(separator: ",").map(String.init), words[2].trimmingCharacters(in: CharacterSet(charactersIn: ";")))); continue }
+            if line.lowercased().hasPrefix("style "), words.count == 3 { let c = colours(words[2]); direct.append((words[1], c.fill, c.stroke, c.text)); continue }
             let lower = line.lowercased()
             if lower.hasPrefix("subgraph") {
                 var rest = line.dropFirst("subgraph".count).trimmingCharacters(in: .whitespaces)
@@ -67,10 +148,30 @@ struct MermaidGraph: Equatable {
                 continue
             }
             if lower == "end" { _ = stack.popLast(); continue }
-            if ["classdef", "class ", "style ", "linkstyle", "click ", "direction "].contains(where: { lower.hasPrefix($0) }) { continue }
+            if ["linkstyle", "click ", "direction "].contains(where: { lower.hasPrefix($0) }) { continue }
             graph.read(statement: line, group: stack.last)
         }
+        for (ids, name) in applied + graph.inlineClasses.map({ ([$0.id], $0.name) }) {
+            guard let style = classes[name] else { continue }
+            for id in ids { graph.paint(id, fill: style.fill, stroke: style.stroke, text: style.text) }
+        }
+        for item in direct { graph.paint(item.id, fill: item.fill, stroke: item.stroke, text: item.text) }
+        graph.inlineClasses = []
         return graph.nodes.isEmpty ? nil : graph
+    }
+
+    /// `A:::name` uses seen while reading, applied once classDefs are known.
+    var inlineClasses: [(id: String, name: String)] = []
+
+    static func == (a: MermaidGraph, b: MermaidGraph) -> Bool {
+        a.direction == b.direction && a.nodes == b.nodes && a.edges == b.edges && a.groups == b.groups
+    }
+
+    mutating func paint(_ id: String, fill: String?, stroke: String?, text: String?) {
+        guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        if let fill { nodes[index].fill = fill }
+        if let stroke { nodes[index].stroke = stroke }
+        if let text { nodes[index].text = text }
     }
 
     /// A node list or a chain: `A[x] --> B & C -- label --> D`.
@@ -149,6 +250,11 @@ struct MermaidGraph: Equatable {
             shape = kind
             rest = body[range.upperBound...]
             break
+        }
+        if rest.hasPrefix(":::") {
+            let name = String(rest.dropFirst(3).prefix { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
+            rest = rest.dropFirst(3 + name.count)
+            inlineClasses.append((id, name))
         }
         if let index = nodes.firstIndex(where: { $0.id == id }) {
             if let label { nodes[index].label = label; nodes[index].shape = shape }
@@ -426,9 +532,12 @@ struct MermaidView: View {
             ZStack(alignment: .topLeading) {
                 ForEach(graph.groups) { group in
                     if let frame = layout.groupFrames[group.id] {
-                        RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35))
-                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                            .overlay(alignment: .topLeading) { Text(group.title).font(.caption.bold()).foregroundStyle(.secondary).padding(6) }
+                        RoundedRectangle(cornerRadius: 12).fill(Color.accentColor.opacity(0.05))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [5, 3])))
+                            .overlay(alignment: .topLeading) {
+                                Label(group.title, systemImage: "square.stack.3d.up").font(.caption.bold()).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                            }
                             .frame(width: frame.width, height: frame.height)
                             .offset(x: frame.minX, y: frame.minY)
                     }
@@ -464,7 +573,8 @@ struct MermaidView: View {
         let maxWidth: CGFloat = 190
         let text = NSAttributedString(string: node.label, attributes: [.font: font])
         let bounds = text.boundingRect(with: CGSize(width: maxWidth, height: 400), options: [.usesLineFragmentOrigin, .usesFontLeading])
-        var size = CGSize(width: ceil(bounds.width) + 26, height: ceil(bounds.height) + 18)
+        // Icon (22) + spacing + padding around the label.
+        var size = CGSize(width: ceil(bounds.width) + 26 + (node.shape == .diamond ? 0 : 30), height: max(ceil(bounds.height) + 18, 38))
         switch node.shape {
         case .diamond: size = CGSize(width: size.width * 1.5, height: max(size.height * 1.6, 54))
         case .circle: let side = max(size.width, size.height); size = CGSize(width: side, height: side)
@@ -513,37 +623,88 @@ struct MermaidView: View {
     }
 }
 
+/// A node as an architecture card: an icon for what it is, its label, an accent colour (its
+/// category's, or the diagram's own `style`), a soft shadow. Decisions stay diamonds.
 private struct NodeView: View {
     let node: MermaidGraph.Node
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: Color { node.stroke.flatMap(Color.init(hex:)) ?? node.category.tint }
+    private var fill: Color { node.fill.flatMap(Color.init(hex:)) ?? (colorScheme == .dark ? Color(white: 0.17) : .white) }
 
     var body: some View {
-        ZStack {
-            shape
-            Text(node.label)
-                .font(.system(size: 12, weight: .medium))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, node.shape == .diamond ? 22 : 10)
-                .padding(.top, node.shape == .cylinder ? 8 : 0)
+        if node.shape == .diamond {
+            ZStack {
+                Diamond().fill(fill).overlay(Diamond().stroke(tint.opacity(0.8), lineWidth: 1.2))
+                    .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                Text(node.label).font(.system(size: 11, weight: .semibold)).multilineTextAlignment(.center).padding(.horizontal, 24)
+                    .foregroundStyle(node.text.flatMap(Color.init(hex:)) ?? .primary)
+            }
+        } else {
+            HStack(spacing: 7) {
+                Image(systemName: node.category.systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 22, height: 22)
+                    .background(tint.opacity(0.14), in: .rect(cornerRadius: 6))
+                Text(node.label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(node.text.flatMap(Color.init(hex:)) ?? .primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(fill, in: shape)
+            .overlay(shape.strokeBorder(tint.opacity(0.55), lineWidth: 1))
+            .overlay(alignment: .leading) {
+                // Accent bar, like a service card.
+                shape.fill(tint).frame(width: 3).padding(.vertical, 6).opacity(node.shape == .circle ? 0 : 1)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 3, y: 1)
         }
     }
 
-    @ViewBuilder private var shape: some View {
-        let fill = Color.accentColor.opacity(0.12), stroke = Color.accentColor.opacity(0.7)
+    private var shape: some InsettableShape {
         switch node.shape {
-        case .box, .subroutine, .flag:
-            RoundedRectangle(cornerRadius: 4).fill(fill).overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(stroke))
-                .overlay { if node.shape == .subroutine { HStack { Rectangle().fill(stroke).frame(width: 1); Spacer(); Rectangle().fill(stroke).frame(width: 1) }.padding(.horizontal, 6) } }
-        case .rounded:
-            RoundedRectangle(cornerRadius: 12).fill(fill).overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(stroke))
-        case .stadium:
-            Capsule().fill(fill).overlay(Capsule().strokeBorder(stroke))
-        case .circle:
-            Circle().fill(fill).overlay(Circle().strokeBorder(stroke))
-        case .diamond:
-            Diamond().fill(fill).overlay(Diamond().stroke(stroke))
-        case .cylinder:
-            Cylinder().fill(Color.orange.opacity(0.12)).overlay(Cylinder().stroke(Color.orange.opacity(0.7)))
+        case .stadium, .circle: AnyInsettableShape(Capsule())
+        case .rounded: AnyInsettableShape(RoundedRectangle(cornerRadius: 12))
+        default: AnyInsettableShape(RoundedRectangle(cornerRadius: 7))
         }
+    }
+}
+
+/// A type-erased InsettableShape (cards switch between rounded rectangles and capsules).
+private struct AnyInsettableShape: InsettableShape {
+    private let make: @Sendable (CGRect, CGFloat) -> Path
+    private let inset: CGFloat
+
+    init<S: InsettableShape>(_ shape: S) where S: Sendable {
+        make = { rect, amount in shape.inset(by: amount).path(in: rect) }
+        inset = 0
+    }
+
+    private init(make: @escaping @Sendable (CGRect, CGFloat) -> Path, inset: CGFloat) {
+        self.make = make
+        self.inset = inset
+    }
+
+    func path(in rect: CGRect) -> Path { make(rect, inset) }
+    func inset(by amount: CGFloat) -> AnyInsettableShape { AnyInsettableShape(make: make, inset: inset + amount) }
+}
+
+extension Color {
+    /// "#f9f", "#ff99ff" or "#ff99ffcc".
+    init?(hex: String) {
+        var text = hex.trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("#") else { return nil }
+        text.removeFirst()
+        if text.count == 3 { text = text.map { "\($0)\($0)" }.joined() }
+        guard text.count == 6 || text.count == 8, let value = UInt64(text, radix: 16) else { return nil }
+        let hasAlpha = text.count == 8
+        let r = Double((value >> (hasAlpha ? 24 : 16)) & 0xff) / 255, g = Double((value >> (hasAlpha ? 16 : 8)) & 0xff) / 255
+        let b = Double((value >> (hasAlpha ? 8 : 0)) & 0xff) / 255, a = hasAlpha ? Double(value & 0xff) / 255 : 1
+        self.init(red: r, green: g, blue: b, opacity: a)
     }
 }
 

@@ -76,6 +76,22 @@ struct MermaidTests {
         #expect(image.size.width <= 300 && image.size.height > 40 && image.size.height <= 420)
     }
 
+    @Test func categoriesAndColours() throws {
+        let graph = try #require(MermaidGraph.parse(Self.papi + """
+
+              Q[Pub/Sub topic]:::hot
+              R[(Redis cache)]
+              classDef hot fill:#ffeeee,stroke:#f00
+              style CAPIG fill:#eef,color:#333
+            """))
+        let byID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0) })
+        #expect(byID["KG"]?.category == .database && byID["CTV"]?.category == .client && byID["CAPIG"]?.category == .gateway)
+        #expect(byID["Q"]?.category == .queue && byID["R"]?.category == .cache && byID["page-cache"]?.category == .decision)
+        #expect(byID["Q"]?.fill == "#ffeeee" && byID["Q"]?.stroke == "#f00")
+        #expect(byID["CAPIG"]?.fill == "#eef" && byID["CAPIG"]?.text == "#333")
+        #expect(Color(hex: "#f9f") != nil && Color(hex: "red") == nil)
+    }
+
     @Test func otherDiagramsStayCode() {
         #expect(MermaidGraph.parse("sequenceDiagram\n A->>B: hi") == nil)
         #expect(MermaidGraph.parse("graph TD\n A --> B")?.direction == .topToBottom)
