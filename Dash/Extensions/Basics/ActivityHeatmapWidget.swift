@@ -103,6 +103,7 @@ private struct ActivityHeatmapView: View {
             } else {
                 ContentUnavailableView("Pick what to show", systemImage: "square.grid.3x3.middle.filled",
                                        description: Text("Edit the widget and choose a series. Plugins add their own (PRs, worktrees, tickets…)."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task(id: "\(config.series)|\(offset)|\(months)") {

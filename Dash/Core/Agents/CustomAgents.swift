@@ -214,6 +214,7 @@ private struct AgentsWidgetView: View {
         if rows.isEmpty {
             ContentUnavailableView("No agents", systemImage: "person.2.badge.gearshape",
                                    description: Text("Create one in Settings › Automation › Agents."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             AgentRowsView(rows: rows) { id in Task { _ = try? await hub.run(id, reason: "manual") } }
         }
