@@ -166,12 +166,15 @@ struct HotInstallTests {
         let host = try ExtensionHost(settings: AppSettings(defaults: UserDefaults(suiteName: "dash-tests-\(UUID())")!),
                                      extensions: ExtensionHost.builtInExtensions(), inMemory: true)
         host.dashboard.migrate()
-        _ = try host.dashboard.add(kind: "note", title: "Kept")
+        let kept = try host.dashboard.add(kind: "note", title: "Kept")
         let before = ObjectIdentifier(host.container)
         // FakeNote isn't in the launch schema; adding the feature has to grow it.
         let notes = FakeFeature(id: "hot-notes")
         try host.addHotLoaded([notes])
         #expect(ObjectIdentifier(host.container) != before)
+        // A model fetched before the schema grew (a sync holding it across an await) stays usable.
+        kept.title = "Still usable"
+        #expect(kept.title == "Still usable")
         #expect(host.extensions.contains { $0.id == "hot-notes" })
         #expect(host.availableTools.contains { $0.name == "hot-notes_run" })
         host.context.insert(FakeNote(text: "hello"))

@@ -94,6 +94,8 @@ final class ExtensionHost: ExtensionContext {
     @ObservationIgnored let inMemory: Bool
     @ObservationIgnored private(set) var dashboard: DashboardStore!
     @ObservationIgnored weak var chat: ChatSession?
+    /// Containers replaced when a hot-installed plugin grew the schema, kept so their models stay valid.
+    @ObservationIgnored private var retiredContainers: [ModelContainer] = []
 
     var context: ModelContext { container.mainContext }
     /// Claude for features and plugins: Claude Code with the user's Claude login.
@@ -245,6 +247,9 @@ final class ExtensionHost: ExtensionContext {
         let known = Set(extensions.flatMap(\.models).map { ObjectIdentifier($0) })
         if added.contains(where: { !known.contains(ObjectIdentifier($0)) }) {
             try? context.save()
+            // The old container stays alive: models running extensions still hold (a sync waiting on
+            // the network, an open sheet) stay usable instead of crashing as destroyed.
+            retiredContainers.append(container)
             container = try Self.makeContainer(models: (extensions + items).flatMap(\.models), inMemory: inMemory)
             if !inMemory { DatabaseVault.shared.attach(container) }
             DashLog.info("Store schema grown for \(items.map(\.id).joined(separator: ", "))", category: "plugins")
