@@ -70,13 +70,78 @@ struct DashScript {
             guard let id = words.text() else { throw ToolError("forget obs:… (an id from recall)") }
             return try await call("memory_forget", ["id": .string(id)])
         case "search": return try await call("dashql", ["query": .string("from knowledge \"\(words.rest)\"")])
+        case "sidebar": return try await call("sidebar", [:])
+        case "section": return try await section(&words)
+        case "plugin", "plugins", "extension":
+            guard let name = words.word() else { return try await call("extensions_list", [:]) }
+            switch words.word()?.lowercased() {
+            case "on", "enable": return try await call("extension_set_enabled", ["id": .string(name), "enabled": true])
+            case "off", "disable": return try await call("extension_set_enabled", ["id": .string(name), "enabled": false])
+            case nil, "settings", "open": return try await call("open_screen", ["screen": .string(name)])
+            case let other?: throw ToolError("plugin \"…\" on | off | settings (not `\(other)`).")
+            }
+        case "automation": return try await call("automation_list", [:])
+        case "rules":
+            let scope = words.word() ?? "global"
+            return try await call("automation_set_rules", ["scope": .string(scope), "text": words.options()["text"] ?? .string(words.rest)])
+        case "command":
+            guard let action = words.word()?.lowercased(), let name = words.word() else { throw ToolError("command save <name> prompt=\"…\" summary=\"…\" | command delete <name>") }
+            if action == "delete" { return try await call("command_delete", ["name": .string(name)]) }
+            var input = words.options()
+            input["name"] = .string(name)
+            return try await call("command_save", .object(input))
+        case "hook":
+            switch words.word()?.lowercased() {
+            case "create", "new":
+                let name = words.word()
+                var input = words.options()
+                if input["name"] == nil, let name { input["name"] = .string(name) }
+                return try await call("hook_create", .object(input))
+            case "on": return try await call("hook_set_enabled", ["id": .string(try words.require("hook name or id")), "enabled": true])
+            case "off": return try await call("hook_set_enabled", ["id": .string(try words.require("hook name or id")), "enabled": false])
+            case "delete": return try await call("hook_delete", ["id": .string(try words.require("hook name or id"))])
+            default: throw ToolError("hook create name=\"…\" trigger={…} action={…} | hook on|off|delete \"name\"")
+            }
+        case "agent", "agents":
+            guard let first = words.word() else { return try await call("dash_agents", [:]) }
+            switch first.lowercased() {
+            case "create", "new":
+                let name = words.word()
+                var input = words.options()
+                if input["name"] == nil, let name { input["name"] = .string(name) }
+                return try await call("agent_create", .object(input))
+            default:
+                switch words.word()?.lowercased() {
+                case "run": return try await call("dash_agent_run", ["id": .string(first), "reason": .string(words.rest.isEmpty ? "asked in chat" : words.rest)])
+                case "reports": return try await call("dash_agent_reports", ["id": .string(first)])
+                case "set", "update":
+                    var input = words.options()
+                    input["id"] = .string(first)
+                    return try await call("agent_update", .object(input))
+                case "delete": return try await call("agent_delete", ["id": .string(first)])
+                default: throw ToolError("agent create \"Name\" instructions=… every_minutes=… | agent \"Name\" run | reports | set k=v | delete")
+                }
+            }
+        case "open": return try await call("open_screen", ["screen": .string(words.rest)])
         case "tool", "call":
             guard let name = words.word() else { throw ToolError("tool <name> key=value … (help lists them)") }
             return try await call(name, .object(words.options()))
         default:
             // A tool name on its own works too: `jira_follow key=LAF-1`.
             if tools.contains(where: { $0.name == verb }) { return try await call(verb, .object(words.options())) }
-            throw ToolError("Unknown verb `\(verb)`. Verbs: from, widget, page, show, note, remember, recall, forget, search, tool, help.")
+            throw ToolError("Unknown verb `\(verb)`. Verbs: from, widget, page, show, open, note, sidebar, section, plugin, automation, rules, command, hook, agent, remember, recall, forget, search, tool, help.")
+        }
+    }
+
+    private func section(_ words: inout DashArgs) async throws -> JSONValue {
+        switch words.word()?.lowercased() {
+        case "create", "new": return try await call("section_create", ["name": .string(try words.require("section name"))])
+        case "rename":
+            let section = try words.require("section name")
+            let options = words.options()
+            return try await call("section_rename", ["section": .string(section), "name": options["name"] ?? .string(words.rest)])
+        case "delete": return try await call("section_delete", ["section": .string(try words.require("section name"))])
+        default: throw ToolError("section create \"Name\" | section rename \"Old\" name=\"New\" | section delete \"Name\"")
         }
     }
 
@@ -145,7 +210,12 @@ struct DashScript {
             if input["name"] == nil, let name = words.text() { input["name"] = .string(name) }
             return try await call("update_page", .object(input))
         case "delete", "remove": return try await call("delete_page", ["id": .string(pageID)])
-        case let other?: throw ToolError("page \"…\" read | add <kind> … | rename name=… | delete (not `\(other)`).")
+        case "move":
+            var input = words.options()
+            input["page"] = .string(pageID)
+            return try await call("page_move", .object(input))
+        case "home": return try await call("page_set_home", ["page": .string(pageID), "home": words.options()["on"] ?? .bool(words.word()?.lowercased() != "off")])
+        case let other?: throw ToolError("page \"…\" read | add <kind> … | rename name=… | move section=… before=… | home on|off | delete (not `\(other)`).")
         }
     }
 
@@ -243,6 +313,13 @@ struct DashScript {
           show page "Name" | show note "Title" | show notes | show knowledge | show current
           note create "Title" text="…" | note append "Title" text="…" | note read "Title" | note search words
           remember "fact" about=[LAF-1, owner/repo] | recall [words] | forget obs:… | search <words in the knowledge graph>
+          sidebar | section create "Ops" | section rename "Ops" name="On-call" | section delete "Ops"
+          page "Name" move section="Ops" before="Other page" | page "Name" home on|off
+          plugins | plugin "jira-board" on|off|settings       open marketplace | open hooks | open gallery | open jira-board
+          automation | rules global text="…" | command save standup prompt="…" summary="…" | command delete standup
+          hook create name="Morning brief" trigger={"schedule":{"time":"09:00","weekdays":[2,3,4,5,6]}} action={"prompt":{"prompt":"…","noteTitle":null,"notify":true}}
+          hook on|off|delete "Name"
+          agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
         Values: "text", numbers, true/false, [a, b], {"json": "object"}. Widgets and pages by title or id.
         Each statement's result lists the actions (tool calls) it became; plan: true returns those without running anything.

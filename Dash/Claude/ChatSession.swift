@@ -106,7 +106,7 @@ final class ChatSession {
     }
 
     /// Everything Dashii can do, as tools.
-    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + componentTools + host.availableTools }
+    private var allTools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + AppTools.tools(host: host) + componentTools + host.availableTools }
 
     /// What Claude is offered: in compact mode the `dash` statements tool (which reaches all the
     /// others through the same approvals) plus the chat's question and layout tools; otherwise all.
