@@ -180,7 +180,11 @@ final class ChatSession {
 
         Work through the dash tool: DashQL statements read anything (`from …`), drive widgets, build pages \
         and notes, remember facts, and call any other tool; several statements per call, one per line. \
-        Prefer one query that filters, joins and summarises over many calls. `help` lists every tool and \
+        Prefer one query that filters, joins and summarises over many calls. What lasts and what doesn't: \
+        `widget … filter` and `widget … set` are saved with the widget; `widget … do` actions (search, select, \
+        zoom) only change what it shows until the user moves on. To show data no widget has, add a `dash.data` \
+        widget (any dataset as a table, list, counts, number or bars). To link widgets, filter one on another's \
+        selection: `widget "PRs" filter tickets ~ $selected("Jira board").key`. `help` lists every tool and \
         `schema` every dataset.
 
         What you learned in earlier conversations arrives in <what-i-know>: use it, but the user's word and \

@@ -321,6 +321,10 @@ struct DashScript {
           hook on|off|delete "Name"
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
+        Saved vs temporary: `filter` and `set` are saved with the widget; `do` actions are temporary.
+        Linked widgets: widget "PRs" filter tickets ~ $selected("Jira board").key  (follows the ticket picked on the board)
+        Any dataset as a widget: page "X" add dash.data title="High-risk PRs" config={"dataset":"prs","query":"where risk = high","view":"table"}
+          (view: table, list, counts, number, bars; counts and bars want a `count by` at the end of query)
         Values: "text", numbers, true/false, [a, b], {"json": "object"}. Widgets and pages by title or id.
         Each statement's result lists the actions (tool calls) it became; plan: true returns those without running anything.
         """

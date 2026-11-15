@@ -130,7 +130,7 @@ enum CoreTools {
             },
             ClaudeTool(
                 name: "widget_act",
-                description: "Do something with a widget on screen, as the user would: search, filter, select a row, jump to a date… The actions a widget offers are listed by read_widget. They only change what the widget shows. The widget must be on the current page (view_show opens its page).",
+                description: "Do something with a widget on screen, as the user would: search, select a row, jump to a date… The actions a widget offers are listed by read_widget. They're temporary (not saved): for a lasting filter use widget_query, for settings update_widget. The widget must be on the current page (view_show opens its page).",
                 properties: ["id": JSONSchema.string("Widget id."), "action": JSONSchema.string("Action name from read_widget."),
                              "input": ["type": "object", "description": "The action's input, per its input_schema."]],
                 required: ["id", "action"]
