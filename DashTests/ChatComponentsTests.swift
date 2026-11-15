@@ -53,4 +53,21 @@ struct ChatComponentsTests {
             try await tool.run(["page_name": "X", "options": [["title": "A", "rationale": "", "widgets": [["kind": "nope", "title": "?", "x": 0, "y": 0, "w": 4, "h": 4]]]]])
         }
     }
+
+    @Test func reworkingAPageReplacesItsWidgets() async throws {
+        let (host, chat) = try make()
+        let page = host.dashboard.createPage(name: "On-call", systemImage: "bell")
+        _ = try host.dashboard.add(kind: "note", title: "Old", page: page.id)
+        let tool = try #require(chat.componentTools.first { $0.name == "propose_layouts" })
+        _ = try await tool.run(["page_name": "On-call", "page_id": .string(page.id.uuidString), "options": [
+            ["title": "Pods first", "rationale": "", "widgets": [["kind": "note", "title": "New", "x": 0, "y": 0, "w": 12, "h": 6]]],
+            ["title": "Split", "rationale": "", "widgets": [["kind": "note", "title": "Other", "x": 0, "y": 0, "w": 6, "h": 6]]],
+        ]])
+        guard case .layouts(let proposal)? = chat.transcript.last?.kind else { Issue.record("no layouts"); return }
+        #expect(proposal.reworks && proposal.pageID == page.id)
+        chat.choose("option-1", in: proposal.id)
+        chat.stop()
+        #expect(host.dashboard.widgets(on: page.id).map(\.title) == ["New"])
+        #expect(host.dashboard.pages().filter { $0.name == "On-call" }.count == 1)
+    }
 }

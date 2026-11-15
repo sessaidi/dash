@@ -23,6 +23,8 @@ struct LayoutProposal: Codable, Equatable, Sendable {
     /// The option picked, once it was, and the page built from it.
     var chosen: String?
     var pageID: UUID?
+    /// Reworking an existing page (`pageID` from the start): the pick replaces its widgets.
+    var reworks = false
 }
 
 struct LayoutOption: Codable, Equatable, Sendable, Identifiable {
@@ -82,6 +84,7 @@ extension ChatSession {
                     """,
                 properties: [
                     "page_name": JSONSchema.string("The page's name, e.g. On-call."),
+                    "page_id": JSONSchema.string("To rework an existing page: its id. The layout picked replaces its widgets."),
                     "icon": JSONSchema.string("SF Symbol name.", enum: DashboardStore.pageIcons),
                     "options": [
                         "type": "array", "description": "2 or 3 layouts.",
@@ -135,7 +138,13 @@ extension ChatSession {
                                         rationale: item["rationale"]?.string ?? "", widgets: widgets))
         }
         let icon = input["icon"]?.string.flatMap { DashboardStore.pageIcons.contains($0) ? $0 : nil } ?? "square.grid.2x2"
-        return LayoutProposal(pageName: name, icon: icon, options: options)
+        var proposal = LayoutProposal(pageName: name, icon: icon, options: options)
+        if let existing = input["page_id"]?.string, !existing.isEmpty {
+            guard let id = UUID(uuidString: existing), (try? host.dashboard.page(id)) != nil else { throw ToolError("No page with id \(existing).") }
+            proposal.pageID = id
+            proposal.reworks = true
+        }
+        return proposal
     }
 
     /// The user answered a question: recorded on the component and sent as their message.
@@ -153,7 +162,14 @@ extension ChatSession {
         guard !isRunning, let index = transcript.lastIndex(where: { $0.id == proposalID }),
               case .layouts(var proposal) = transcript[index].kind, proposal.chosen == nil,
               let option = proposal.options.first(where: { $0.id == optionID }), let store = host.dashboard else { return }
-        let page = store.createPage(name: proposal.pageName, systemImage: proposal.icon)
+        let page: DashboardPage
+        if proposal.reworks, let id = proposal.pageID, let existing = try? store.page(id) {
+            // The user picked a new layout for this page: its widgets make way for the new ones.
+            for widget in store.widgets(on: id) { try? store.remove(widget.id) }
+            page = existing
+        } else {
+            page = store.createPage(name: proposal.pageName, systemImage: proposal.icon)
+        }
         var built: [String] = []
         for widget in option.widgets.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
             guard let record = try? store.add(kind: widget.kind, title: widget.title, config: widget.config, page: page.id) else { continue }
@@ -166,7 +182,7 @@ extension ChatSession {
         host.selectedPageID = page.id
         host.mainView = "page"
         send("""
-            I picked “\(option.title)”. Dash built the page “\(proposal.pageName)” (id \(page.id.uuidString)) with: \
+            I picked “\(option.title)”. Dash \(proposal.reworks ? "rebuilt" : "built") the page “\(proposal.pageName)” (id \(page.id.uuidString)) with: \
             \(built.joined(separator: "; ")). Check each widget's settings (read_widget) and fix what's missing for me, \
             then tell me in a line or two what to set up myself.
             """)

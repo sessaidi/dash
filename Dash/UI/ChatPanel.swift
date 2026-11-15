@@ -276,7 +276,7 @@ private struct LayoutProposalView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Layouts for “\(proposal.pageName)”", systemImage: proposal.icon).font(.callout.weight(.semibold))
+            Label(proposal.reworks ? "New layouts for “\(proposal.pageName)”" : "Layouts for “\(proposal.pageName)”", systemImage: proposal.icon).font(.callout.weight(.semibold))
             ForEach(proposal.options) { option in
                 let chosen = proposal.chosen == option.id
                 VStack(alignment: .leading, spacing: 8) {
@@ -286,7 +286,8 @@ private struct LayoutProposalView: View {
                         if chosen {
                             Label("Built", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
                         } else if proposal.chosen == nil {
-                            Button("Use This Layout") { chat.choose(option.id, in: proposal.id) }
+                            Button(proposal.reworks ? "Apply to “\(proposal.pageName)”" : "Use This Layout") { chat.choose(option.id, in: proposal.id) }
+                                .help(proposal.reworks ? "Replaces the widgets on “\(proposal.pageName)” with this layout" : "Creates the page with this layout")
                                 .buttonStyle(.borderedProminent).controlSize(.small)
                                 .disabled(chat.isRunning)
                         }

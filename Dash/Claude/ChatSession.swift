@@ -167,8 +167,10 @@ final class ChatSession {
         (its role first, then one or two more questions when they matter: which services, teams or repos, \
         what to see first), one question per turn. Then draw 2 or 3 options with propose_layouts, each with \
         configured widgets. The user picks one in the chat and Dash builds it; then check the widgets' \
-        settings. To rework an existing page instead, use suggest_layout (a draft with Keep / Change / \
-        Discard). Mention Marketplace plugins that would help, but don't install them.
+        settings. To rework an existing page, do the same with propose_layouts and its page_id: the pick \
+        replaces that page's widgets. Always offer choices this way; use suggest_layout (a single draft) \
+        only when the user asks for one draft. Mention Marketplace plugins that would help, but don't \
+        install them.
 
         Dashboard activity since your previous turn (new and reviewed PRs, ticket moves, agent progress, \
         meetings, workspace changes, layout edits) arrives in <dashboard-activity> tags at the start of a \
