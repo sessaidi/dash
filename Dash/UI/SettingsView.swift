@@ -21,6 +21,7 @@ struct SettingsView: View {
                     AutomationSettings(section: $host.automationSection)
                 }
             }
+            Tab("Appearance", systemImage: "paintbrush", value: "appearance") { AppearanceSettings() }
             Tab("Persona", systemImage: "face.smiling", value: "persona") { PersonaSettings() }
             Tab("Plugins", systemImage: "puzzlepiece.extension", value: "plugins") { ExtensionList() }
             Tab("Marketplace", systemImage: "bag", value: "marketplace") {
@@ -349,6 +350,80 @@ private struct PersonaSettings: View {
 }
 
 /// Settings › Debug: turn on debug mode, then open the Debug window.
+/// Light or dark, the accent colour, and how widgets stand out from the page.
+private struct AppearanceSettings: View {
+    @State private var appearance = Appearance.shared
+
+    var body: some View {
+        @Bindable var appearance = appearance
+        Form {
+            Section("Mode") {
+                Picker("Appearance", selection: $appearance.mode) {
+                    ForEach(Appearance.Mode.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
+            Section {
+                ColorChoice(title: "Accent", hex: $appearance.accentHex, none: "System")
+            } footer: {
+                Text("Buttons, selections, links and charts.")
+            }
+            Section {
+                Picker("Widgets", selection: $appearance.widgetStyle) {
+                    ForEach(Appearance.WidgetStyle.allCases) { Text($0.title).tag($0) }
+                }
+                ColorChoice(title: "Card colour", hex: $appearance.cardHex, none: "Default")
+                    .disabled(appearance.widgetStyle == .page)
+                ColorChoice(title: "Page colour", hex: $appearance.pageHex, none: "Window")
+                LabeledContent("Colour strength") {
+                    Slider(value: $appearance.tintStrength, in: 0.05...1).frame(maxWidth: 220)
+                }
+            } header: {
+                Text("Widgets and pages")
+            } footer: {
+                Text("On cards, widgets stand apart from the page. To give one widget its own colour, right-click it › Color: it gets a card in that colour and uses it as its accent.")
+            }
+            Section {
+                Button("Reset Appearance", role: .destructive) { appearance.reset() }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// A row of swatches (none, the palette) and a colour well for any other colour.
+private struct ColorChoice: View {
+    let title: String
+    @Binding var hex: String?
+    /// What no colour means: "System", "Default", "Window".
+    let none: String
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                Button(none) { hex = nil }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(hex == nil ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .capsule)
+                ForEach(Appearance.palette, id: \.hex) { color in
+                    Button { hex = color.hex } label: {
+                        Circle().fill(Color(hex: color.hex) ?? .gray).frame(width: 16, height: 16)
+                            .overlay { if hex == color.hex { Circle().strokeBorder(.primary, lineWidth: 2) } }
+                    }
+                    .buttonStyle(.plain)
+                    .help(color.name)
+                    .accessibilityLabel(color.name)
+                }
+                ColorPicker("Other", selection: Binding(
+                    get: { hex.flatMap(Color.init(hex:)) ?? .gray },
+                    set: { hex = $0.hexString }), supportsOpacity: false)
+                    .labelsHidden()
+            }
+        }
+    }
+}
+
 /// The installed version, the latest release, and installing it.
 private struct UpdateSettings: View {
     @State private var updater = Updater.shared

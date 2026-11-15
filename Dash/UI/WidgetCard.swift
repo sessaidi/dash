@@ -15,6 +15,7 @@ struct WidgetCard: View {
     /// Width of the filter chip, which the header controls sit left of.
     @State private var filterChipWidth: CGFloat = 0
     @State private var dashiiLooking = false
+    @State private var appearance = Appearance.shared
 
     var body: some View {
         let type = host.widgetType(widget.kind)
@@ -86,9 +87,11 @@ struct WidgetCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Outside edit mode widgets sit on the page itself (no card); the card appears while
-        // editing so each one can be seen, moved and resized.
-        .background(editing ? AnyShapeStyle(.background.secondary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 14))
+        // By default widgets sit on the page itself and a card appears only while editing, so each
+        // one can be seen, moved and resized. Settings › Appearance can put them all on cards, and
+        // a widget with its own colour always has one.
+        .background(appearance.cardFill(widget: widget.id, editing: editing) ?? AnyShapeStyle(.clear), in: .rect(cornerRadius: 14))
+        .modifier(WidgetTint(color: appearance.color(ofWidget: widget.id)))
         .animation(.smooth(duration: 0.25), value: editing)
         .onHover { hovering = $0 }
         .modifier(DragWhenEditing(editing: editing))
@@ -162,11 +165,27 @@ struct WidgetCard: View {
             Picker("Size Preset", selection: Binding(get: { widget.size }, set: { try? host.dashboard.update(widget.id, size: $0) })) {
                 ForEach(WidgetSize.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
+            Menu("Color", systemImage: "paintpalette") {
+                Button("Default") { appearance.setColor(nil, ofWidget: widget.id) }
+                Divider()
+                ForEach(Appearance.palette, id: \.hex) { color in
+                    Button(color.name) { appearance.setColor(color.hex, ofWidget: widget.id) }
+                }
+            }
             Button(host.layoutEditing ? "Done Editing Layout" : "Edit Layout", systemImage: "square.and.pencil") {
                 withAnimation(.snappy(duration: 0.2)) { host.layoutEditing.toggle() }
             }
             Divider()
             Button("Remove", systemImage: "trash", role: .destructive) { try? host.dashboard.remove(widget.id) }
+    }
+}
+
+/// A widget with its own colour uses it as its accent too (charts, badges, selection).
+private struct WidgetTint: ViewModifier {
+    let color: Color?
+
+    func body(content: Content) -> some View {
+        if let color { content.tint(color) } else { content }
     }
 }
 

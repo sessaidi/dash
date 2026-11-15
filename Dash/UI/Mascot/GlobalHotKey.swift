@@ -44,6 +44,11 @@ final class GlobalHotKey {
 final class DashAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Light or dark as chosen in Settings › Appearance, before the first window shows.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { Appearance.shared.apply() }
+    }
+
     /// Preferences are saved a moment after they change; save what's pending before quitting.
     func applicationWillTerminate(_ notification: Notification) {
         (DashDefaults.shared as? DatabaseDefaults)?.flush()

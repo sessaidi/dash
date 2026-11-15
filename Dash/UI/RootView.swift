@@ -545,6 +545,7 @@ struct DashboardGrid: View {
     var showsHome = false
     @Environment(ExtensionHost.self) private var host
     @Query private var widgets: [WidgetRecord]
+    @State private var appearance = Appearance.shared
 
     init(pageID: UUID, editing: Bool = false, showsHome: Bool = false) {
         self.pageID = pageID
@@ -603,6 +604,8 @@ struct DashboardGrid: View {
         }
         .onExitCommand { if editing { stopEditing() } }
         .contextMenu { PageBackgroundMenu() }
+        // The page colour from Settings › Appearance, behind the widgets.
+        .background { if let page = appearance.page { page.ignoresSafeArea() } }
     }
 
     private func stopEditing() {

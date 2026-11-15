@@ -62,6 +62,7 @@ struct DashApp: App {
                 }
             }
                 .frame(minWidth: 1180, minHeight: 720)
+                .dashAccent()
                 .task {
                     // The boot runs once per launch (the task restarts if the window is recreated).
                     guard !testing, boot.steps.isEmpty else { return }
@@ -98,6 +99,7 @@ struct DashApp: App {
 
         Window("Debug", id: "debug") {
             DebugWindow()
+                .dashAccent()
                 .environment(host)
                 .environment(host.settings)
                 .environment(chat)
@@ -117,6 +119,7 @@ struct DashApp: App {
 
         Settings {
             SettingsView()
+                .dashAccent()
                 .environment(host)
                 .environment(host.settings)
                 .modelContainer(host.container)
