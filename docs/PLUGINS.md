@@ -169,6 +169,24 @@ struct BoardPreview: View {
 anything that changes things, `writesRemotely` for anything that writes to another service
 (Dash never gives those to Dashii or agents).
 
+**Fetchers** (`DataFetcher`, DashKit 2.3): Dashii and agents never call a service; they read
+Dash's database (datasets, the knowledge graph). An integration declares what it can fetch into
+the database on request; Dashii asks with `data_fetch`, then reads what was stored:
+
+```swift
+var fetchers: [DataFetcher] {
+    [DataFetcher(name: "confluence.pages", summary: "Pages mentioning words, stored as docs in the knowledge graph.",
+                 properties: ["query": JSONSchema.string("Words to look for.")], required: ["query"]) { input in
+        let stored = try await self.syncPages(matching: input["query"]?.string ?? "")
+        return ["stored": .number(Double(stored)), "read_with": "knowledge search, kind doc"]
+    }]
+}
+```
+
+Store what you fetch (SwiftData models, `knowledge` entities, datasets) and return a short
+receipt: what landed and where to read it. New tools read the database; anything that needs
+fresh data goes through a fetcher.
+
 **Functions** (`DashiiFunction<Input, Output>`): one job Dashii does for you, typed. The
 instructions and output schema live in one place; the input is encoded for you (JSON, or
 `CompactFormat` for row-heavy input); the answer is decoded, checked, asked for once more with

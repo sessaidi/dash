@@ -2,7 +2,7 @@ import Foundation
 
 /// The SDK version plugins are built against. Plugins declare the minimum they need.
 public enum DashKitInfo {
-    public static let version = "2.2.0"
+    public static let version = "2.3.0"
 
     /// The major version: a plugin must be built for this one (a new major breaks the ABI).
     public static var major: Int { Int(version.split(separator: ".").first ?? "") ?? 0 }
