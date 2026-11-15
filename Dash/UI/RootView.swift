@@ -371,25 +371,28 @@ private struct Sidebar: View {
     /// One sidebar row. The icon sits at the same place in both widths; the title fades and is
     /// clipped by the row as the sidebar narrows, and the highlight shrinks with it.
     private func row(_ title: String, icon: String, key: String, tinted: Bool = false, selected: Bool = false) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 0 : 10) {
             Image(systemName: icon)
                 .font(.system(size: 16))
                 .foregroundStyle(tinted ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 .frame(width: 24, height: 22)
-            // May shrink to nothing, so a row never asks for more than the rail's width.
-            Text(title)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(minWidth: 0, alignment: .leading)
-                .opacity(compact ? 0 : 1)
+            // Gone in the icon rail, so the highlight is a square centred on the icon.
+            if !compact {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(minWidth: 0, alignment: .leading)
+                    .transition(.opacity)
+            }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, compact ? 8 : 12)
         .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: compact ? nil : .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 8)
                 .fill(selected ? AnyShapeStyle(.quaternary) : hoveredRow == key ? AnyShapeStyle(.quinary) : AnyShapeStyle(.clear))
         }
+        .frame(maxWidth: .infinity, alignment: compact ? .center : .leading)
         .clipShape(.rect(cornerRadius: 8))
         .contentShape(.rect)
         .onHover { inside in
