@@ -102,7 +102,7 @@ public struct SnapGrid<ID: Hashable & Sendable, Cell: View>: View {
     public init(
         frames: [ID: GridFrame], engine: GridEngine = GridEngine(), rowHeight: CGFloat = 40, spacing: CGFloat = 16,
         editing: Bool = true, limits: [ID: GridLimits] = [:], header: AnyView? = nil,
-        minimumColumnWidth: CGFloat = 60,
+        minimumColumnWidth: CGFloat = 40,
         onCommit: @escaping ([ID: GridFrame]) -> Void, @ViewBuilder cell: @escaping (ID) -> Cell
     ) {
         self.minimumColumnWidth = minimumColumnWidth
