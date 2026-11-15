@@ -13,8 +13,11 @@ struct VersionControlTests {
     }
 
     @discardableResult
+    /// Git for fixtures, blind to the user's global hooks and signing (a locked GPG agent would
+    /// otherwise fail the setup). Fixtures fill the bare origin by fetching into it, never pushing.
     func git(_ arguments: [String], in directory: URL) async throws -> String {
-        let output = await VCSRunner.run(try #require(VCSRunner.find("git")), arguments, in: directory)
+        let hermetic = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+        let output = await VCSRunner.run(try #require(VCSRunner.find("git")), hermetic + arguments, in: directory)
         #expect(output.ok, "git \(arguments.joined(separator: " ")): \(output.stderr)")
         return output.stdout
     }
@@ -85,11 +88,11 @@ struct VersionControlTests {
         try await git(["clone", "--quiet", origin.path, seed.path], in: root)
         for directory in [seed] { try await git(["config", "user.email", "t@x.io"], in: directory); try await git(["config", "user.name", "T"], in: directory) }
         try "one\n".write(to: seed.appending(path: "a.txt"), atomically: true, encoding: .utf8)
-        try await git(["add", "-A"], in: seed); try await git(["commit", "-qm", "one"], in: seed); try await git(["push", "-q", "origin", "main"], in: seed)
+        try await git(["add", "-A"], in: seed); try await git(["commit", "-qm", "one"], in: seed); try await git(["fetch", "-q", seed.path, "main:main"], in: origin)
         try await git(["clone", "--quiet", origin.path, clone.path], in: root)
         try await git(["config", "user.email", "t@x.io"], in: clone); try await git(["config", "user.name", "T"], in: clone)
         try "upstream\n".write(to: seed.appending(path: "b.txt"), atomically: true, encoding: .utf8)
-        try await git(["add", "-A"], in: seed); try await git(["commit", "-qm", "upstream"], in: seed); try await git(["push", "-q", "origin", "main"], in: seed)
+        try await git(["add", "-A"], in: seed); try await git(["commit", "-qm", "upstream"], in: seed); try await git(["fetch", "-q", seed.path, "main:main"], in: origin)
         return (origin, clone)
     }
 
