@@ -26,7 +26,7 @@ public struct StateView: View {
                 ProgressView()
                 Text(title).font(.callout).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         case .empty(let title, let systemImage, let message):
             unavailable(title: title, systemImage: systemImage, message: message)
         case .failed(let title, let message):
@@ -46,6 +46,8 @@ public struct StateView: View {
         } actions: {
             if let action { Button(action.title, action: action.run) }
         }
+        // Centred in whatever space it gets, whichever container it's in.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
