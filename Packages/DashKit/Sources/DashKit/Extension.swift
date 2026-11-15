@@ -28,6 +28,8 @@ public protocol DashExtension: AnyObject {
     var storagePrefix: String { get }
     var widgets: [WidgetType] { get }
     var tools: [ClaudeTool] { get }
+    /// What DashQL can read from this extension (pods, tickets, PRs…). Read-only.
+    var datasets: [QueryDataset] { get }
     /// What its background work asks Claude to do (e.g. automatic PR reviews), configurable in
     /// the extension's AI settings (`host.aiSettings(.extension(id), tasks: aiTasks)`).
     var aiTasks: [AITask] { get }
@@ -79,6 +81,7 @@ extension DashExtension {
     public var secrets: SecretStore? { secretKeys.isEmpty ? nil : SecretStore(extensionID: id) }
     public var storagePrefix: String { id }
     public var widgets: [WidgetType] { [] }
+    public var datasets: [QueryDataset] { [] }
     public var tools: [ClaudeTool] { [] }
     public func settingsView() -> AnyView { AnyView(EmptyView()) }
     public func start(host: any ExtensionContext) {}
