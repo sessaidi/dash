@@ -191,9 +191,10 @@ final class ExtensionHost: ExtensionContext {
         }
     }
 
-    /// Tools from enabled extensions whose integrations are all connected.
+    /// Tools from enabled extensions whose integrations are all connected, minus the ones that
+    /// write remotely: Claude only ever reads from remote systems.
     var availableTools: [ClaudeTool] {
-        extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools)
+        extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools).filter { !$0.writesRemotely }
     }
 
     func isEnabled(_ item: any DashExtension) -> Bool {

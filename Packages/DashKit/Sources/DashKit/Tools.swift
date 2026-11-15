@@ -8,16 +8,28 @@ public struct ClaudeTool {
     public let inputSchema: JSONValue
     /// Tools that write to an outside system or delete data ask the user first.
     public var requiresApproval: Bool
+    /// Tools that change a remote system (a forge, a tracker, a cluster). Dash never gives them
+    /// to Claude: remotely it may only read.
+    public var writesRemotely: Bool
     public let run: @MainActor (JSONValue) async throws -> JSONValue
 
     public init(
         name: String, description: String, properties: [String: JSONValue] = [:], required: [String] = [],
         requiresApproval: Bool = false, run: @escaping @MainActor (JSONValue) async throws -> JSONValue
     ) {
+        self.init(name: name, description: description, properties: properties, required: required,
+                  requiresApproval: requiresApproval, writesRemotely: false, run: run)
+    }
+
+    public init(
+        name: String, description: String, properties: [String: JSONValue] = [:], required: [String] = [],
+        requiresApproval: Bool = false, writesRemotely: Bool, run: @escaping @MainActor (JSONValue) async throws -> JSONValue
+    ) {
         self.name = name
         self.description = description
         self.inputSchema = ["type": "object", "properties": .object(properties), "required": .array(required.map { .string($0) })]
-        self.requiresApproval = requiresApproval
+        self.requiresApproval = requiresApproval || writesRemotely
+        self.writesRemotely = writesRemotely
         self.run = run
     }
 

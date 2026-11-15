@@ -16,7 +16,8 @@ private final class WatchExtension: DashExtension {
     func start(host: any ExtensionContext) {}
     var tools: [ClaudeTool] {
         [ClaudeTool(name: "watch_status", description: "Status.") { _ in "ok" },
-         ClaudeTool(name: "watch_restart", description: "Restart.", requiresApproval: true) { _ in "done" }]
+         ClaudeTool(name: "watch_restart", description: "Restart.", requiresApproval: true) { _ in "done" },
+         ClaudeTool(name: "watch_comment", description: "Comment remotely.", writesRemotely: true) { _ in "posted" }]
     }
     var agents: [AgentDefinition] {
         [AgentDefinition(id: "sre", name: "Watch SRE", summary: "Watches.", role: "SRE", specialities: ["Kubernetes"],
@@ -54,6 +55,11 @@ struct AgentsTests {
         defer { host.clearAIChoices(.extension("watch")) }
         #expect(hub.isEnabled(entry) && hub.interval(entry) == 10)
         #expect(AgentHub.tools(for: entry.agent, in: host).map(\.name) == ["watch_status"])
+        // Remote writes never reach Claude, not even an acting agent or the chat.
+        let acting = AgentDefinition(id: "fix", name: "Fixer", summary: "", instructions: "x", integrations: ["watch"], access: .actWithApproval)
+        #expect(AgentHub.tools(for: acting, in: host).map(\.name) == ["watch_status", "watch_restart"])
+        #expect(!host.availableTools.contains { $0.name == "watch_comment" })
+        #expect(watch.tools.last?.requiresApproval == true)
 
         let skipped = try await hub.run("watch.sre", reason: "manual")
         #expect(skipped.status == .skipped && skipped.summary == "All healthy.")
