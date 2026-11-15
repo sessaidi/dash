@@ -16,7 +16,7 @@ There are two kinds, and features build on integrations:
   Board, Agents, Zoom.
 
 The first-party plugins live in the [dash-registry](https://github.com/sessaidi/dash-registry)
-repository (locally `~/code/dash-registry`), which is also a Marketplace registry.
+repository, which is also a Marketplace registry.
 
 ## Tutorials
 

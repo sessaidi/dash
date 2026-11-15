@@ -22,9 +22,10 @@ tests pass. [Tutorial 2](2-widget.md) builds a widget on top of it, and
 
 - macOS 26 and Xcode 26, with Dash running on the same Mac.
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) and Python 3.
-- Two checkouts side by side: the plugin registry at `~/code/dash-registry`, and Dash at
-  `~/code/perso/dash` (plugins build against its `Packages/DashKit`). If your Dash checkout is
-  elsewhere, change the `DashKit: { path: … }` line in your plugin's `project.yml`.
+- Two checkouts side by side: the [plugin registry](https://github.com/sessaidi/dash-registry)
+  and [Dash](https://github.com/sessaidi/dash) as `dash` next to it (plugins build against its
+  `Packages/DashKit`). If your Dash checkout is elsewhere, set `DASH_ROOT` to it, or write its
+  path in a `.dash-root` file at the registry's root.
 
 All commands run from the registry's folder. Two scripts do the building:
 
