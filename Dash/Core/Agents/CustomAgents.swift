@@ -151,7 +151,8 @@ final class AgentsStudio: DashExtension {
                        properties: ["id": JSONSchema.string("Agent id."), "limit": JSONSchema.integer("How many (default 5).")],
                        required: ["id"]) { input in
                 let request = try input.toolInput(ReportsInput.self)
-                let reports = AgentHub.shared.reports(request.id, limit: min(request.limit ?? 5, 30))
+                let id = AgentHub.shared.entry(request.id)?.id ?? request.id
+                let reports = AgentHub.shared.reports(id, limit: min(request.limit ?? 5, 30))
                 return try JSONValue.parse(String(decoding: JSONEncoder().encode(reports), as: UTF8.self))
             },
         ]

@@ -89,7 +89,14 @@ final class AgentHub {
         return host.extensions.filter { host.isEnabled($0) }.flatMap { owner in owner.agents.map { Entry(owner: owner, agent: $0) } }
     }
 
-    func entry(_ id: String) -> Entry? { entries.first { $0.id == id } }
+    /// An agent by its id ("acme-board.triage"), else by its name when only one agent has it
+    /// ("PR nudger": custom agents' ids are UUIDs nobody types).
+    func entry(_ id: String) -> Entry? {
+        let all = entries
+        if let exact = all.first(where: { $0.id == id }) { return exact }
+        let named = all.filter { $0.agent.name.caseInsensitiveCompare(id) == .orderedSame }
+        return named.count == 1 ? named[0] : nil
+    }
 
     /// The agents Dashii can ask (scheduled or not), one line each, for its prompt; nil when there are none.
     var catalog: String? {
@@ -152,8 +159,9 @@ final class AgentHub {
 
     /// Runs an agent now and stores its report. With a `question` (Dashii delegating to it), the
     /// precheck can't skip the run: what it saw becomes context, and the report answers the question.
-    func run(_ id: String, reason: String, question: String? = nil) async throws -> AgentReport {
-        guard let host, let entry = entry(id) else { throw ToolError("No agent \(id) (is its extension enabled?).") }
+    func run(_ name: String, reason: String, question: String? = nil) async throws -> AgentReport {
+        guard let host, let entry = entry(name) else { throw ToolError("No agent \(name) (is its extension enabled?).") }
+        let id = entry.id
         guard !running.contains(id) else { throw ToolError("\(entry.agent.name) is already running.") }
         running.insert(id)
         defer { running.remove(id) }
