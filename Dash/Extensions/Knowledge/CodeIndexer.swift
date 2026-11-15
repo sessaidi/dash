@@ -119,6 +119,19 @@ struct CodeIndexer: Sendable {
             callEdges += Self.resolveCalls(from: id, names: names, index: index, imports: imports, root: root.path)
         }
         try await store.replaceCallEdges(from: Set(callers.keys), callEdges)
+        // Inheritance: a changed type's supertypes and protocols, resolved to types of the repository.
+        var inheritEdges: [KnowledgeEdge] = []
+        for file in changed {
+            for (id, symbol) in zip(file.symbolIDs, file.parsed.symbols) where !symbol.inherits.isEmpty {
+                for name in symbol.inherits {
+                    let targets = (index[name] ?? []).filter { $0 != id && !$0.contains("#" + name + ".") }
+                    let sameFile = targets.filter { Self.path(ofSymbol: $0, root: root.path) == file.path }
+                    let chosen = !sameFile.isEmpty ? sameFile : targets.count <= 2 ? targets : []
+                    for target in chosen { inheritEdges.append(KnowledgeEdge(src: id, dst: target, kind: "inherits", weight: 1 / Double(chosen.count), source: "code")) }
+                }
+            }
+        }
+        try await store.upsert(inheritEdges)
         try await store.setMeta("calls-v2:" + repoID, "1")
 
 

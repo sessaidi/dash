@@ -122,3 +122,22 @@ struct KnowledgeAnalysisTests {
         #expect(touched.contains { $0["symbol"] == "Route" && $0["change"] == "body" })
     }
 }
+
+/// Supertypes become `inherits` edges, walked by knowledge_hierarchy.
+@MainActor
+struct KnowledgeHierarchyTests {
+    @Test func hierarchyFollowsInheritance() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "dash-hierarchy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "protocol Shape {}\nclass Base: Shape {}\nfinal class Circle: Base {\n    func area() -> Double { 0 }\n}\n"
+            .write(to: root.appending(path: "Shapes.swift"), atomically: true, encoding: .utf8)
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "hierarchy-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        _ = try await KnowledgeExtension.index(root.path, store: store, history: false)
+        let tools = Dictionary(uniqueKeysWithValues: knowledge.tools.map { ($0.name, $0) })
+        let up = try await tools["knowledge_hierarchy"]!.run(["id": .string("sym:\(root.path)/Shapes.swift#Circle")])
+        #expect(up.array?.compactMap { $0["name"]?.string } == ["Base", "Shape"])
+        let down = try await tools["knowledge_hierarchy"]!.run(["id": .string("sym:\(root.path)/Shapes.swift#Shape"), "direction": "down"])
+        #expect(down.array?.compactMap { $0["name"]?.string } == ["Base", "Circle"])
+    }
+}
