@@ -247,8 +247,9 @@ final class AgentHub {
         // DashQL is read-only, so every agent can query; `dash` reaches the same tools, no more.
         // Skills are guidance, so every agent may read and load them (not save or delete).
         let skills = Skills.tools(host: host).filter { ["skills_list", "skill_use"].contains($0.name) }
-        // Functions are reads with a smaller model; a run gets a few.
-        let allowed = DashQL.tools(host: host) + skills + FunctionTools.tools(host: host, limit: 6) + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
+        // Functions are reads with a smaller model; a run gets a few. Fetching asks integrations
+        // to refresh the database, which is all an agent ever reads.
+        let allowed = DashQL.tools(host: host) + skills + FunctionTools.tools(host: host, limit: 6) + FetchTools.tools(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
             owner.tools.filter { !$0.writesRemotely && agent.allows(tool: $0.name, from: owner.id, requiresApproval: $0.requiresApproval) }
         }
         let dash = DashiiTool(
