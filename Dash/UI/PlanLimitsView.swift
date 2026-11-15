@@ -27,7 +27,7 @@ struct PlanLimitsSection: View {
         } header: {
             Text("Plan limits")
         } footer: {
-            Text("From Claude Code's /usage, read in its own folder (Library/Application Support/Dash/claude-status). No model call, no cost.")
+            Text("From the engine's /usage, read in its own folder (Library/Application Support/Dash/claude-status). No model call, no cost.")
         }
         .task { if usage.limits == nil { await usage.refreshLimits(executable: executable) } }
     }

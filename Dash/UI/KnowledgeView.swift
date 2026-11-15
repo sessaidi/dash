@@ -295,10 +295,10 @@ struct KnowledgeSettings: View {
             } header: {
                 Text("Repositories")
             } footer: {
-                Text("Indexed on this Mac: Swift, Go, TypeScript/JavaScript, Python, Rust, Kotlin and Java. Nothing leaves it except what Claude reads below.")
+                Text("Indexed on this Mac: Swift, Go, TypeScript/JavaScript, Python, Rust, Kotlin and Java. Nothing leaves it except what Dashii reads below.")
             }
             Section {
-                Toggle("Let Claude study the code in the background", isOn: $knowledge.understand)
+                Toggle("Let Dashii study the code in the background", isOn: $knowledge.understand)
                 Stepper("\(knowledge.understandBudget) directories per pass", value: $knowledge.understandBudget, in: 1...30)
                     .disabled(!knowledge.understand)
                 Stepper("A pass every \(knowledge.understandHours) h", value: $knowledge.understandHours, in: 1...48)
@@ -306,7 +306,7 @@ struct KnowledgeSettings: View {
             } header: {
                 Text("Understanding")
             } footer: {
-                Text("Claude reads one directory at a time (declarations, imports, README) and notes what it's for, changed and larger directories first. Model and effort: the AI tab.")
+                Text("Dashii reads one directory at a time (declarations, imports, README) and notes what it's for, changed and larger directories first. Model and effort: the AI tab.")
             }
             Section {
                 if !knowledge.counts.isEmpty {
@@ -364,7 +364,7 @@ private struct RepositoryRow: View {
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             .fixedSize()
                     }
-                    .help("Claude has studied \(coverage.studied) of \(coverage.directories) directories")
+                    .help("Dashii has studied \(coverage.studied) of \(coverage.directories) directories")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,7 +382,7 @@ private struct RepositoryRow: View {
                     }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
-                    .help("Study more: Claude reads the next 10 directories (uses Claude usage)")
+                    .help("Study more: Dashii reads the next 10 directories (uses Dashii usage)")
                 }
             }
             .frame(width: 22)
@@ -404,7 +404,7 @@ private struct SummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("What Claude understood", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.secondary)
+            Label("What Dashii understood", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.secondary)
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let title):

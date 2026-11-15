@@ -14,7 +14,7 @@ struct DebugWindow: View {
     @State private var tick = 0
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Claude", extensions = "Extensions"
+        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Dashii", extensions = "Extensions"
         var id: String { rawValue }
         var icon: String {
             switch self {

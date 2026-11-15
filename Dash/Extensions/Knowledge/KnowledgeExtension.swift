@@ -510,7 +510,7 @@ final class KnowledgeExtension: DashExtension {
         memoryTools + [
             DashiiTool(
                 name: "knowledge_search",
-                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Claude's notes. Start here to locate anything.",
+                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), concepts, tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes. Start here to locate anything.",
                 properties: ["query": JSONSchema.string("Words or a name, e.g. \"renew subscription\" or \"UserService\"."),
                              "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "concept", "ticket", "pr", "agent", "meeting", "note", "person"]),
                              "limit": JSONSchema.integer("Max results (default 20).")],
@@ -570,7 +570,7 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_overview",
-                description: "The indexed repositories with Claude's overview of each and of their top-level directories, plus graph size. Call first when asked about a project as a whole.",
+                description: "The indexed repositories with Dashii's overview of each and of their top-level directories, plus graph size. Call first when asked about a project as a whole.",
                 properties: [:]
             ) { [weak self] _ in
                 guard let store = self?.store else { return nil }
@@ -615,7 +615,7 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_add_repository",
-                description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Claude usage). Give a local path, a folder name found by knowledge_find_repos, or GitHub owner/name: a local checkout is used if there is one, otherwise it's cloned into the code folder with the user's git credentials. Then knowledge_learn can study it.",
+                description: "Add a repository to the knowledge graph and index it (structure, symbols, history; no Dashii usage). Give a local path, a folder name found by knowledge_find_repos, or GitHub owner/name: a local checkout is used if there is one, otherwise it's cloned into the code folder with the user's git credentials. Then knowledge_learn can study it.",
                 properties: ["repository": JSONSchema.string("A path, a folder name, or owner/name.")],
                 required: ["repository"], requiresApproval: true
             ) { [weak self] input in
@@ -669,7 +669,7 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_context",
-                description: "Everything the graph knows that's relevant to a question, in one call: the best matching concepts, directories (with Claude's notes), files and symbols, each with the summary of where it lives. Use it to ground an answer about how the code works before reading files.",
+                description: "Everything the graph knows that's relevant to a question, in one call: the best matching concepts, directories (with Dashii's notes), files and symbols, each with the summary of where it lives. Use it to ground an answer about how the code works before reading files.",
                 properties: ["question": JSONSchema.string("The question, in plain words."), "limit": JSONSchema.integer("How many matches (default 12).")],
                 required: ["question"]
             ) { [weak self] input in
@@ -679,7 +679,7 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_status",
-                description: "The state of the knowledge graph per repository: files and symbols indexed, how much Claude has studied, whether git history is linked, when it was last indexed. Use it to tell the user what Knowledge can answer well.",
+                description: "The state of the knowledge graph per repository: files and symbols indexed, how much Dashii has studied, whether git history is linked, when it was last indexed. Use it to tell the user what Knowledge can answer well.",
                 properties: [:]
             ) { [weak self] _ in
                 guard let self, let store else { return nil }
@@ -698,7 +698,7 @@ final class KnowledgeExtension: DashExtension {
             },
             DashiiTool(
                 name: "knowledge_learn",
-                description: "Have Claude study more of the code now (directories not yet understood or changed since), improving later answers. Costs Claude usage.",
+                description: "Have Dashii study more of the code now (directories not yet understood or changed since), improving later answers. Costs Dashii usage.",
                 properties: ["directories": JSONSchema.integer("How many directories (default 5, max 20)."),
                              "repo": JSONSchema.string("Optional repository id to focus on.")],
                 requiresApproval: true
@@ -784,7 +784,7 @@ final class KnowledgeExtension: DashExtension {
         }
         let unstudied = ranked.contains { ($0.kind == "file" || $0.kind == "symbol") && $0.summary.isEmpty }
         return ["question": .string(question), "matches": .array(results),
-                "note": unstudied ? "Some matches are in code Claude hasn't studied yet; knowledge_learn on that repository improves answers." : .null]
+                "note": unstudied ? "Some matches are in code Dashii hasn't studied yet; knowledge_learn on that repository improves answers." : .null]
     }
 
     /// The relation read from the other end: "calls" seen from the callee is "called_by".

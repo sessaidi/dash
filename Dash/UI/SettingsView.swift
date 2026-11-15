@@ -10,7 +10,7 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var host = host
         TabView(selection: $host.settingsTab) {
-            Tab("Claude", systemImage: "sparkles", value: "claude") {
+            Tab("Dashii", systemImage: "sparkles", value: "claude") {
                 SegmentedPane(selection: $host.claudeSection, segments: [("setup", "Setup"), ("usage", "Usage")]) { section in
                     if section == "usage" { UsageView() } else { ClaudeSettings() }
                 }
@@ -67,13 +67,13 @@ private struct ClaudeSettings: View {
                     if let cli = settings.claudeExecutable {
                         Label("Found \(cli.path)", systemImage: "checkmark.circle").foregroundStyle(.green)
                     } else {
-                        Label("Claude Code not found — install it or set its path", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Label("Dashii's engine (Claude Code) not found — install it or set its path", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
                 }
             } header: {
-                Text("Claude Code")
+                Text("Engine")
             } footer: {
-                Text("Chat, PR reviews, meeting summaries, agents and plugins all run on Claude Code with your Claude login (claude /login). Dash turns off Claude Code's own tools, settings and hooks for these sessions and offers its own tools instead.")
+                Text("Dashii (chat, PR reviews, meeting summaries, agents and plugins) runs on Claude Code with your login (claude /login). Dash turns off the engine's own tools, settings and hooks and gives Dashii only Dash's tools.")
             }
             Section {
                 Picker("Model", selection: $settings.model) {
@@ -82,7 +82,7 @@ private struct ClaudeSettings: View {
                 Picker("Effort", selection: $settings.effort) {
                     ForEach(AppSettings.efforts, id: \.self) { Text($0) }
                 }
-                Toggle("Ask before Claude posts to GitHub or Jira, starts agents, or deletes", isOn: $settings.confirmWrites)
+                Toggle("Ask before Dashii posts to GitHub or Jira, starts agents, or deletes", isOn: $settings.confirmWrites)
                 Toggle(isOn: $settings.compactTools) {
                     Text("Work through DashQL statements")
                     Text("Dashii gets one `dash` tool instead of every tool: fewer tokens per message, same abilities and approvals.")
@@ -132,7 +132,7 @@ private struct ExtensionList: View {
     private var list: some View {
             Form {
                 section(.integration, "Integrations", footer: "Connect an account. Turning one off hides its tools and pauses the features that require it.")
-                section(.feature, "Features", footer: "Build on integrations: widgets, Claude tools, agents. Turning one off keeps its data and settings.")
+                section(.feature, "Features", footer: "Build on integrations: widgets, Dashii tools, agents. Turning one off keeps its data and settings.")
                 if !host.extensionErrors.isEmpty {
                     Section("Problems") {
                         ForEach(host.extensionErrors, id: \.self) { Text($0).foregroundStyle(.red).font(.callout) }
@@ -345,7 +345,7 @@ private struct DebugSettings: View {
                 Button("Open Debug Window") { openWindow(id: "debug") }
                     .disabled(!settings.debugMode)
             } footer: {
-                Text("Debug mode logs every HTTP request and Claude Code turn, and adds the Debug window (logs, activity, network, Claude, extensions, diagnostics export) to the sidebar and the Debug menu (⌥⌘D).")
+                Text("Debug mode logs every HTTP request and Dashii turn, and adds the Debug window (logs, activity, network, Dashii, extensions, diagnostics export) to the sidebar and the Debug menu (⌥⌘D).")
             }
             SecretsSection()
             Section("Logs") {
@@ -374,7 +374,7 @@ struct ClaudeStatusSection: View {
                 if let org = auth.orgName { LabeledContent("Organization", value: org) }
                 if let method = auth.authMethod { LabeledContent("Signed in with", value: method) }
             }
-            if let version = usage.version { LabeledContent("Claude Code", value: version) }
+            if let version = usage.version { LabeledContent("Engine", value: version) }
             if let error = usage.error { Text(error).foregroundStyle(.red).font(.callout) }
             HStack {
                 if let refreshed = usage.refreshedAt {

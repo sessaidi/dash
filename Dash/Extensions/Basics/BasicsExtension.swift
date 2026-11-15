@@ -24,13 +24,13 @@ final class BasicsExtension: DashExtension {
             return (try? host?.context.fetch(FetchDescriptor<ClaudeCall>(predicate: #Predicate { $0.date >= start && $0.date < end }))) ?? []
         }
         return [
-            ActivitySeries(id: "claude.tokens", title: "Claude tokens", unit: "tokens", systemImage: "sparkles") { interval in
+            ActivitySeries(id: "claude.tokens", title: "Dashii tokens", unit: "tokens", systemImage: "sparkles") { interval in
                 ActivitySeries.sumPerDay(calls(interval).map { ($0.date, Double($0.inputTokens + $0.outputTokens + $0.cacheWriteTokens)) }, in: interval)
             },
-            ActivitySeries(id: "claude.requests", title: "Claude requests", unit: "requests", systemImage: "bubble.left.and.bubble.right") { interval in
+            ActivitySeries(id: "claude.requests", title: "Dashii requests", unit: "requests", systemImage: "bubble.left.and.bubble.right") { interval in
                 ActivitySeries.countPerDay(calls(interval).map(\.date), in: interval)
             },
-            ActivitySeries(id: "claude.cost", title: "Claude cost (USD)", unit: "USD", systemImage: "dollarsign.circle") { interval in
+            ActivitySeries(id: "claude.cost", title: "Dashii cost (USD)", unit: "USD", systemImage: "dollarsign.circle") { interval in
                 ActivitySeries.sumPerDay(calls(interval).map { ($0.date, $0.costUSD) }, in: interval)
             },
         ]
@@ -72,8 +72,8 @@ struct ClaudeUsageWidget: DashboardWidget {
     struct Config: Codable, Equatable, Sendable {}
 
     static let kind = "claude.usage"
-    static let displayName = "Claude Usage"
-    static let summary = "Your Claude plan's limits (usage credits or session and weekly limits), /usage for the last 24 hours, and what Dash spent today."
+    static let displayName = "Dashii Usage"
+    static let summary = "Your plan's limits (usage credits or session and weekly limits), /usage for the last 24 hours, and what Dash spent today."
     static let systemImage = "gauge.with.dots.needle.33percent"
     static let defaultSize = WidgetSize.small
     static let sizeLimits = GridLimits(minW: 3, minH: 4, maxW: 8, maxH: 10)
@@ -115,7 +115,7 @@ private struct ClaudeUsageWidgetView: View {
             if usage.refreshedAt == nil, let error = usage.error {
                 StateView(.failed(message: error), action: ("Retry", { Task { await usage.refresh(executable: settings.claudeExecutable) } }))
             } else if usage.refreshedAt == nil {
-                StateView(.loading("Reading Claude Code status…"))
+                StateView(.loading("Reading Dashii status…"))
             } else {
                 ClaudeUsageSummary(account: usage.auth?.loggedIn == true ? usage.auth?.email : nil, plan: usage.auth?.subscriptionType?.capitalized,
                                    requests: window?.requests, sessions: window?.sessions,

@@ -110,8 +110,8 @@ enum HookTrigger: Codable, Hashable {
         case .schedule(let time, let weekdays):
             "At \(time) on \(weekdays.count == 7 ? "every day" : weekdays.sorted() == [2, 3, 4, 5, 6] ? "weekdays" : weekdays.sorted().map { Calendar.current.shortWeekdaySymbols[($0 - 1) % 7] }.joined(separator: ", "))"
         case .launch: "When Dash starts"
-        case .beforeTool(let name): "Before Claude runs \(name)"
-        case .afterTool(let name): "After Claude ran \(name)"
+        case .beforeTool(let name): "Before Dashii runs \(name)"
+        case .afterTool(let name): "After Dashii ran \(name)"
         case .query(let query, let minutes, _): "When `\(query.count > 60 ? String(query.prefix(60)) + "…" : query)` finds something new (every \(minutes) min)"
         }
     }

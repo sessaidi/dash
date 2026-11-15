@@ -193,11 +193,11 @@ final class AgentHub {
         for try await message in query(prompt, options: options) {
             guard case .result(let result) = message else { continue }
             ClaudeUsage.shared.record(source: "agent.\(entry.id)", model: options.model ?? host.settings.model, effort: options.effort, result: result)
-            if result.isError { throw ToolError("Claude Code: \(result.result ?? result.subtype)") }
+            if result.isError { throw ToolError("Dashii: \(result.result ?? result.subtype)") }
             let text = result.structuredOutput?.line ?? result.result ?? ""
             return try AgentReport.parse(text, agentID: entry.id, startedAt: started, reason: reason, costUSD: result.totalCostUSD)
         }
-        throw ToolError("Claude Code ended without a report.")
+        throw ToolError("Dashii ended without a report.")
     }
 
     /// The tools an agent may use: the ones it names and those of its integrations, minus the

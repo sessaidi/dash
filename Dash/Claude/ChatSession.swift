@@ -138,7 +138,7 @@ final class ChatSession {
         if case .deny(let reason) = await HookEngine.shared.beforeTool(tool.name, input: input) { return reason }
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
-                icon: "sparkles", title: "Claude wants to run \(tool.name)", message: Self.summary(of: tool.description),
+                icon: "sparkles", title: "Dashii wants to run \(tool.name)", message: Self.summary(of: tool.description),
                 details: [.init(title: "Input", text: input.jsonString(pretty: true))])
             if !approved { return "The user declined this action." }
         }
@@ -291,7 +291,7 @@ final class ChatSession {
         }
         if tool.requiresApproval, host.settings.confirmWrites {
             let approved = await host.permissions.ask(
-                icon: "sparkles", title: "Claude wants to run \(call.name)", message: Self.summary(of: tool.description),
+                icon: "sparkles", title: "Dashii wants to run \(call.name)", message: Self.summary(of: tool.description),
                 details: [.init(title: "Input", text: call.input.jsonString(pretty: true))])
             guard approved else { return ("The user declined this action.", true) }
         }
@@ -353,7 +353,7 @@ final class ChatSession {
                 Task { if await memory.learn(from: exchange) > 0 { self.host.ext(KnowledgeExtension.self)?.bump() } }
             }
             if result.isError, result.subtype != "error_during_execution" {
-                notice("Claude Code: \(result.result ?? result.subtype)", isError: true)
+                notice("Dashii: \(result.result ?? result.subtype)", isError: true)
             } else if result.subtype == "error_during_execution" {
                 notice("Stopped.", isError: false)
             }
@@ -403,7 +403,7 @@ final class ChatSession {
             codeTurn = nil
         }
         if code === session { code = nil }
-        codeTurn?.resume(throwing: ToolError("Claude Code exited."))
+        codeTurn?.resume(throwing: ToolError("Dashii stopped."))
         codeTurn = nil
     }
 
@@ -441,7 +441,7 @@ final class ChatSession {
         case .result(let result):
             let usage = result.usage?.dash ?? .null
             trace.append(ClaudeTraceEntry(
-                date: codeStarted, model: "\(host.settings.model) via Claude Code", stopReason: result.subtype,
+                date: codeStarted, model: host.settings.model, stopReason: result.subtype,
                 inputTokens: usage["input_tokens"]?.int ?? 0, outputTokens: usage["output_tokens"]?.int ?? 0,
                 cacheReadTokens: usage["cache_read_input_tokens"]?.int ?? 0, cacheWriteTokens: usage["cache_creation_input_tokens"]?.int ?? 0,
                 toolCalls: [], milliseconds: result.durationMS, error: result.isError ? (result.result ?? result.subtype) : nil))

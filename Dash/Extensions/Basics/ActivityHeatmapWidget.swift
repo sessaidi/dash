@@ -15,7 +15,7 @@ struct ActivityHeatmapWidget: DashboardWidget {
 
     static let kind = "activity.heatmap"
     static let displayName = "Activity Heatmap"
-    static let summary = "A calendar heatmap of commits, worktrees, PRs, tickets, meetings, agent runs or Claude usage per day."
+    static let summary = "A calendar heatmap of commits, worktrees, PRs, tickets, meetings, agent runs or Dashii usage per day."
     static let systemImage = "square.grid.3x3.middle.filled"
     static let defaultSize = WidgetSize.wide
     static let sizeLimits = GridLimits(minW: 6, minH: 5, maxW: 12, maxH: 10)

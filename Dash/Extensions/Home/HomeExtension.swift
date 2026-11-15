@@ -12,7 +12,7 @@ final class HomeExtension: DashExtension {
     let id = "home"
     let name = "Home"
     let systemImage = "house"
-    let metadata = ExtensionMetadata(version: "1.0.0", summary: "A welcome, an ask bar, suggestions from your plugins and a daily brief from Claude.",
+    let metadata = ExtensionMetadata(version: "1.0.0", summary: "A welcome, an ask bar, suggestions from your plugins and a daily brief from Dashii.",
                                      category: .productivity, homepage: "https://github.com/sessaidi/dash")
 
     struct BriefItem: Codable, Hashable, Identifiable {
@@ -176,7 +176,7 @@ private struct HomeSettings: View {
             }
             Section("Home page") {
                 Toggle("Suggestions from your plugins and activity", isOn: $home.showsSuggestions)
-                Toggle("Daily brief from Claude", isOn: $home.showsBrief)
+                Toggle("Daily brief from Dashii", isOn: $home.showsBrief)
                 Toggle("Write the brief automatically each morning", isOn: $home.autoBrief)
                     .disabled(!home.showsBrief)
             }

@@ -113,7 +113,7 @@ final class ClaudeUsage {
         do {
             let limits = try await ClaudeCodeStatus.planLimits(executable: executable, folder: Self.statusFolder)
             self.limits = limits
-            limitsError = limits.meters.isEmpty ? "Claude Code's /usage showed no plan limits." : nil
+            limitsError = limits.meters.isEmpty ? "Dashii's /usage showed no plan limits." : nil
         } catch {
             limitsError = error.localizedDescription
         }

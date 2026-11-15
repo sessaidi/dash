@@ -34,7 +34,7 @@ struct VersionControlSettings: View {
             } header: {
                 Text("Preferences")
             } footer: {
-                Text("Claude reads these before changing a repository (vcs_preferences), and the update tools follow them.")
+                Text("Dashii reads these before changing a repository (vcs_preferences), and the update tools follow them.")
             }
 
             Section {

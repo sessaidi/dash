@@ -198,7 +198,7 @@ private struct UsageCard: View {
     private var usage: ClaudeUsage { .shared }
 
     var body: some View {
-        HomeCard(icon: "gauge.with.dots.needle.33percent", title: "Claude usage", action: {
+        HomeCard(icon: "gauge.with.dots.needle.33percent", title: "Dashii usage", action: {
             host.settingsTab = "claude"
             host.claudeSection = "usage"
             host.openManagerWindow?()
@@ -314,7 +314,7 @@ private struct BriefCard: View {
             } else if let error = home.briefError {
                 Text(error).font(.callout).foregroundStyle(.red)
             } else {
-                Text("Let Claude propose today's work from your role, your focus and what's waiting on your dashboard.")
+                Text("Let Dashii propose today's work from your role, your focus and what's waiting on your dashboard.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }

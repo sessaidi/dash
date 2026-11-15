@@ -49,7 +49,7 @@ struct ChatPanel: View {
                     .frame(width: 30, height: 26)
                 Text(host.persona.name).font(.headline)
             }
-            Text("\(settings.model) · Claude Code").font(.caption).foregroundStyle(.secondary)
+            Text(DashiiModel(rawValue: settings.model)?.displayName ?? settings.model).font(.caption).foregroundStyle(.secondary)
             Spacer()
             Button("History", systemImage: "clock.arrow.circlepath") { showingHistory.toggle() }
                 .labelStyle(.iconOnly)
@@ -87,7 +87,7 @@ struct ChatPanel: View {
     private var missingKeyBanner: some View {
         HStack {
             Image(systemName: "terminal").foregroundStyle(.orange)
-            Text("Install Claude Code (or set its path) to chat.").font(.callout)
+            Text("Set up Dashii's engine (Settings › AI) to chat.").font(.callout)
             Spacer()
             SettingsLink { Text("Settings…") }
         }

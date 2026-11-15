@@ -12,7 +12,7 @@ final class JujutsuIntegration: Integration {
     let id = "jj"
     let name = "Jujutsu"
     let systemImage = "point.topleft.down.to.point.bottomright.curvepath"
-    let metadata = ExtensionMetadata(version: "1.0.0", summary: "Local jj repositories: changes, diffs, operation log and bookmarks for Claude, plus new changes and rebases the way you prefer.",
+    let metadata = ExtensionMetadata(version: "1.0.0", summary: "Local jj repositories: changes, diffs, operation log and bookmarks for Dashii, plus new changes and rebases the way you prefer.",
                                      category: .sourceControl, homepage: "https://github.com/sessaidi/dash")
 
     private(set) var executable: String?

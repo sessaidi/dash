@@ -41,11 +41,11 @@ struct UsageView: View {
             } header: {
                 Text("Dash's requests")
             } footer: {
-                Text("Every Claude Code request Dash makes (chat, PR reviews, plugin tasks), kept in Dash's database. Costs are Claude Code's estimates at API prices; on a Claude subscription they count toward your plan's limits rather than a bill. Agents run their own Claude Code sessions and aren't included.")
+                Text("Every Dashii request Dash makes (chat, PR reviews, plugin tasks), kept in Dash's database. Costs are the engine's estimates at API prices; on a Dashii subscription they count toward your plan's limits rather than a bill. Agents run their own Dashii sessions and aren't included.")
             }
 
             if calls.isEmpty {
-                Section { Text("No Claude requests in this period.").foregroundStyle(.secondary) }
+                Section { Text("No Dashii requests in this period.").foregroundStyle(.secondary) }
             } else {
                 Section("Cost per day, by model") {
                     Chart(daily(calls), id: \.id) { point in

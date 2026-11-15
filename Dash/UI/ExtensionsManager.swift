@@ -162,10 +162,10 @@ private struct Overview: View {
                     .help(tool.description)
                 }
             } header: {
-                Text("Claude tools")
+                Text("Dashii tools")
             } footer: {
                 if !host.unmetRequirements(of: item).isEmpty || !host.isEnabled(item) {
-                    Text("Claude can't use these until the feature is on and its integrations are connected.")
+                    Text("Dashii can't use these until the feature is on and its integrations are connected.")
                 }
             }
         }

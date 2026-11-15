@@ -15,7 +15,7 @@ struct WorkspaceAnalyticsWidget: DashboardWidget {
 
     static let kind = "workspace.analytics"
     static let displayName = "Workspace Analytics"
-    static let summary = "Claude activity as a calendar heatmap (tokens, cost or requests per day), with the peak day, totals, streak and top sources."
+    static let summary = "Dashii activity as a calendar heatmap (tokens, cost or requests per day), with the peak day, totals, streak and top sources."
     static let systemImage = "square.grid.3x3.square"
     static let defaultSize = WidgetSize.wide
     static let sizeLimits = GridLimits(minW: 6, minH: 5, maxW: 12, maxH: 10)

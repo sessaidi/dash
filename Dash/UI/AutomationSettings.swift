@@ -79,8 +79,8 @@ struct RulesEditor: View {
                     Text(selection == "global" ? "Rules for every conversation" : "Rules for \(scopes.first { $0.id == selection }?.name ?? selection)")
                 } footer: {
                     Text(selection == "global"
-                         ? "Claude follows these everywhere: the chat, plugin tasks, hooks. Like a CLAUDE.md for Dash."
-                         : "Claude follows these whenever this plugin's tools or AI tasks are used.")
+                         ? "Dashii follows these everywhere: the chat, plugin tasks, hooks. Like a CLAUDE.md for Dash."
+                         : "Dashii follows these whenever this plugin's tools or AI tasks are used.")
                 }
             }
             .formStyle(.grouped)
@@ -247,7 +247,7 @@ struct HooksEditor: View {
                     .id(hook.id)
             } else {
                 ContentUnavailableView("No hook selected", systemImage: "bolt",
-                                       description: Text("Hooks run something when an event happens, on a schedule, when Dash starts, or around Claude's tool calls."))
+                                       description: Text("Hooks run something when an event happens, on a schedule, when Dash starts, or around Dashii's tool calls."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -365,8 +365,8 @@ private struct HookForm: View {
             Text("Watch: a query finds something new").tag(TriggerKind.query)
             Text("On a schedule").tag(TriggerKind.schedule)
             Text("Dash starts").tag(TriggerKind.launch)
-            Text("Before Claude runs a tool").tag(TriggerKind.beforeTool)
-            Text("After Claude ran a tool").tag(TriggerKind.afterTool)
+            Text("Before Dashii runs a tool").tag(TriggerKind.beforeTool)
+            Text("After Dashii ran a tool").tag(TriggerKind.afterTool)
         }
         switch hook.trigger {
         case .event(let kind, let source, let contains, let criticalOnly):
@@ -406,7 +406,7 @@ private struct HookForm: View {
             Stepper("Every \(minutes) min", value: Binding(get: { minutes }, set: { hook.trigger = .query(query: query, everyMinutes: $0, key: key) }), in: 1...240)
             TextField("Rows are the same when", text: Binding(get: { key ?? "" }, set: { hook.trigger = .query(query: query, everyMinutes: minutes, key: $0.isEmpty ? nil : $0) }),
                       prompt: Text("a field, e.g. name or key (empty: the whole row)"))
-            Text("Dash runs the query itself, without Claude, and fires only for rows it hasn't seen before; the first check just takes note of what's there. Easier: ask Dashii to set up a watcher.")
+            Text("Dash runs the query itself, without Dashii, and fires only for rows it hasn't seen before; the first check just takes note of what's there. Easier: ask Dashii to set up a watcher.")
                 .font(.caption).foregroundStyle(.secondary)
         case .launch:
             Text("Runs each time Dash opens.").foregroundStyle(.secondary)
@@ -461,7 +461,7 @@ private struct HookForm: View {
             case .tool: hook.action = .tool(name: host.availableTools.first?.name ?? "", input: "{}")
             case .shell: hook.action = .shell(command: "")
             case .agent: hook.action = .agent(id: AgentHub.shared.entries.first?.id ?? "", context: "{{count}} new: {{rows}}")
-            case .requireApproval: hook.action = .requireApproval(message: "Claude wants to run {{tool.name}}.")
+            case .requireApproval: hook.action = .requireApproval(message: "Dashii wants to run {{tool.name}}.")
             case .block: hook.action = .block(message: "Not allowed by the user's hook.")
             }
         })
@@ -530,7 +530,7 @@ private struct HookForm: View {
         case .requireApproval(let message):
             TextField("Message", text: Binding(get: { message }, set: { hook.action = .requireApproval(message: $0) }))
         case .block(let message):
-            TextField("Reason told to Claude", text: Binding(get: { message }, set: { hook.action = .block(message: $0) }))
+            TextField("Reason told to Dashii", text: Binding(get: { message }, set: { hook.action = .block(message: $0) }))
         }
     }
 

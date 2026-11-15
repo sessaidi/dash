@@ -39,7 +39,7 @@ struct ClaudeCodeBackendTests {
         // The fake echoes the prompt: the activity digest leads it, the user's text ends it.
         #expect(texts.contains { $0.hasPrefix("echo: <dashboard-activity>") && $0.contains("Created page “Home”") && $0.hasSuffix("hello") })
         #expect(!chat.isRunning)
-        #expect(chat.trace.last?.model.contains("Claude Code") == true)
+        #expect(chat.trace.last?.model == host.settings.model)
     }
 
     /// Dashii and Dash agents get no shell, and remote-writing commands are denied on top.

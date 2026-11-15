@@ -12,7 +12,7 @@ final class GitIntegration: Integration {
     let id = "git"
     let name = "Git"
     let systemImage = "arrow.triangle.branch"
-    let metadata = ExtensionMetadata(version: "1.0.0", summary: "Local git repositories: status, history, diffs, blame and search for Claude, plus branch updates the way you prefer.",
+    let metadata = ExtensionMetadata(version: "1.0.0", summary: "Local git repositories: status, history, diffs, blame and search for Dashii, plus branch updates the way you prefer.",
                                      category: .sourceControl, homepage: "https://github.com/sessaidi/dash")
 
     private(set) var executable: String?

@@ -63,11 +63,11 @@ struct ClaudeCodeService: DashiiService {
             guard case .result(let result) = message else { continue }
             DashLog.info("Claude Code \(options.model ?? settings.model) \(result.subtype) turns=\(result.numTurns) cost=$\(String(format: "%.4f", result.totalCostUSD)) in \(Int(Date().timeIntervalSince(started) * 1000))ms", category: "claude")
             ClaudeUsage.shared.record(source: source ?? "plugin", model: options.model ?? settings.model, effort: options.effort, result: result)
-            if result.isError { throw ToolError("Claude Code: \(result.result ?? result.subtype)") }
+            if result.isError { throw ToolError("Dashii: \(result.result ?? result.subtype)") }
             if let structured = result.structuredOutput { return structured.line }
             return result.result ?? ""
         }
-        throw ToolError("Claude Code ended without a result.")
+        throw ToolError("Dashii ended without a result.")
     }
 }
 
