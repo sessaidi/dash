@@ -182,7 +182,16 @@ final class AgentHub {
         }
         let report: AgentReport
         do {
-            report = try await claude(entry, reason: reason, question: question, context: context, started: started)
+            do {
+                report = try await claude(entry, reason: reason, question: question, context: context, started: started)
+            } catch is ToolsNotConnected {
+                // Once more: a run without its tools would report on nothing.
+                DashLog.error("\(entry.id): Dash's tools didn't connect; retrying", category: "agents")
+                report = try await claude(entry, reason: reason, question: question, context: context, started: started)
+            }
+        } catch is ToolsNotConnected {
+            report = AgentReport(agentID: id, startedAt: started, reason: reason, status: .failed,
+                                 summary: "Dash's tools didn't connect to the agent twice in a row, so it didn't run. Try again in a moment.")
         } catch {
             report = AgentReport(agentID: id, startedAt: started, reason: reason, status: .failed, summary: error.localizedDescription)
         }
@@ -219,6 +228,10 @@ final class AgentHub {
                 + "Answer it in the report's summary, plainly and with the evidence; findings are the problems you found while answering."
         }
         for try await message in query(prompt, options: options) {
+            // Without Dash's tools the agent has nothing to check: stop rather than report on nothing.
+            if case .system(let system) = message, system.subtype == "init", let status = system.mcpServers["dash"], status != "connected" {
+                throw ToolsNotConnected()
+            }
             guard case .result(let result) = message else { continue }
             ClaudeUsage.shared.record(source: "agent.\(entry.id)", model: options.model ?? host.settings.model, effort: options.effort, result: result)
             if result.isError { throw ToolError("Dashii: \(result.result ?? result.subtype)") }
@@ -314,3 +327,6 @@ final class AgentHub {
         return ((try? host.context.fetch(descriptor)) ?? []).map(\.report)
     }
 }
+
+/// An agent run whose Dash tools (the in-process MCP server) didn't connect.
+struct ToolsNotConnected: Error {}
