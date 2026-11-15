@@ -271,6 +271,8 @@ public protocol ExtensionContext: AnyObject, Sendable {
     func runAgent(_ id: String, reason: String) async throws -> AgentReport
     /// An agent's latest reports, newest first: what widgets show.
     func agentReports(_ id: String, limit: Int) -> [AgentReport]
+    /// The mirror of online data that integrations sync and features read.
+    var synced: any SyncedStore { get }
 }
 
 extension ExtensionContext {
@@ -288,6 +290,9 @@ extension ExtensionContext {
     }
 
     public func agentReports(_ id: String, limit: Int) -> [AgentReport] { [] }
+
+    /// Default for hosts without a persisted mirror (test fakes): one in memory per process.
+    public var synced: any SyncedStore { DefaultSynced.store }
 
     /// Default for hosts without saved choices (test fakes): ignored.
     public func setAIChoice(_ choice: AITaskChoice?, task: String, scope: AIScope) {}

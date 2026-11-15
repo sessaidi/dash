@@ -35,6 +35,9 @@ public final class TestHost: ExtensionContext, @unchecked Sendable {
     public var permissions: any PermissionAsking { testPermissions }
     public var claude: any ClaudeService { testClaude }
     public let activity = ActivityLog()
+    /// The mirror of online data, in memory.
+    public let testSynced = MemorySyncedStore()
+    public var synced: any SyncedStore { testSynced }
     /// Extension ids treated as turned off.
     public var disabled: Set<String> = []
     /// AI choices per scope, as the user would set them in an AI tab.

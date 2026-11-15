@@ -94,6 +94,9 @@ final class ExtensionHost: ExtensionContext {
     @ObservationIgnored let inMemory: Bool
     @ObservationIgnored private(set) var dashboard: DashboardStore!
     @ObservationIgnored weak var chat: ChatSession?
+    /// The mirror of online data integrations sync and features read.
+    @ObservationIgnored private(set) lazy var syncedMirror = SyncedMirror(host: self)
+    var synced: any SyncedStore { syncedMirror }
     /// Containers replaced when a hot-installed plugin grew the schema, kept so their models stay valid.
     @ObservationIgnored private var retiredContainers: [ModelContainer] = []
 
@@ -116,7 +119,7 @@ final class ExtensionHost: ExtensionContext {
     /// store is a lightweight migration, so hot-installed plugins can grow the schema.
     static func makeContainer(models: [any PersistentModel.Type], inMemory: Bool) throws -> ModelContainer {
         let schema = Schema([WidgetRecord.self, DashboardPage.self, SidebarSection.self, ClaudeCall.self,
-                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self] + models)
+                             AutomationRule.self, AutomationCommand.self, AutomationHook.self, HookRun.self, StoredSecret.self, ChatConversation.self, SyncedRecordModel.self] + models)
         let configuration = inMemory
             ? ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             : ModelConfiguration(schema: schema, url: try storeURL())
