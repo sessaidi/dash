@@ -76,6 +76,8 @@ final class ChatSession {
     private(set) var live: [ChatEntry] = []
     private(set) var isRunning = false
     var isPanelVisible = true
+    /// Text put in the composer for the user to finish (a started request); the panel takes it.
+    var pendingDraft: String?
     /// The conversation on screen, saved after every turn.
     private(set) var conversationID: UUID?
 

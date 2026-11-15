@@ -363,4 +363,10 @@ final class ExtensionHost: ExtensionContext {
         chat?.isPanelVisible = true
         chat?.send(prompt)
     }
+
+    /// Starts a request in the chat's composer for the user to finish and send.
+    func draftForClaude(_ text: String) {
+        chat?.isPanelVisible = true
+        chat?.pendingDraft = text
+    }
 }

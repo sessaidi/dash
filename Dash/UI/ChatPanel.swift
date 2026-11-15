@@ -134,6 +134,13 @@ struct ChatPanel: View {
                 .lineLimit(1...8)
                 .focused($composerFocused)
                 .onSubmit(submit)
+                // A request started elsewhere (Filter with Dashii…): put it here to finish.
+                .onChange(of: chat.pendingDraft, initial: true) { _, text in
+                    guard let text else { return }
+                    draft = text
+                    chat.pendingDraft = nil
+                    composerFocused = true
+                }
             if chat.isRunning {
                 Button("Stop", systemImage: "stop.circle.fill") { chat.stop() }
                     .labelStyle(.iconOnly)

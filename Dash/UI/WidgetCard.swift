@@ -11,7 +11,6 @@ struct WidgetCard: View {
     /// The widget's menu shows when the pointer is over it (no card to anchor it otherwise).
     @State private var hovering = false
     @State private var dashiiLooking = false
-    @State private var queryOpen = false
 
     var body: some View {
         let type = host.widgetType(widget.kind)
@@ -33,15 +32,10 @@ struct WidgetCard: View {
                     guard !editing else { return }
                     withAnimation(.snappy(duration: 0.2)) { host.layoutEditing = true }
                 }
-                if !editing, let type, !type.queryFields.isEmpty {
-                    QueryBarButton(widget: widget, fields: type.queryFields, open: $queryOpen)
-                        .opacity(hovering || queryOpen || !widget.query.isEmpty ? 1 : 0)
+                if !editing, let type, !widget.query.isEmpty {
+                    FilterChip(widget: widget, fields: type.queryFields)
                 }
                 if !editing { menu.opacity(hovering ? 1 : 0) }
-            }
-            if queryOpen, let type, !editing {
-                QueryBar(widget: widget, fields: type.queryFields) { queryOpen = false }
-                    .transition(.move(edge: .top).combined(with: .opacity))
             }
             Group {
                 if let owner = host.owner(ofWidget: widget.kind), !host.isEnabled(owner) {
@@ -137,6 +131,11 @@ struct WidgetCard: View {
             Button("Ask Dashii", systemImage: "bubble.left") {
                 host.askClaude("Read widget \"\(widget.title)\" (id \(widget.id.uuidString)) and tell me what stands out.")
             }
+            if host.widgetType(widget.kind)?.queryFields.isEmpty == false {
+                Button("Filter with Dashii…", systemImage: "line.3.horizontal.decrease.circle") {
+                    host.draftForClaude("Filter “\(widget.title)” to show ")
+                }
+            }
             Picker("Size Preset", selection: Binding(get: { widget.size }, set: { try? host.dashboard.update(widget.id, size: $0) })) {
                 ForEach(WidgetSize.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }
@@ -195,86 +194,32 @@ private struct DragWhenEditing: ViewModifier {
     }
 }
 
-/// The widget's query in its header: a chip with the query when one is set, a magnifier otherwise.
-private struct QueryBarButton: View {
+/// What Dashii filtered the widget to, in plain words; clear it or ask Dashii to change it.
+/// The DashQL behind it is only in the tooltip: the user talks to Dashii, not in queries.
+private struct FilterChip: View {
     let widget: WidgetRecord
     let fields: [QueryDataset.Field]
-    @Binding var open: Bool
-
-    var body: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.2)) { open.toggle() }
-        } label: {
-            if widget.query.isEmpty {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-            } else {
-                Label(widget.query, systemImage: "line.3.horizontal.decrease.circle.fill")
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 220)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.tint.opacity(0.15), in: .capsule)
-            }
-        }
-        .buttonStyle(.borderless)
-        .help(widget.query.isEmpty ? "Filter with DashQL" : "DashQL: \(widget.query)")
-    }
-}
-
-/// Edits the widget's DashQL query: Return applies, Escape closes, errors show inline.
-private struct QueryBar: View {
-    let widget: WidgetRecord
-    let fields: [QueryDataset.Field]
-    let close: () -> Void
     @Environment(ExtensionHost.self) private var host
-    @State private var text = ""
-    @State private var error: String?
-    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
-                TextField(example, text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.callout.monospaced())
-                    .focused($focused)
-                    .onSubmit(apply)
-                    .onExitCommand(perform: close)
-                if !widget.query.isEmpty {
-                    Button("Clear", systemImage: "xmark.circle.fill") { text = ""; apply() }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
-                }
+        let summary = (try? WidgetQuery(widget.query, fields: fields))??.summary ?? widget.query
+        Menu {
+            Button("Change Filter…", systemImage: "bubble.left") {
+                host.draftForClaude("Change the filter on “\(widget.title)” (now: \(summary)) to show ")
             }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(error == nil ? AnyShapeStyle(.clear) : AnyShapeStyle(.red.opacity(0.6))))
-            if let error {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
-            } else {
-                Text("Fields: " + fields.map { $0.name }.joined(separator: ", ") + ". Then | sort -field | take 20.")
-                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-            }
+            Button("Show Everything", systemImage: "xmark.circle") { try? host.dashboard.setQuery(widget.id, "") }
+        } label: {
+            Label(summary, systemImage: "line.3.horizontal.decrease.circle.fill")
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .onAppear {
-            text = widget.query
-            focused = true
-        }
-    }
-
-    private var example: String {
-        let field = fields.first { $0.type == "string" }?.name ?? fields.first?.name ?? "field"
-        return "\(field):value  … | sort -\(fields.first { $0.type == "number" }?.name ?? field) | take 20"
-    }
-
-    private func apply() {
-        do {
-            try host.dashboard.setQuery(widget.id, text)
-            error = nil
-            close()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: 260)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(.tint.opacity(0.14), in: .capsule)
+        .help("Filtered by \(host.persona.name): \(summary)\n\(widget.query)")
     }
 }

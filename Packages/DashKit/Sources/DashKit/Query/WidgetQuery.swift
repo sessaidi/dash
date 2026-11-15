@@ -40,6 +40,67 @@ public struct WidgetQuery: Sendable {
         return await apply(to: rows).compactMap { $0["__index"]?.int }.compactMap { items.indices.contains($0) ? items[$0] : nil }
     }
 
+    /// The query in plain words for the user ("namespace contains papi-eu · restarts over 3 ·
+    /// worst restarts first · top 20"): they ask Dashii in words and read this, not DashQL.
+    public var summary: String {
+        query.stages.map(Self.describe).filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    static func describe(_ stage: DashQuery.Stage) -> String {
+        switch stage {
+        case .filter(let expression): describe(expression)
+        case .search(let text): "mentions “\(text)”"
+        case .sort(let keys): "sorted by " + keys.map { "\(words($0.field))\($0.descending ? " (highest first)" : "")" }.joined(separator: ", then ")
+        case .take(let count): "first \(count)"
+        case .select(let fields): "showing " + fields.map { words($0.field) }.joined(separator: ", ")
+        case .distinct(let fields): "one per " + fields.map(words).joined(separator: ", ")
+        case .summarize(_, let by): by.isEmpty ? "summarised" : "grouped by " + by.map(words).joined(separator: ", ")
+        case .join: ""
+        }
+    }
+
+    static func describe(_ expression: QueryExpr) -> String {
+        switch expression {
+        case .and(let a, let b): "\(describe(a)) · \(describe(b))"
+        case .or(let a, let b): "\(describe(a)) or \(describe(b))"
+        case .not(.isNull(let field)): "has \(words(field))"
+        case .not(let inner): "not (\(describe(inner)))"
+        case .isNull(let field): "no \(words(field))"
+        case .text(let text): "mentions “\(text)”"
+        case .inList(let field, let values): "\(words(field)) is \(values.map(value).joined(separator: " or "))"
+        case .between(let field, let low, let high): "\(words(field)) between \(value(low)) and \(value(high))"
+        case .compare(let field, let op, let literal):
+            switch op {
+            case .equal: "\(words(field)) is \(value(literal))"
+            case .notEqual: "\(words(field)) isn't \(value(literal))"
+            case .greater: "\(words(field)) over \(value(literal))"
+            case .greaterOrEqual: "\(words(field)) at least \(value(literal))"
+            case .less: "\(words(field)) under \(value(literal))"
+            case .lessOrEqual: "\(words(field)) at most \(value(literal))"
+            case .contains: "\(words(field)) contains \(value(literal))"
+            case .notContains: "\(words(field)) doesn't contain \(value(literal))"
+            case .matches: "\(words(field)) matches \(value(literal))"
+            }
+        }
+    }
+
+    private static func words(_ field: String) -> String {
+        field.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: ".", with: " ")
+    }
+
+    private static func value(_ value: QueryValue) -> String {
+        switch value {
+        case .string(let text): text
+        case .number(let number): number.rounded() == number ? String(Int(number)) : String(number)
+        case .bool(let flag): flag ? "yes" : "no"
+        case .null: "empty"
+        case .me: "me"
+        case .date(let date):
+            abs(date.timeIntervalSinceNow) < 86_400 * 7
+                ? date.formatted(.relative(presentation: .named)) : date.formatted(date: .abbreviated, time: .omitted)
+        }
+    }
+
     /// Who `me` is for widget queries; set by the host.
     @MainActor public static var me: [String] = []
 }
