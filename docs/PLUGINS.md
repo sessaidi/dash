@@ -1,15 +1,15 @@
 # The Dash plugin SDK
 
-Everything in Dash beyond the dashboard, Claude and the Marketplace is a **plugin**: a
-`.dashplugin` bundle compiled against **DashKit**. Plugins install while Dash runs (no rebuild,
-no relaunch) and keep working across Dash updates.
+Everything in Dash beyond the dashboard, Dashii (the assistant) and the Marketplace is a
+**plugin**: a `.dashplugin` bundle compiled against **DashKit 2**. Plugins install while Dash runs
+(no rebuild, no relaunch) and keep working across Dash updates of the same major version.
 
 There are two kinds, and features build on integrations:
 
 - An **integration** holds an account or a local service: credentials in the Keychain, an
   authenticated `IntegrationConnection`, a status, and non-secret `exports`. Examples: GitHub,
   Atlassian, AWS, Google Cloud, Docker, Kubernetes.
-- A **feature** adds widgets, Claude tools, AI tasks and background work. It declares the
+- A **feature** adds widgets, Dashii tools, AI tasks and background work. It declares the
   integrations it `requires` (or uses when present, `optional`) and reaches them only through
   DashKit (`host.integration("github")?.connection`), never by importing another plugin. So
   anyone can write a feature on top of anyone's integration. Examples: Pull Requests, Jira
@@ -28,44 +28,43 @@ scripts/new-plugin.py Standup --feature --requires atlassian,github --author "Ad
 TEST=1 scripts/build-plugins.sh Weather                         # build, test, zip, index
 ```
 
-`new-plugin.py` writes a complete, passing plugin:
-
-| File | What |
-|---|---|
-| `project.yml` | XcodeGen project: the `.dashplugin` bundle and its test target |
-| `Info.plist`, `plugin.json` | Bundle info; registry metadata (name, kind, icon, description, requires, provides, author) |
-| `Sources/<Name>Plugin.swift` | The entry point (below) |
-| `Sources/<Name>Integration.swift` | Integration: token in the Keychain, connection, status, settings view, a `_get` tool |
-| `Sources/<Name>Feature.swift` | Feature: a widget with a sample preview and size limits, a tool, an AI task |
-| `Tests/…` | Swift Testing tests using `DashKitTesting` |
-
 **Try it live:** copy `build/<Name>/Build/Products/Release/<Name>Plugin.dashplugin` into
 `~/Library/Application Support/Dash/Plugins`. Dash notices it, asks you to load it, and starts
-it right away. Its widgets appear in the widget gallery and its tools reach Claude.
+it right away. Its widgets appear in the widget gallery and its tools reach Dashii.
 
-## How Dash loads plugins
+## Layout
 
-- **Install from the Marketplace:** Dash downloads the zip at the registry's pinned commit,
-  refuses it if its SHA-256 differs from `registry.json`, checks `DashKitMinimumVersion`, puts
-  the bundle in the Plugins folder, approves that exact build and **loads it immediately**.
-- **Drop into the Plugins folder:** Dash asks before loading anything it hasn't approved
-  (approval is pinned to the executable's SHA-256; a changed binary asks again).
-- **Data:** a plugin's SwiftData models join the store. When a hot-loaded plugin brings new
-  models, Dash grows the store's schema on the spot (adding models is a lightweight migration).
-- **Update or remove:** Swift code can't be unloaded, so a plugin that's already loaded stops
-  right away (its background work and tools go quiet) and the new build, or its absence, takes
-  effect at the next launch. Dash says so and offers to relaunch.
-- **Compatibility:** DashKit is built with library evolution, so a plugin built against an older
-  DashKit keeps loading in newer Dash builds. DashKit's public API only grows.
+One folder per concern, one widget per folder:
+
+```
+plugins/Tickets/
+├── project.yml, Info.plist, plugin.json
+├── Rules/tickets.md                 what Dashii follows when your tools run (Markdown)
+├── Sources/
+│   ├── TicketsPlugin.swift          entry point
+│   ├── TicketsFeature.swift         the DashExtension: ids, settings, start/stop
+│   ├── Tools/                       DashiiTools, DashiiFunctions
+│   ├── Query/                       DashQL datasets and verbs
+│   ├── Widgets/Board/
+│   │   ├── BoardWidget.swift        manifest: kind, names, sizes, Config, configSchema, actions
+│   │   ├── BoardProvider.swift      WidgetDataProvider: Config → Snapshot
+│   │   ├── BoardSnapshot.swift      plain Sendable data, with a sample for previews
+│   │   └── BoardView.swift          renders a Snapshot, picks a layout from WidgetSizeClass
+│   └── Presets.swift                hook presets
+└── Tests/
+```
+
+Views never fetch: they render a snapshot, so the gallery preview, tests and the real widget
+share one view. Write one view that adapts to `WidgetSizeClass` (compact, regular, large)
+rather than one view per size; split a size into its own file only when its layout really differs.
 
 ## Entry point
 
 ```swift
 import DashKit
 
-@objc(WeatherDashPlugin)                 // NSPrincipalClass in Info.plist (informational)
-final class WeatherPlugin: DashPlugin {
-    override class func makeExtensions() -> [any DashExtension] { [WeatherFeature()] }
+enum WeatherPlugin {
+    @MainActor static func makeExtensions() -> [any DashExtension] { [WeatherFeature()] }
 }
 
 /// What Dash calls when it loads the bundle.
@@ -78,13 +77,28 @@ public func dashPluginEntry() -> UnsafeMutableRawPointer {
 One plugin may return several extensions (Docker returns its integration and its Containers
 feature).
 
+## How Dash loads plugins
+
+- **Install from the Marketplace:** Dash downloads the zip at the registry's pinned commit,
+  refuses it if its SHA-256 differs from `registry.json`, checks `DashKitMinimumVersion`, puts
+  the bundle in the Plugins folder, approves that exact build and **loads it immediately**.
+  Newly installed plugins start turned off; the user turns them on.
+- **Drop into the Plugins folder:** Dash asks before loading anything it hasn't approved
+  (approval is pinned to the executable's SHA-256; a changed binary asks again).
+- **Data:** a plugin's SwiftData models join the store. When a hot-loaded plugin brings new
+  models, Dash grows the store's schema on the spot (adding models is a lightweight migration).
+- **Update or remove:** Swift code can't be unloaded, so a plugin that's already loaded stops
+  right away (its background work and tools go quiet) and the new build, or its absence, takes
+  effect at the next launch. Dash says so and offers to relaunch.
+
 ## The API (DashKit)
 
 **Every extension** (`DashExtension`): `id`, `name`, `systemImage`, `metadata` (version, author,
 summary, category, tags, links, `minimumDashKit`), `requires`/`optional`, `models`, `secretKeys`
-and `secrets` (Keychain), `preferences` (UserDefaults under its id), `widgets`, `tools`,
-`aiTasks`, `settingsView()`, `start(host:)`, `prepare(host:)` (awaited at launch while the
-splash shows progress), `stop()`.
+and `secrets` (`SecretStore`, Keychain; `legacy` lists older account names to read), `preferences`
+(UserDefaults under its id), `widgets`, `tools`, `aiTasks`, `datasets`, `verbs`, `hookPresets`,
+`settingsView()`, `start(host:)`, `prepare(host:)` (awaited at launch while the splash shows
+progress), `stop()`.
 
 **Integrations** add `isConnected`, `connectionState` (use `state(error:configured:account:)`),
 `connection` (`IntegrationConnection`: base URL, headers, extra hosts, per-request `sign`, a
@@ -92,68 +106,100 @@ custom `session` or `transport`) and `exports`.
 
 **The host** (`ExtensionContext`, passed to `start` and in `WidgetContext.host`): the shared
 SwiftData `context`, the other `extensions` (`host.integration(id)`, `host.ext(Type.self)`),
-`permissions` (the permission modal), `claude` (Claude Code with the user's login),
-`activity` (what Claude reads before each turn), `askClaude`, `openManager`, `addWidget`, and
-`aiSettings(scope, tasks:)`.
+`permissions` (`ask(PermissionPrompt)`, the permission modal), `dashii` (`DashiiService`),
+`activity` (what Dashii reads before each turn; `onEmit` returns an `ActivitySubscription` to
+cancel in `stop()`), `askDashii`, `openManager`, `addWidget`, and `aiSettings(scope, tasks:)`.
 
-**Widgets** (`DashboardWidget`): a typed `Config` (JSON for Claude, with a `configSchema`),
-`content`, optional `settings`, `snapshot` (what Claude reads), `defaultSize`, `sizeLimits`
-(`GridLimits` in cells: 12 columns, 40 pt rows), `aiTasks`, and `preview(config:)`: a view drawn
-from sample data for the widget gallery and Settings. A preview must not touch the network,
-accounts or local services; without one Dash shows a neutral placeholder.
+### Widgets
 
-**Claude tools** (`ClaudeTool`): a name, description, JSON-schema properties, and
-`requiresApproval` for anything that writes or costs.
+`DashboardWidget`: a typed `Config` (JSON for Dashii, with a `configSchema`), `content`, optional
+`settings`, `snapshot` (what Dashii reads), `defaultSize`, `sizeLimits` (`GridLimits` in cells:
+12 columns, 40 pt rows), `aiTasks`, `actions` (what Dashii may do to it: temporary UI state),
+`queryFields` (what its DashQL filter bar knows), and `preview(config:)`: a view drawn from
+sample data for the gallery and Settings. A preview must not touch the network, accounts or
+local services.
 
-**AI tasks** (`AITask`): declare what you ask Claude to do, the models that suit it
-(`ClaudeModel`), efforts, an optional on/off switch, and prompt templates with `{{variables}}`.
-Dash shows them in an **AI** tab (per widget, or per extension in Settings). Run them with:
+Load data with a **`WidgetDataProvider`** and render it with **`ProvidedWidget`**, which handles
+the first load, refreshes while the widget is on screen and the app is active, loading and
+failure states, Retry, and a stale badge when a reload failed (the last snapshot stays):
 
 ```swift
-let settings = host.aiSettings(.extension(id), tasks: aiTasks)
-let prompt = settings.render("summarize", "prompt", ["count": "3"])
-let text = try await host.claude.complete(task: "summarize", settings: settings, system: "…", prompt: prompt)
+struct BoardProvider: WidgetDataProvider {
+    let host: any ExtensionContext
+    var refresh: WidgetRefresh { .every(.seconds(120)) }
+    func snapshot(for config: BoardConfig) async throws -> BoardSnapshot { … }
+}
+
+static func content(config: Binding<BoardConfig>, context: WidgetContext) -> some View {
+    ProvidedWidget(BoardProvider(host: context.host), config: config.wrappedValue) { snapshot, size in
+        BoardView(snapshot: snapshot, size: size)
+    }
+}
+
+static func preview(config: BoardConfig) -> some View { BoardView(snapshot: .sample, size: .regular) }
 ```
 
-**Home suggestions** (`suggestions`): what's waiting for the user right now, built from data
-you already stored (`Suggestion` with a priority, and a prompt or a link).
+### Dashii tools and functions
 
-**Automation** (`defaultRules`, `defaultCommands`, `events`): instructions Claude follows when
-your tools run, `/commands` you offer, and the activity event kinds you emit (declare every
-`emit` kind so users can build hooks on it).
+**Tools** (`DashiiTool`): a name, description, JSON-schema properties, `requiresApproval` for
+anything that changes things, `writesRemotely` for anything that writes to another service
+(Dash never gives those to Dashii or agents).
 
-**Knowledge** (`knowledge: [KnowledgeEntity]`): hand Dash's knowledge graph what you know, so
-Dashii can connect it with the code and with other plugins' data. An entity has an id
-`"<kind>:<key>"` (`ticket:PROJ-12`, `pr:acme/api#3`, `agent:<uuid>`, `meeting:<uuid>`,
-`person:<login or email>`), a title, searchable text, and typed `links`. Link to the code with
-`repo:owner/name` and `repofile:owner/name:path/in/repo.swift`: Dash resolves them to the
-user's local clones. Ticket keys in titles and text are linked for you. Read from your stored
-data only; Dash asks after each refresh and replaces what you handed in before.
+**Functions** (`DashiiFunction<Input, Output>`): one job Dashii does for you, typed. The
+instructions and output schema live in one place; the input is encoded for you (JSON, or
+`CompactFormat` for row-heavy input); the answer is decoded, checked, asked for once more with
+what was wrong, and optionally cached:
 
-**Agents** (`agents: [AgentDefinition]`): background workers with a `role`, `specialities`,
-`instructions` and a `scope` ("only the prod namespace"). They may use the tools you list and
-every tool of the `integrations` you name; `access: .readOnly` (default) hides tools that need
-approval, `.actWithApproval` allows them and the user approves each call. They run on a
-`schedule` (every N minutes and/or on event kinds) or on demand, with Claude Code and the
-model/effort the user picks in your AI tab. An optional `precheck` runs first without Claude
-and can `.skip("All healthy")`, so idle runs cost nothing. Each run ends in an `AgentReport`
-(summary, findings with info/warning/critical severity) stored in Dash's database; warning and
-critical findings emit `agent.finding`. Read reports with `host.agentReports(id, limit:)`, run
-one with `host.runAgent(id, reason:)` (ids are `"<extension id>.<agent id>"`). Users create
-their own agents in Settings › Automation › Agents with the same fields.
+```swift
+static let triage = DashiiFunction<AlertContext, Triage>(
+    name: "alerts.triage", version: 1, task: "triage",
+    instructions: "Find the most likely cause. Cite the rows you used.",
+    outputSchema: Triage.schema, model: .fast, inputFormat: .compact, cacheFor: .seconds(600),
+    check: { guard !$0.evidence.isEmpty else { throw ToolError("cite evidence") } })
 
-**Activity series** (`activitySeries: [ActivitySeries]`): counts per day you can chart (PRs
-opened, worktrees created, meetings…). The built-in Activity Heatmap widget lists every
-series; `ActivitySeries.countPerDay` and `sumPerDay` do the grouping.
+let triage = try await Self.triage.run(context, dashii: host.dashii, settings: host.aiSettings(.extension(id), tasks: aiTasks))
+```
 
-**UI** (DashKitUI): `StateView` (loading, empty, failed, needs connection), `ItemRow`,
-`MetricView`, `Badge`, `StatusDot`, `Tone`, `SecretField`, `ConnectionStatusLabel`,
-`AsyncButton`, `RelativeTime`, `DetailScaffold`, `ActivityHeatmap` (a calendar heatmap). Use
-them so plugins look like Dash.
+With `task`, the user's model and effort for that AI task apply and usage is attributed to it.
+Bump `version` when the instructions change (it's part of the cache key).
+
+**AI tasks** (`AITask`): declare what you ask Dashii to do, the models that suit it
+(`DashiiModel`: strong, balanced, fast, deep), efforts, an optional on/off switch, and prompt
+templates with `{{variables}}`. Dash shows them in an **AI** tab (per widget, or per extension).
+
+### DashQL
+
+Dashii and agents work in Dash through DashQL. Make your data and actions part of it:
+
+- **Datasets** (`QueryDataset`): rows Dashii can query (`from tickets where status = open`), with
+  typed fields and `aliases` (other words for the dataset).
+- **Verbs** (`DashQLVerb`): statements mapped to your tools, so Dashii writes
+  `ticket follow LAF-123` instead of a tool call. Words after the action fill `arguments` in
+  order; `presets` fix inputs (`ticket unfollow` is `jira_follow` with follow=false). They go
+  through the same approvals as the tool.
+
+### Automation
+
+- **Rules** (`Rules/<id>.md` in the bundle, loaded by the default `defaultRules`): instructions
+  Dashii follows when your tools or AI tasks run. Users can change them; Dashii can only propose.
+- **Hook presets** (`hookPresets`, built with `HookPresetLibrary`): ready-made watchers (a DashQL
+  query run without Dashii that fires on new rows), notifications and agent wake-ups for your data.
+- `defaultCommands` (`/commands`) and `events` (every activity kind you `emit`).
+
+### More
+
+**Home suggestions** (`suggestions`), **knowledge** (`knowledge: [KnowledgeEntity]`, ids
+`"<kind>:<key>"`, links to `repo:`/`repofile:`), **agents** (`agents: [AgentDefinition]`: role,
+instructions, scope, read-only or act-with-approval, schedule, a `precheck` that can skip idle
+runs, an `AgentReport` at the end), **activity series** (counts per day for the heatmap).
+
+**UI** (DashKitUI): `StateView`, `ItemRow`, `MetricView`, `Badge`, `StatusDot`, `Tone`,
+`SecretField`, `ConnectionStatusLabel`, `AsyncButton`, `RelativeTime`, `DetailScaffold`,
+`ActivityHeatmap`. Use them so plugins look like Dash.
 
 ## Testing (DashKitTesting)
 
-`import DashKitTesting` in your test target (it ships inside the DashKit framework):
+`import DashKitTesting` in your test target:
 
 ```swift
 @MainActor
@@ -170,59 +216,47 @@ struct WeatherTests {
 }
 ```
 
-- `TestHost`: an in-memory store for your models, `runTool`, recorded `askedClaude`,
+- `TestHost`: an in-memory store for your models, `runTool`, recorded `askedDashii`,
   `openedManager`, `addedWidgets`, `disabled` ids and `aiChoices`.
-- `TestClaude`: queued `replies`, `error`, and every call with its model and effort.
+- `TestDashii`: queued `replies`, `error`, and every call with its model, effort and source. Test
+  a `DashiiFunction` by queuing its JSON answers.
 - `TestPermissions`: `answer` and what was `asked`.
-- `TestIntegration`: a stand-in integration whose connection goes through `StubHTTP`.
-- `StubHTTP`: canned responses per host (`json:`, `routes:`, or a handler) and the requests made.
-- `TestHost.runAgent(id, reason:)`: runs an agent like Dash does (precheck, then `TestClaude`
-  with the report schema; queue the report JSON in `testClaude.replies`), and `agentReports`.
-- `knowledgeIssues(entities)`: what's wrong with what you hand the knowledge graph (ids not
-  `"<kind>:<key>"`, duplicates, empty titles, links nowhere). Expect it to be empty.
+- `TestIntegration` and `StubHTTP`: a stand-in integration whose connection goes through canned
+  responses per host.
+- `WidgetSnapshotLoader(provider:)`: run a provider without a view (`load`, `snapshot`, `isStale`).
+- `knowledgeIssues(entities)`: what's wrong with what you hand the knowledge graph.
 
-Never call real services or spawn processes in tests.
+Never call real services, spawn processes or push in tests.
 
-## Rules
+## Rules for plugin code
 
-- **Integrations fetch, features read.** An integration talks to its service (API, socket,
-  CLI) and keeps the data in Dash's database or in `exports`; features build on that data and
-  on the integration's tools, and never call the service themselves. Many features can then
-  share one integration's data, and offline features keep working.
-
-- Swift 6 with strict concurrency; extensions and views are `@MainActor`.
+- **Integrations fetch, features read.** An integration talks to its service and keeps the data
+  in Dash's database or in `exports`; features build on that data and on the integration's tools.
+- Swift 6 with strict concurrency; extensions, providers and views are `@MainActor`.
 - Integrations do everything in-process (URLSession, Security, CryptoKit, Network); no `Process`.
   Features may run local tools only when that's their purpose (Agents runs `git` and `claude`).
-- Requests go through `IntegrationConnection` (`send`, `get`), so features get auth without
-  seeing secrets.
-- Keep ids, widget kinds, tool names, model names and preference keys stable across versions:
-  users' dashboards, data and settings refer to them.
+- Requests go through `IntegrationConnection`, so features get auth without seeing secrets.
+- Keep ids, widget kinds, tool names, verbs and preference keys stable across versions.
 - A plugin runs with Dash's own access. Be explicit in the permission modal about anything
-  sensitive (`host.permissions.ask`), and mark writing tools `requiresApproval`.
+  sensitive, and mark tools `requiresApproval` / `writesRemotely` truthfully.
 
 ## Compatibility
 
-DashKit is built with library evolution: a plugin compiled against an older DashKit keeps
-loading in a newer Dash. To keep it that way, DashKit only grows:
+DashKit is built with library evolution. Within a major version it only grows: new protocol
+requirements come with defaults, new parameters with default values, public enums are switched
+with `@unknown default`, stored value types decode old data.
 
-- New protocol requirements always come with a default implementation, so existing plugins
-  don't have to change.
-- New parameters get default values; nothing public is renamed or removed (deprecate first,
-  keep it working for at least one major version).
-- Public enums are not frozen: `switch` over them with `@unknown default`.
-- Value types stored by Dash (`AgentReport`, `AgentFinding`) are `Codable`; new fields are
-  optional or defaulted so old data still decodes.
-- `DashKitInfo.version` follows semantic versioning: minor for additions, major for removals.
-  Set `DashKitMinimumVersion` to the version that introduced the newest API you use (1.2.0
-  for knowledge, agents and activity series); Dash refuses to load a plugin that needs a
-  newer DashKit than it has, instead of crashing.
+A new **major** version may break the API. Dash refuses a plugin built for another major (the
+user is told to update it from the Marketplace) and one needing a newer minor than it has. Set
+`DashKitMinimumVersion` (and `metadata.minimumDashKit`) to `2.0.0` or the minor that added the
+newest API you use.
 
 ## Publishing
 
-1. `TEST=1 scripts/build-plugins.sh <Name>` writes `dist/<id>-<version>.dashplugin.zip` and
-   regenerates `registry.json` with its SHA-256.
-2. Commit `plugins/<Name>`, the zip and `registry.json` together.
-3. Anyone can add the repository as a registry in Settings › Marketplace (`owner/name`,
+1. `TEST=1 scripts/build-plugins.sh <Name>` writes `dist/<id>-<version>.dashplugin.zip`.
+2. `python3 scripts/build-index.py` regenerates `registry.json` with its SHA-256.
+3. Commit `plugins/<Name>`, the zip and `registry.json` together.
+4. Anyone can add the repository as a registry in Settings › Marketplace (`owner/name`,
    `owner/name@branch`, or a local folder).
 
 Bump `DashPluginVersion` in `project.yml` for every release; the Marketplace offers an update
