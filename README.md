@@ -28,7 +28,7 @@ Then fill in Settings: Claude Code must be installed and logged in (`claude /log
 |---|---|
 | `Dash/Core` | Extension host, plugin loading (at launch and hot install), SwiftData dashboard store, permission center |
 | `Dash/Claude` | Messages API client (raw HTTP + SSE), stream accumulator, chat agent loop, dashboard tools |
-| `Dash/Extensions/*` | What ships in the app: Basics (Note, World Clock) and the Marketplace. Every integration and feature is a plugin in [dash-registry](~/code/dash-registry), installed from Settings › Marketplace (see docs/PLUGINS.md) |
+| `Dash/Extensions/*` | What ships in the app: Basics (Note, World Clock) and the Marketplace. Every integration and feature is a plugin in [dash-registry](https://github.com/sessaidi/dash-registry), installed from Settings › Marketplace (see docs/PLUGINS.md) |
 | `Examples/Registry` | Template registry repo (marketplace) with example integrations and features |
 | `Packages/ClaudeCodeKit` | Swift library for the Claude Code CLI, modelled on the Agent SDK: `query()`, `ClaudeCodeSession`, typed messages, `canUseTool`, interrupt |
 | `docs/PLUGINS.md` | The plugin SDK: writing, testing and publishing `.dashplugin` extensions |
