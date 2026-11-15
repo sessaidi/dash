@@ -54,10 +54,10 @@ struct AgentsTests {
         host.clearAIChoices(.extension("watch"))
         defer { host.clearAIChoices(.extension("watch")) }
         #expect(hub.isEnabled(entry) && hub.interval(entry) == 10)
-        #expect(AgentHub.tools(for: entry.agent, in: host).map(\.name) == ["watch_status"])
+        #expect(AgentHub.tools(for: entry.agent, in: host).map(\.name) == ["dashql", "dashql_schema", "watch_status"])
         // Remote writes never reach Claude, not even an acting agent or the chat.
         let acting = AgentDefinition(id: "fix", name: "Fixer", summary: "", instructions: "x", integrations: ["watch"], access: .actWithApproval)
-        #expect(AgentHub.tools(for: acting, in: host).map(\.name) == ["watch_status", "watch_restart"])
+        #expect(AgentHub.tools(for: acting, in: host).map(\.name) == ["dashql", "dashql_schema", "watch_status", "watch_restart"])
         #expect(!host.availableTools.contains { $0.name == "watch_comment" })
         #expect(watch.tools.last?.requiresApproval == true)
 

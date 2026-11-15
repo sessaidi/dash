@@ -203,7 +203,8 @@ final class AgentHub {
     /// The tools an agent may use: the ones it names and those of its integrations, minus the
     /// ones that change things when it's read-only, and never one that writes remotely.
     static func tools(for agent: AgentDefinition, in host: ExtensionHost) -> [ClaudeTool] {
-        host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
+        // DashQL is read-only, so every agent can query.
+        DashQL.tools(host: host) + host.extensions.filter { host.isEnabled($0) }.flatMap { owner in
             owner.tools.filter { !$0.writesRemotely && agent.allows(tool: $0.name, from: owner.id, requiresApproval: $0.requiresApproval) }
         }
     }

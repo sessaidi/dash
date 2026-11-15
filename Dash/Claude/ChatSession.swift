@@ -101,7 +101,7 @@ final class ChatSession {
         host.chat = self
     }
 
-    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + componentTools + host.availableTools }
+    private var tools: [ClaudeTool] { CoreTools.tools(host: host) + ViewContext.tools(host: host) + DashQL.tools(host: host) + componentTools + host.availableTools }
 
     static let systemPrompt = """
         Dash is a macOS work dashboard. It shows the user's Jira board, \
@@ -133,6 +133,10 @@ final class ChatSession {
         user message. Use them to stay \
         current and mention what matters to the question; don't recite them. Call dashboard_activity to look \
         further back.
+
+        To look things up across sources (pods, tickets, PRs, releases, monitors, activity, widgets, notes, \
+        knowledge), prefer one dashql query over many tool calls: it filters, joins and summarises in one go \
+        (dashql_schema lists the datasets).
 
         What you learned in earlier conversations arrives in <what-i-know>: use it, but the user's word and \
         live data win. When the user tells you to remember something or corrects you, call memory_remember \
