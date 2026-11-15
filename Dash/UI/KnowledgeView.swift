@@ -372,11 +372,11 @@ private struct RepositoryRow: View {
                     HStack(spacing: 8) {
                         ProgressView(value: Double(coverage.studied), total: Double(coverage.directories))
                             .progressViewStyle(.linear)
-                        Text("\(Int((Double(coverage.studied) / Double(coverage.directories) * 100).rounded()))%")
+                        Text("\(Int((Double(coverage.studied) / Double(coverage.directories) * 100).rounded()))% studied")
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             .fixedSize()
                     }
-                    .help("Dashii has studied \(coverage.studied) of \(coverage.directories) directories")
+                    .help("Dashii has read and summarised \(coverage.studied) of \(coverage.directories) directories (the code itself is always fully indexed)")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
