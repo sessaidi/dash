@@ -50,8 +50,7 @@ struct KnowledgeView: View {
                                     onOpen: { select($0, remember: true) }, onBack: back)
                         .id(selected.id)
                 } else {
-                    ContentUnavailableView("Knowledge", systemImage: knowledge.systemImage,
-                                           description: Text("Search, or ask Dashii about your projects: it reads this graph."))
+                    KnowledgeHome(knowledge: knowledge) { select($0, remember: false) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
