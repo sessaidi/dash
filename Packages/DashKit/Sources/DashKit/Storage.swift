@@ -235,28 +235,32 @@ public struct SecretKey: Hashable, Sendable {
 }
 
 /// Keychain items owned by one extension, stored as account "<extension id>.<key>".
-/// `legacy` maps a key to an account name earlier builds used, read as a fallback.
+/// `legacy` maps a key to account names earlier builds used, read in order as a fallback.
 public struct SecretStore: Sendable {
     public let extensionID: String
-    public var legacy: [String: String]
+    public var legacy: [String: [String]]
 
-    public init(extensionID: String, legacy: [String: String] = [:]) {
+    public init(extensionID: String, legacy: [String: [String]] = [:]) {
         self.extensionID = extensionID
         self.legacy = legacy
+    }
+
+    public init(extensionID: String, legacy: [String: String]) {
+        self.init(extensionID: extensionID, legacy: legacy.mapValues { [$0] })
     }
 
     public func account(_ key: String) -> String { "\(extensionID).\(key)" }
 
     public func read(_ key: String) -> String? {
-        Keychain.read(account(key)) ?? legacy[key].flatMap(Keychain.read)
+        Keychain.read(account(key)) ?? legacy[key, default: []].lazy.compactMap(Keychain.read).first
     }
 
     public func contains(_ key: String) -> Bool { read(key) != nil }
 
-    /// nil or "" removes the item (and its legacy copy).
+    /// nil or "" removes the item (and its legacy copies).
     public func write(_ key: String, _ value: String?) {
         Keychain.write(value, for: account(key))
-        if let old = legacy[key], value?.isEmpty ?? true { Keychain.write(nil, for: old) }
+        if value?.isEmpty ?? true { for old in legacy[key, default: []] { Keychain.write(nil, for: old) } }
     }
 
     public func removeAll(_ keys: [SecretKey]) {
