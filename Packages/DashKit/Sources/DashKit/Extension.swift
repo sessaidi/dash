@@ -57,6 +57,9 @@ public protocol DashExtension: AnyObject {
     /// What it knows (tickets, PRs, sessions…) for Dash's knowledge graph. Read from stored data;
     /// Dash asks after each sync cycle.
     var knowledge: [KnowledgeEntity] { get }
+    /// What it can fetch from its service into Dash's database when Dashii or an agent asks
+    /// (`data_fetch`): they read the database, never the service. See `DataFetcher`.
+    var fetchers: [DataFetcher] { get }
     /// Background agents it offers (an SRE watching clusters, a triager…). See `AgentDefinition`.
     var agents: [AgentDefinition] { get }
     /// Counts per day it can chart (the Activity Heatmap widget). See `ActivitySeries`.
@@ -87,6 +90,7 @@ extension DashExtension {
     public var defaultCommands: [CommandDefinition] { [] }
     public var events: [EventDefinition] { [] }
     public var knowledge: [KnowledgeEntity] { [] }
+    public var fetchers: [DataFetcher] { [] }
     public var agents: [AgentDefinition] { [] }
     public var activitySeries: [ActivitySeries] { [] }
     public var secretKeys: [SecretKey] { [] }
