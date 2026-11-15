@@ -14,6 +14,8 @@ enum CoreTools {
     private struct PageUpdateInput: Decodable { let id: String; let name: String?; let icon: String? }
     private struct PageIDInput: Decodable { let id: String }
     private struct ListInput: Decodable { let page_id: String? }
+    private struct DraftInput: Decodable { let name: String; let icon: String?; let rationale: String }
+    private struct ActInput: Decodable { let id: String; let action: String; let input: JSONValue? }
 
     private static func uuid(_ text: String) throws -> UUID {
         guard let id = UUID(uuidString: text) else { throw ToolError("\"\(text)\" is not an id. Call list_widgets or list_pages.") }
@@ -93,9 +95,30 @@ enum CoreTools {
             },
             ClaudeTool(
                 name: "read_widget",
-                description: "Read one widget's live data (for example the issues on a Jira board widget or the PRs in a pull request widget).",
+                description: "Read one widget's live data (for example the issues on a Jira board widget or the PRs in a pull request widget), what the widget type is, what it shows right now beyond its config (ui_state: search, selection, visible range) and the actions you can run on it with widget_act.",
                 properties: ["id": JSONSchema.string("Widget id from list_widgets.")], required: ["id"]
             ) { input in try await store.snapshot(uuid(input.toolInput(WidgetID.self).id)) },
+            ClaudeTool(
+                name: "widget_act",
+                description: "Do something with a widget on screen, as the user would: search, filter, select a row, jump to a date… The actions a widget offers are listed by read_widget. They only change what the widget shows. The widget must be on the current page (view_show opens its page).",
+                properties: ["id": JSONSchema.string("Widget id."), "action": JSONSchema.string("Action name from read_widget."),
+                             "input": ["type": "object", "description": "The action's input, per its input_schema."]],
+                required: ["id", "action"]
+            ) { input in
+                let request = try input.toolInput(ActInput.self)
+                let id = try uuid(request.id)
+                let record = try store.widget(id)
+                guard let type = host.widgetType(record.kind) else { throw ToolError("Unknown widget kind \"\(record.kind)\".") }
+                guard type.actions.contains(where: { $0.name == request.action }) else {
+                    throw ToolError("\(type.displayName) has no action \"\(request.action)\". Actions: \(type.actions.map(\.name).joined(separator: ", ").isEmpty ? "none" : type.actions.map(\.name).joined(separator: ", ")).")
+                }
+                let live = host.live(id)
+                live.attention = .now
+                let result = try await live.perform(request.action, input: request.input ?? .object([:]))
+                // Let the view settle so the state it reports reflects the action.
+                try? await Task.sleep(for: .milliseconds(150))
+                return ["result": result, "ui_state": live.state]
+            },
             ClaudeTool(
                 name: "add_widget",
                 description: "Add a widget to the end of the dashboard. `config` is merged over the kind's default config.",

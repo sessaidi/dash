@@ -283,6 +283,16 @@ final class ExtensionHost: ExtensionContext {
     /// Widgets that can be placed: from installed, enabled extensions only.
     var widgetTypes: [WidgetType] { extensions.filter { isEnabled($0) }.flatMap(\.widgets) }
 
+    /// Each placed widget's live link to Dashii (actions, UI state, attention).
+    @ObservationIgnored private var liveWidgets: [UUID: WidgetLiveState] = [:]
+
+    func live(_ widgetID: UUID) -> WidgetLiveState {
+        if let live = liveWidgets[widgetID] { return live }
+        let live = WidgetLiveState()
+        liveWidgets[widgetID] = live
+        return live
+    }
+
     func widgetType(_ kind: String) -> WidgetType? {
         widgetTypes.first { $0.kind == kind }
     }

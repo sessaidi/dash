@@ -10,6 +10,7 @@ struct WidgetCard: View {
     @State private var wiggle = false
     /// The widget's menu shows when the pointer is over it (no card to anchor it otherwise).
     @State private var hovering = false
+    @State private var dashiiLooking = false
 
     var body: some View {
         let type = host.widgetType(widget.kind)
@@ -52,6 +53,8 @@ struct WidgetCard: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // Widgets read their size and size family (narrow, medium, wide, large) from here.
             .measuresWidgetLayout()
+            // Dashii reads and drives the widget through this.
+            .environment(\.widgetLive, host.live(widget.id))
             // While editing, the whole card is a drag handle and its content doesn't take clicks.
             .allowsHitTesting(!editing)
         }
@@ -63,6 +66,22 @@ struct WidgetCard: View {
         .animation(.smooth(duration: 0.25), value: editing)
         .onHover { hovering = $0 }
         .modifier(DragWhenEditing(editing: editing))
+        // A soft glow while Dashii reads or drives the widget.
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.tint.opacity(dashiiLooking ? 0.7 : 0), lineWidth: 2)
+                .shadow(color: .accentColor.opacity(dashiiLooking ? 0.45 : 0), radius: 8)
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: 0.35), value: dashiiLooking)
+        }
+        .onChange(of: host.live(widget.id).attention) { _, date in
+            guard date != nil else { return }
+            dashiiLooking = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                dashiiLooking = false
+            }
+        }
         .overlay(alignment: .topLeading) {
             if editing {
                 Button {

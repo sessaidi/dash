@@ -24,6 +24,9 @@ public protocol DashboardWidget {
     static var aiTasks: [AITask] { get }
     /// JSON schema of `Config`, given to Claude so it can configure the widget.
     static var configSchema: JSONValue { get }
+    /// What Dashii can do with the widget on screen (search, filter, select…); the content view
+    /// handles them with `handlesWidgetActions`.
+    static var actions: [WidgetAction] { get }
 
     @ViewBuilder static func content(config: Binding<Config>, context: WidgetContext) -> Content
     @ViewBuilder static func settings(config: Binding<Config>, context: WidgetContext) -> Settings
@@ -47,6 +50,7 @@ extension DashboardWidget {
     public static var defaultSize: WidgetSize { .medium }
     public static var sizeLimits: GridLimits { GridLimits() }
     public static var aiTasks: [AITask] { [] }
+    public static var actions: [WidgetAction] { [] }
     public static func snapshot(config: Config, context: WidgetContext) async -> JSONValue {
         (try? JSONValue(encoding: config)) ?? .null
     }
@@ -96,6 +100,8 @@ public struct WidgetType: Identifiable {
     public let aiTasks: [AITask]
     public let defaultConfig: JSONValue
     public let configSchema: JSONValue
+    /// What Dashii can do with it on screen.
+    public let actions: [WidgetAction]
     public let hasSettings: Bool
     /// Decodes and re-encodes a config, throwing if it does not fit the widget's `Config`.
     public let normalize: (JSONValue) throws -> JSONValue
@@ -123,6 +129,7 @@ public struct WidgetType: Identifiable {
         self.aiTasks = aiTasks
         defaultConfig = .object([:])
         configSchema = ["type": "object", "properties": .object([:])]
+        actions = []
         hasSettings = false
         normalize = { $0 }
         self.content = { _, context in content(context) }
@@ -141,6 +148,7 @@ public struct WidgetType: Identifiable {
         let fallback = W.defaultConfig
         defaultConfig = (try? JSONValue(encoding: fallback)) ?? .object([:])
         configSchema = W.configSchema
+        actions = W.actions
         hasSettings = W.Settings.self != EmptyView.self
         normalize = { raw in
             do { return try JSONValue(encoding: raw.decode(W.Config.self)) } catch let error as DecodingError {

@@ -405,8 +405,17 @@ final class DashboardStore {
     func snapshot(_ id: UUID) async throws -> JSONValue {
         let record = try widget(id)
         guard let type = host.widgetType(record.kind) else { throw ToolError("Unknown widget kind \"\(record.kind)\".") }
+        let live = host.live(id)
+        live.attention = .now
         let data = await type.snapshot(record.config, WidgetContext(widgetID: id, host: host, aiTasks: type.aiTasks))
-        return describe(record).merging(["data": data])
+        // What it is, what's on screen beyond its config, and what Dashii can do with it.
+        return describe(record).merging([
+            "type": ["name": .string(type.displayName), "summary": .string(type.summary)],
+            "data": data,
+            "on_screen": .bool(live.handler != nil || live.state != .null),
+            "ui_state": live.state,
+            "actions": .array(type.actions.map(\.json)),
+        ])
     }
 
     /// First launch: a Home page with one widget per extension.
