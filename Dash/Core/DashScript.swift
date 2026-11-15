@@ -141,6 +141,10 @@ struct DashScript {
             case "delete": return try await call("skill_delete", ["name": .string(try words.require("skill name"))])
             default: throw ToolError("skill use <name> | skill save <name> when_to_use=\"…\" instructions=\"…\" template=\"…\" | skill delete <name> | skills")
             }
+        case "functions": return try await call("functions_list", [:])
+        case "function", "fn":
+            guard let name = words.word() else { throw ToolError("function <name> key=value … (functions lists them)") }
+            return try await call("function_run", ["name": .string(name), "input": .object(words.options())])
         case "tool", "call":
             guard let name = words.word() else { throw ToolError("tool <name> key=value … (help lists them)") }
             return try await call(name, .object(words.options()))
@@ -373,6 +377,7 @@ struct DashScript {
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | reports | set k=v | delete
           skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
           <keyword> <action> <args> key=value …   statements plugins add (ticket follow LAF-1); `help` lists them, `help <keyword>` shows one
+          functions | function logs.digest lines=[…] context="…"   hand a narrow job to a smaller model (JSON answer)
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
         Saved vs temporary: `filter` and `set` are saved with the widget; `do` actions are temporary.
         Linked widgets: widget "PRs" filter tickets ~ $selected("Jira board").key  (follows the ticket picked on the board)
