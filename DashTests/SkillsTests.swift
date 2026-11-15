@@ -11,9 +11,10 @@ struct SkillsTests {
         let host = try ExtensionHost(settings: AppSettings(defaults: UserDefaults(suiteName: "skills-\(UUID())")!),
                                      extensions: ExtensionHost.builtInExtensions(), inMemory: true)
         host.dashboard.migrate()
-        DashDefaults.shared.removeObject(forKey: "skills.seeded")
+        for key in ["skills.seeded", "skills.seeded.bug-report", "skills.seeded.service-docs"] { DashDefaults.shared.removeObject(forKey: key) }
         Skills.seed(in: host.context)
         #expect(Skills.named("bug-report", in: host.context)?.origin == "dash")
+        #expect(Skills.named("service-docs", in: host.context)?.instructions.contains("Docs/<Service>") == true)
         let catalog = try #require(Skills.catalog(in: host.context))
         #expect(catalog.contains("bug-report:") && !catalog.contains("Investigate before writing"))
 

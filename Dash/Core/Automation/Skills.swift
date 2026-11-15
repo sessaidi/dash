@@ -55,12 +55,47 @@ enum Skills {
             + enabled.map { "- \($0.name): \($0.whenToUse)" }.joined(separator: "\n") + "\n</skills>"
     }
 
-    /// The skills Dash ships, added once (the user may edit or disable them).
+    /// The skills Dash ships.
+    static var shipped: [DashSkill] { [bugReport, serviceDocs] }
+
+    /// Adds each skill Dash ships once (the user may edit, disable or delete it; it doesn't come back).
     static func seed(in context: ModelContext) {
-        guard DashDefaults.shared.object(forKey: "skills.seeded") == nil else { return }
-        if named(bugReport.name, in: context) == nil { context.insert(bugReport) }
+        // Installs from before per-skill seeding already have the bug report skill.
+        if DashDefaults.shared.object(forKey: "skills.seeded") != nil { DashDefaults.shared.set(true, forKey: "skills.seeded.bug-report") }
+        for skill in shipped where DashDefaults.shared.object(forKey: "skills.seeded.\(skill.name)") == nil {
+            if named(skill.name, in: context) == nil { context.insert(skill) }
+            DashDefaults.shared.set(true, forKey: "skills.seeded.\(skill.name)")
+        }
         try? context.save()
-        DashDefaults.shared.set(true, forKey: "skills.seeded")
+    }
+
+    /// A documentation set from the knowledge graph: an index and nested pages, not one note.
+    static var serviceDocs: DashSkill {
+        DashSkill(
+            name: "service-docs",
+            whenToUse: "The user wants a service, repository or system documented (from the knowledge graph and code): a full, linked doc set with subpages.",
+            instructions: """
+                Write a documentation set, not a note. Plan, research, then write every page.
+                1. Research from evidence: knowledge_overview and knowledge_context for the repository; knowledge_search and \
+                knowledge_snippet for entry points, handlers, routing, configuration, storage, clients and tests; knowledge_trace \
+                for the main flows; knowledge_experts for owners; the README and docs folders. Quote real names: packages, types, \
+                files as path:line, config keys, endpoints.
+                2. Plan before writing: an index page and 8–15 subpages in the folder Docs/<Service>, with sub-folders for big \
+                areas (Docs/<Service>/V2 with one page per layer). Typical pages: Overview, Architecture, Request lifecycle, \
+                Domain model and data, Storage and caching, Dependencies and integrations, Configuration and environments, \
+                Deploy and operations (dashboards, alerts, runbooks), Developer guide (how to add an endpoint/feature, \
+                conventions, testing), Gotchas and FAQ, Glossary.
+                3. Every page is substantial and stands alone: purpose, how it works with the real names, at least one \
+                ```mermaid flowchart``` where a picture helps (flowcharts draw natively; avoid sequence diagrams), tables for \
+                inventories, short code excerpts, @Callout for warnings, and a Related line of [[links]] to sibling pages.
+                4. Write one or two pages per dash call (long pages each in their own call). notes_search first; if a page \
+                exists, notes_update it instead of creating a duplicate.
+                5. Finish with the index: what the service is in three sentences, a mermaid map of the pages, a table of \
+                contents with [[links]], owners, and "Last updated". Then tell the user the pages you wrote.
+                Facts only from the graph and the code; write "To confirm" where you are unsure. Never paste secrets.
+                """,
+            template: "Docs/<Service>/<Service> (index) · Overview · Architecture · Request lifecycle · Data · Storage and caching · Dependencies · Configuration · Operations · Developer guide · Gotchas · Glossary",
+            origin: "dash")
     }
 
     /// Converted from a public "bug report writing" skill: its method kept, its sample credentials,
