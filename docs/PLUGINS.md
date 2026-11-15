@@ -18,6 +18,22 @@ There are two kinds, and features build on integrations:
 The first-party plugins live in the [dash-registry](https://github.com/sessaidi/dash-registry)
 repository (locally `~/code/dash-registry`), which is also a Marketplace registry.
 
+## Tutorials
+
+Step by step, on one example (a made-up ticket service called Acme, served on your Mac by a
+mock server), with a checkpoint to try in Dash after each step. Start with Tutorial 1's
+[Before you start](tutorials/1-integration.md#before-you-start): what to install, and the words
+used.
+
+1. [Build an integration](tutorials/1-integration.md): a token in the Keychain, an authenticated
+   connection, status, settings and read-only tools.
+2. [Build a widget](tutorials/2-widget.md): a provider, a snapshot and a view with a layout per
+   size (narrow, medium, wide, large), header controls, actions Dashii can drive, and tests.
+3. [Build an agent](tutorials/3-agent.md): without code through Dashii, or as an
+   `AgentDefinition` with a schedule, a free precheck and structured reports.
+
+The finished code is in the registry's [`examples/`](https://github.com/sessaidi/dash-registry/tree/main/examples).
+
 ## Quick start
 
 From the registry repository:
