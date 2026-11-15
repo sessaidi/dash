@@ -171,14 +171,21 @@ struct MermaidGraph: Equatable {
         var frames: [String: CGRect]
         var groupFrames: [String: CGRect]
         var size: CGSize
+        /// Per edge (same order as `edges`): an orthogonal polyline from source to target.
+        var routes: [[CGPoint]] = []
+        /// Per edge: where its label goes (nil without a label).
+        var labels: [CGPoint?] = []
     }
 
-    /// Layered layout: ranks by longest path from the sources, order in a rank by the average
-    /// position of neighbours (a few sweeps), members of a subgraph kept together.
-    func layout(size measure: (Node) -> CGSize) -> Layout {
+    /// Layered layout with orthogonal routing. Nodes are ranked by longest path; an edge that spans
+    /// several layers gets a placeholder in each layer it crosses (so it never runs through a node);
+    /// ranks are ordered by the average position of neighbours; each edge turns in the gap between
+    /// two layers on its own lane; back edges go round the outside. `labelSize` measures labels.
+    func layout(size measure: (Node) -> CGSize, labelSize: (String) -> CGSize = { CGSize(width: CGFloat($0.count) * 6 + 10, height: 16) }) -> Layout {
         let ids = nodes.map(\.id)
+        let horizontal = isHorizontal
+        // Ranks: longest path, cycle-safe (relax at most nodes.count times).
         var rank: [String: Int] = Dictionary(uniqueKeysWithValues: ids.map { ($0, 0) })
-        // Longest path, cycle-safe: relax at most nodes.count times.
         for _ in 0..<max(ids.count, 1) {
             var changed = false
             for edge in edges where edge.from != edge.to {
@@ -189,68 +196,202 @@ struct MermaidGraph: Equatable {
         }
         let maxRank = rank.values.max() ?? 0
         var layers: [[String]] = (0...maxRank).map { level in ids.filter { rank[$0] == level } }
-        let groupIndex: [String: Int] = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($1.id, $0) })
-        func groupKey(_ id: String) -> Int { nodes.first { $0.id == id }?.group.flatMap { groupIndex[$0] } ?? -1 }
 
-        for sweep in 0..<4 {
+        // Forward edges become chains through placeholders; back edges and self loops are routed apart.
+        var chains: [[String]] = Array(repeating: [], count: edges.count)
+        var segments: [(String, String)] = []
+        var dummyLayer: [String: Int] = [:]
+        for (index, edge) in edges.enumerated() {
+            guard let a = rank[edge.from], let b = rank[edge.to], b > a else { continue }
+            var chain = [edge.from]
+            for level in (a + 1)..<b {
+                let id = "~\(index)~\(level)"
+                layers[level].append(id)
+                dummyLayer[id] = level
+                chain.append(id)
+            }
+            chain.append(edge.to)
+            chains[index] = chain
+            for k in 0..<(chain.count - 1) { segments.append((chain[k], chain[k + 1])) }
+        }
+
+        // Order within layers: barycenter sweeps, subgraph members kept together.
+        let groupIndex: [String: Int] = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($1.id, $0) })
+        let groupOf = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.group.flatMap { groupIndex[$0] } ?? -1) })
+        for sweep in 0..<6 where maxRank > 0 {
             let down = sweep % 2 == 0
-            for level in (down ? Array(1...max(maxRank, 1)) : Array((0..<maxRank).reversed())) where level <= maxRank {
-                let neighbourLayer = layers[down ? level - 1 : level + 1]
-                let position = Dictionary(uniqueKeysWithValues: neighbourLayer.enumerated().map { ($1, Double($0)) })
-                func centre(_ id: String) -> Double {
-                    let linked = edges.compactMap { edge -> Double? in
-                        if down, edge.to == id { return position[edge.from] }
-                        if !down, edge.from == id { return position[edge.to] }
-                        return nil
-                    }
-                    return linked.isEmpty ? Double(layers[level].firstIndex(of: id) ?? 0) : linked.reduce(0, +) / Double(linked.count)
+            for level in (down ? Array(1...maxRank) : Array((0..<maxRank).reversed())) {
+                let neighbour = layers[down ? level - 1 : level + 1]
+                let position = Dictionary(uniqueKeysWithValues: neighbour.enumerated().map { ($1, Double($0)) })
+                let current = layers[level]
+                var keys: [String: (Int, Double)] = [:]
+                for (offset, id) in current.enumerated() {
+                    let linked = segments.compactMap { down ? ($0.1 == id ? position[$0.0] : nil) : ($0.0 == id ? position[$0.1] : nil) }
+                    let centre = linked.isEmpty ? Double(offset) : linked.reduce(0, +) / Double(linked.count)
+                    keys[id] = (groupOf[id] ?? -1, centre)
                 }
-                let keys = Dictionary(uniqueKeysWithValues: layers[level].map { ($0, (groupKey($0), centre($0))) })
                 layers[level].sort { keys[$0]! < keys[$1]! }
             }
         }
 
-        let sizes = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, measure($0)) })
-        let gapAcross: CGFloat = 22, gapAlong: CGFloat = 70, margin: CGFloat = 40
-        var frames: [String: CGRect] = [:]
-        var along: CGFloat = margin
-        var extentAcross: CGFloat = 0
-        let layerAcross = layers.map { layer in layer.reduce(0) { $0 + (isHorizontal ? sizes[$1]!.height : sizes[$1]!.width) } + gapAcross * CGFloat(max(layer.count - 1, 0)) }
-        let widest = layerAcross.max() ?? 0
+        // Sizes in layer space: `along` crosses layers, `across` runs within a layer.
+        var along: [String: CGFloat] = [:], across: [String: CGFloat] = [:]
+        for node in nodes {
+            let size = measure(node)
+            along[node.id] = horizontal ? size.width : size.height
+            across[node.id] = horizontal ? size.height : size.width
+        }
+        for id in dummyLayer.keys { along[id] = 0; across[id] = 6 }
+
+        // Lanes: how many segments turn in each gap, which sets how wide the gap is.
+        func layerOf(_ id: String) -> Int { rank[id] ?? dummyLayer[id] ?? 0 }
+        var lanesPerGap = [Int](repeating: 0, count: maxRank + 1)
+        for (a, _) in segments { lanesPerGap[layerOf(a)] += 1 }
+        let margin: CGFloat = 40, gapAcross: CGFloat = 26
+        var gapAlong = lanesPerGap.map { max(64, CGFloat($0 + 1) * 10) }
+
+        // Positions: layers left to right (or top to bottom), centred across.
+        var thickness: [CGFloat] = layers.map { layer in layer.map { along[$0] ?? 0 }.max() ?? 0 }
+        let lengths = layers.map { layer in layer.reduce(0) { $0 + (across[$1] ?? 0) } + gapAcross * CGFloat(max(layer.count - 1, 0)) }
+        let widest = lengths.max() ?? 0
+        var start: [CGFloat] = [], cursor = margin
+        for level in layers.indices {
+            start.append(cursor)
+            cursor += thickness[level] + (level < gapAlong.count ? gapAlong[level] : 0)
+        }
+        var a0: [String: CGFloat] = [:], c0: [String: CGFloat] = [:]
         for (level, layer) in layers.enumerated() {
-            let thickness = layer.map { isHorizontal ? sizes[$0]!.width : sizes[$0]!.height }.max() ?? 0
-            var across = margin + (widest - layerAcross[level]) / 2
+            var c = margin + 20 + (widest - lengths[level]) / 2
             for id in layer {
-                let size = sizes[id]!
-                let origin = isHorizontal
-                    ? CGPoint(x: along + (thickness - size.width) / 2, y: across)
-                    : CGPoint(x: across, y: along + (thickness - size.height) / 2)
-                frames[id] = CGRect(origin: origin, size: size)
-                across += (isHorizontal ? size.height : size.width) + gapAcross
-            }
-            extentAcross = max(extentAcross, across)
-            along += thickness + gapAlong
-        }
-        var total = isHorizontal ? CGSize(width: along - gapAlong + margin, height: extentAcross + margin)
-                                 : CGSize(width: extentAcross + margin, height: along - gapAlong + margin)
-        // Reverse directions mirror the drawing.
-        if direction == .rightToLeft || direction == .bottomToTop {
-            for (id, frame) in frames {
-                frames[id] = direction == .rightToLeft
-                    ? CGRect(x: total.width - frame.maxX, y: frame.minY, width: frame.width, height: frame.height)
-                    : CGRect(x: frame.minX, y: total.height - frame.maxY, width: frame.width, height: frame.height)
+                a0[id] = start[level] + (thickness[level] - (along[id] ?? 0)) / 2
+                c0[id] = c
+                c += (across[id] ?? 0) + gapAcross
             }
         }
+        let extentAlong = cursor - (gapAlong.last ?? 0) + margin
+        var extentAcross = margin * 2 + 40 + widest
+
+        // Ports: edges leaving or entering a side spread along it, ordered by where they go.
+        var outgoing: [String: [Int]] = [:], incoming: [String: [Int]] = [:]
+        for (index, chain) in chains.enumerated() where chain.count > 1 {
+            outgoing[chain[0], default: []].append(index)
+            incoming[chain[chain.count - 1], default: []].append(index)
+        }
+        func centreAcross(_ id: String) -> CGFloat { (c0[id] ?? 0) + (across[id] ?? 0) / 2 }
+        func port(_ id: String, edge: Int, list: [String: [Int]], other: (Int) -> String) -> CGFloat {
+            let attached = (list[id] ?? []).sorted { centreAcross(other($0)) < centreAcross(other($1)) }
+            guard attached.count > 1, let position = attached.firstIndex(of: edge), (across[id] ?? 0) > 0 else { return centreAcross(id) }
+            let span = (across[id] ?? 0) * 0.6
+            return centreAcross(id) - span / 2 + span * CGFloat(position) / CGFloat(attached.count - 1)
+        }
+
+        // Lane per segment in its gap, ordered by where it starts to limit crossings.
+        var laneOf: [String: CGFloat] = [:]
+        for level in 0...maxRank {
+            let inGap = segments.filter { layerOf($0.0) == level }.sorted { centreAcross($0.0) == centreAcross($1.0) ? centreAcross($0.1) < centreAcross($1.1) : centreAcross($0.0) < centreAcross($1.0) }
+            let gapStart = start[level] + thickness[level]
+            for (k, segment) in inGap.enumerated() {
+                laneOf[segment.0 + "→" + segment.1] = gapStart + (gapAlong[level]) * CGFloat(k + 1) / CGFloat(inGap.count + 1)
+            }
+        }
+
+        // Routes in layer space (a, c).
+        var abstract: [[CGPoint]] = Array(repeating: [], count: edges.count)
+        var below = extentAcross - margin
+        for (index, edge) in edges.enumerated() {
+            let chain = chains[index]
+            if chain.count > 1 {
+                var points: [CGPoint] = []
+                for k in 0..<(chain.count - 1) {
+                    let a = chain[k], b = chain[k + 1]
+                    let ca = k == 0 ? port(a, edge: index, list: outgoing) { chains[$0][1] } : centreAcross(a)
+                    let cb = k == chain.count - 2 ? port(b, edge: index, list: incoming) { chains[$0][chains[$0].count - 2] } : centreAcross(b)
+                    let exit = (a0[a] ?? 0) + (along[a] ?? 0)
+                    let entry = a0[b] ?? 0
+                    if points.isEmpty { points.append(CGPoint(x: exit, y: ca)) } else { points.append(CGPoint(x: exit, y: ca)) }
+                    if abs(ca - cb) > 0.5 {
+                        let lane = laneOf[a + "→" + b] ?? (exit + entry) / 2
+                        points.append(CGPoint(x: lane, y: ca))
+                        points.append(CGPoint(x: lane, y: cb))
+                    }
+                    points.append(CGPoint(x: entry, y: cb))
+                }
+                abstract[index] = Self.simplified(points)
+            } else if let from = a0[edge.from], let to = a0[edge.to] {
+                // Back edge or self loop: out, round the far side of the drawing, back in.
+                below += 12
+                let exit = from + (along[edge.from] ?? 0), entry = to
+                let out = exit + 14, back = entry - 14
+                abstract[index] = [CGPoint(x: exit, y: centreAcross(edge.from)), CGPoint(x: out, y: centreAcross(edge.from)),
+                                   CGPoint(x: out, y: below), CGPoint(x: back, y: below), CGPoint(x: back, y: centreAcross(edge.to)),
+                                   CGPoint(x: entry, y: centreAcross(edge.to))]
+            }
+        }
+        extentAcross = max(extentAcross, below + margin)
+
+        // To screen space, mirrored for right-to-left and bottom-to-top.
+        let width = horizontal ? extentAlong : extentAcross, height = horizontal ? extentAcross : extentAlong
+        func screen(_ p: CGPoint) -> CGPoint {
+            var point = horizontal ? p : CGPoint(x: p.y, y: p.x)
+            if direction == .rightToLeft { point.x = width - point.x }
+            if direction == .bottomToTop { point.y = height - point.y }
+            return point
+        }
+        var frames: [String: CGRect] = [:]
+        for node in nodes {
+            guard let a = a0[node.id], let c = c0[node.id] else { continue }
+            let corners = [screen(CGPoint(x: a, y: c)), screen(CGPoint(x: a + (along[node.id] ?? 0), y: c + (across[node.id] ?? 0)))]
+            frames[node.id] = CGRect(x: min(corners[0].x, corners[1].x), y: min(corners[0].y, corners[1].y),
+                                     width: abs(corners[0].x - corners[1].x), height: abs(corners[0].y - corners[1].y))
+        }
+        let routes = abstract.map { $0.map(screen) }
+
         var groupFrames: [String: CGRect] = [:]
         for group in groups {
             let members = nodes.filter { $0.group == group.id }.compactMap { frames[$0.id] }
             guard let first = members.first else { continue }
-            // Room around the members, and above them for the title.
             let bounds = members.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -12, dy: -12)
             groupFrames[group.id] = CGRect(x: bounds.minX, y: bounds.minY - 18, width: bounds.width, height: bounds.height + 18)
         }
-        for frame in groupFrames.values { total.width = max(total.width, frame.maxX + 8); total.height = max(total.height, frame.maxY + 8) }
-        return Layout(frames: frames, groupFrames: groupFrames, size: total)
+
+        // Labels: on the edge's longest segment, nudged until they hit no node and no other label.
+        var taken = Array(frames.values)
+        var labels: [CGPoint?] = []
+        for (index, edge) in edges.enumerated() {
+            guard let text = edge.label, routes[index].count > 1 else { labels.append(nil); continue }
+            let size = labelSize(text)
+            let route = routes[index]
+            let longest = (0..<(route.count - 1)).max { hypot(route[$0 + 1].x - route[$0].x, route[$0 + 1].y - route[$0].y) < hypot(route[$1 + 1].x - route[$1].x, route[$1 + 1].y - route[$1].y) }!
+            let a = route[longest], b = route[longest + 1]
+            let vertical = abs(a.x - b.x) < 0.5
+            var spot = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+            let step: CGFloat = vertical ? size.height + 2 : size.width / 2
+            for attempt in 0..<12 {
+                let rect = CGRect(x: spot.x - size.width / 2, y: spot.y - size.height / 2, width: size.width, height: size.height).insetBy(dx: -2, dy: -2)
+                if !taken.contains(where: { $0.intersects(rect) }) { taken.append(rect); break }
+                let shift = step * CGFloat((attempt / 2) + 1) * (attempt % 2 == 0 ? 1 : -1)
+                spot = vertical ? CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + shift) : CGPoint(x: (a.x + b.x) / 2 + shift, y: (a.y + b.y) / 2)
+            }
+            labels.append(spot)
+        }
+
+        var size = CGSize(width: width, height: height)
+        for frame in groupFrames.values { size.width = max(size.width, frame.maxX + 8); size.height = max(size.height, frame.maxY + 8) }
+        return Layout(frames: frames, groupFrames: groupFrames, size: size, routes: routes, labels: labels)
+    }
+
+    /// Drops points that don't turn the line.
+    static func simplified(_ points: [CGPoint]) -> [CGPoint] {
+        var result: [CGPoint] = []
+        for point in points {
+            if let last = result.last, abs(last.x - point.x) < 0.5, abs(last.y - point.y) < 0.5 { continue }
+            if result.count >= 2 {
+                let a = result[result.count - 2], b = result[result.count - 1]
+                if (abs(a.x - b.x) < 0.5 && abs(b.x - point.x) < 0.5) || (abs(a.y - b.y) < 0.5 && abs(b.y - point.y) < 0.5) { result[result.count - 1] = point; continue }
+            }
+            result.append(point)
+        }
+        return result
     }
 }
 
@@ -265,7 +406,7 @@ struct MermaidView: View {
     private static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     var body: some View {
-        let layout = graph.layout(size: Self.size)
+        let layout = graph.layout(size: Self.size, labelSize: Self.labelSize)
         if let fit {
             let scale = min(1, fit.width / max(layout.size.width, 1), fit.height / max(layout.size.height, 1))
             diagram(layout)
@@ -293,19 +434,18 @@ struct MermaidView: View {
                     }
                 }
                 Canvas { context, _ in
-                    for edge in graph.edges {
-                        guard let from = layout.frames[edge.from], let to = layout.frames[edge.to] else { continue }
-                        draw(edge, from: from, to: to, in: &context)
+                    for (index, edge) in graph.edges.enumerated() where index < layout.routes.count {
+                        draw(edge, route: layout.routes[index], in: &context)
                     }
                 }
                 .frame(width: layout.size.width, height: layout.size.height)
-                ForEach(Array(graph.edges.enumerated()), id: \.offset) { _, edge in
-                    if let label = edge.label, let from = layout.frames[edge.from], let to = layout.frames[edge.to] {
-                        let middle = CGPoint(x: (from.midX + to.midX) / 2, y: (from.midY + to.midY) / 2)
+                ForEach(Array(graph.edges.enumerated()), id: \.offset) { index, edge in
+                    if let label = edge.label, index < layout.labels.count, let spot = layout.labels[index] {
                         Text(label).font(.caption2).padding(.horizontal, 4).padding(.vertical, 1)
                             .background(.background, in: .rect(cornerRadius: 4))
+                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.separator.opacity(0.5)))
                             .fixedSize()
-                            .position(middle)
+                            .position(spot)
                     }
                 }
                 ForEach(graph.nodes) { node in
@@ -334,42 +474,42 @@ struct MermaidView: View {
         return CGSize(width: max(size.width, 70), height: max(size.height, 34))
     }
 
-    private func draw(_ edge: MermaidGraph.Edge, from: CGRect, to: CGRect, in context: inout GraphicsContext) {
-        let horizontal = graph.isHorizontal
-        let forward = horizontal ? to.midX >= from.midX : to.midY >= from.midY
-        let start: CGPoint, end: CGPoint
-        if horizontal {
-            start = CGPoint(x: forward ? from.maxX : from.minX, y: from.midY)
-            end = CGPoint(x: forward ? to.minX : to.maxX, y: to.midY)
-        } else {
-            start = CGPoint(x: from.midX, y: forward ? from.maxY : from.minY)
-            end = CGPoint(x: to.midX, y: forward ? to.minY : to.maxY)
-        }
-        let bend = max(abs(horizontal ? end.x - start.x : end.y - start.y) / 2, 20)
-        let sign: CGFloat = forward ? 1 : -1
+    /// A label's room, as drawn (caption2 with padding).
+    static func labelSize(_ text: String) -> CGSize {
+        let bounds = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 10)]).size()
+        return CGSize(width: ceil(bounds.width) + 10, height: ceil(bounds.height) + 4)
+    }
+
+    /// An orthogonal polyline with softened corners and an arrowhead along its last segment.
+    private func draw(_ edge: MermaidGraph.Edge, route: [CGPoint], in context: inout GraphicsContext) {
+        guard route.count >= 2 else { return }
         var path = Path()
-        path.move(to: start)
-        if horizontal {
-            path.addCurve(to: end, control1: CGPoint(x: start.x + bend * sign, y: start.y), control2: CGPoint(x: end.x - bend * sign, y: end.y))
-        } else {
-            path.addCurve(to: end, control1: CGPoint(x: start.x, y: start.y + bend * sign), control2: CGPoint(x: end.x, y: end.y - bend * sign))
+        path.move(to: route[0])
+        for k in 1..<route.count {
+            if k < route.count - 1 {
+                let previous = route[k - 1], corner = route[k], next = route[k + 1]
+                let radius = min(6, hypot(corner.x - previous.x, corner.y - previous.y) / 2, hypot(next.x - corner.x, next.y - corner.y) / 2)
+                path.addArc(tangent1End: corner, tangent2End: next, radius: radius)
+            } else {
+                path.addLine(to: route[k])
+            }
         }
-        let color = Color.secondary
         let style: StrokeStyle
         switch edge.line {
         case .dotted: style = StrokeStyle(lineWidth: 1.4, dash: [4, 4])
         case .thick: style = StrokeStyle(lineWidth: 2.6)
         default: style = StrokeStyle(lineWidth: 1.4)
         }
-        context.stroke(path, with: .color(color), style: style)
+        context.stroke(path, with: .color(.secondary), style: style)
         guard edge.arrow else { return }
-        let angle: CGFloat = horizontal ? (forward ? 0 : .pi) : (forward ? .pi / 2 : -.pi / 2)
+        let end = route[route.count - 1], before = route[route.count - 2]
+        let angle = atan2(end.y - before.y, end.x - before.x)
         var head = Path()
         head.move(to: end)
         head.addLine(to: CGPoint(x: end.x - 8 * cos(angle - 0.4), y: end.y - 8 * sin(angle - 0.4)))
         head.addLine(to: CGPoint(x: end.x - 8 * cos(angle + 0.4), y: end.y - 8 * sin(angle + 0.4)))
         head.closeSubpath()
-        context.fill(head, with: .color(color))
+        context.fill(head, with: .color(.secondary))
     }
 }
 

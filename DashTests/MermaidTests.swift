@@ -42,6 +42,32 @@ struct MermaidTests {
         for i in all.indices { for j in all.indices where i < j { #expect(!all[i].intersects(all[j])) } }
     }
 
+    /// Edges run horizontally or vertically only, never through a node, and labels don't overlap.
+    @Test func orthogonalRoutesAvoidNodes() throws {
+        let text = Self.papi + "\n  CAPIG --> KG\n  KG --> CAPIG"
+        let graph = try #require(MermaidGraph.parse(text))
+        for direction in [MermaidGraph.Direction.leftToRight, .topToBottom] {
+            var oriented = graph
+            oriented.direction = direction
+            let layout = oriented.layout { _ in CGSize(width: 110, height: 40) }
+            #expect(layout.routes.count == oriented.edges.count)
+            for (index, route) in layout.routes.enumerated() {
+                let edge = oriented.edges[index]
+                #expect(route.count >= 2)
+                for k in 0..<(route.count - 1) {
+                    let a = route[k], b = route[k + 1]
+                    #expect(abs(a.x - b.x) < 0.5 || abs(a.y - b.y) < 0.5, "edge \(edge.from)→\(edge.to) segment \(k) is diagonal")
+                    let segment = CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: max(abs(a.x - b.x), 0.5), height: max(abs(a.y - b.y), 0.5))
+                    for (id, frame) in layout.frames where id != edge.from && id != edge.to {
+                        #expect(!segment.intersects(frame.insetBy(dx: 2, dy: 2)), "edge \(edge.from)→\(edge.to) crosses \(id)")
+                    }
+                }
+            }
+            let labels = layout.labels.compactMap { $0 }.map { CGRect(x: $0.x - 30, y: $0.y - 7, width: 60, height: 14) }
+            for i in labels.indices { for j in labels.indices where i < j { #expect(!labels[i].intersects(labels[j])) } }
+        }
+    }
+
     /// Printed (PDF): drawn without scrolling, scaled into the page.
     @Test func printsScaledToThePage() throws {
         let graph = try #require(MermaidGraph.parse(Self.papi))
