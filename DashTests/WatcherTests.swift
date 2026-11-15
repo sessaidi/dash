@@ -21,9 +21,9 @@ struct WatcherTests {
     }
 
     @Test func valuesForTheAction() {
-        let values = HookEngine.watcherValues([["name": "worker-1", "namespace": "papi-eu", "restarts": 6], ["name": "x"]])
+        let values = HookEngine.watcherValues([["name": "worker-1", "namespace": "bill-eu", "restarts": 6], ["name": "x"]])
         #expect(values["count"] == "2" && values["first.name"] == "worker-1" && values["first.restarts"] == "6")
-        #expect(values["rows"]?.contains("namespace: \"papi-eu\"") == true)
+        #expect(values["rows"]?.contains("namespace: \"bill-eu\"") == true)
     }
 
     @Test func dashiiCanCreateAWatcher() throws {

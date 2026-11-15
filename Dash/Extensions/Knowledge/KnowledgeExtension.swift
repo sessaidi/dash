@@ -552,7 +552,7 @@ final class KnowledgeExtension: DashExtension {
                 name: "memory_remember",
                 description: "Remember a fact for later conversations (the user asked you to, or corrected you): one specific sentence, with the tickets, repos, people or concepts it's about. Never secrets.",
                 properties: ["fact": JSONSchema.string("The fact, one sentence."),
-                             "about": ["type": "array", "items": ["type": "string"], "description": "Names or keys it's about (LAF-123, owner/repo, a person)."]],
+                             "about": ["type": "array", "items": ["type": "string"], "description": "Names or keys it's about (KAN-123, owner/repo, a person)."]],
                 required: ["fact"]
             ) { [weak self] input in
                 guard let memory = self?.memory else { throw ToolError("Knowledge isn't available.") }

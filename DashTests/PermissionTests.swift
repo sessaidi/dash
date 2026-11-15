@@ -14,9 +14,9 @@ struct PermissionTests {
         let create = DashiiTool(name: "notes_create", description: "", requiresApproval: true) { _ in nil }
         let key = try #require(PermissionCenter.rememberKey("dashii", tool: create))
 
-        let first = Task { await center.ask(PermissionPrompt(title: "Dashii wants to run notes_create", message: "", input: ["title": "PAPI"], remember: key)) }
+        let first = Task { await center.ask(PermissionPrompt(title: "Dashii wants to run notes_create", message: "", input: ["title": "BILL"], remember: key)) }
         while center.current == nil { await Task.yield() }
-        #expect(center.current?.input?["title"] == "PAPI")
+        #expect(center.current?.input?["title"] == "BILL")
         center.resolve(true, always: true)
         #expect(await first.value)
 

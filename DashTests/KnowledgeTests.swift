@@ -157,7 +157,7 @@ struct KnowledgeTests {
 
     // MARK: Indexer
 
-    /// A small git repository: Swift billing code, a TypeScript client, two commits mentioning LAF-12.
+    /// A small git repository: Swift billing code, a TypeScript client, two commits mentioning KAN-12.
     private func makeRepo() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appending(path: "dash-kg-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root.appending(path: "Sources/Billing"), withIntermediateDirectories: true)
@@ -181,7 +181,7 @@ struct KnowledgeTests {
         try "export function ignored() {}\n".write(to: root.appending(path: "node_modules/lib/x.ts"), atomically: true, encoding: .utf8)
         for arguments in [["init", "-q"], ["config", "user.email", "ada@example.com"], ["config", "user.name", "Ada"],
                           ["remote", "add", "origin", "git@github.com:acme/api.git"], ["add", "."],
-                          ["commit", "-q", "-m", "LAF-12 add renewals"]] {
+                          ["commit", "-q", "-m", "KAN-12 add renewals"]] {
             #expect(CodeIndexer.git(root, arguments) != nil, "git \(arguments)")
         }
         for round in 1...3 {
@@ -189,7 +189,7 @@ struct KnowledgeTests {
                 .write(to: root.appending(path: "Sources/Billing/Billing.swift"), atomically: true, encoding: .utf8)
             try "// \(round)\n".appending(String(contentsOf: root.appending(path: "Sources/Billing/Invoice.swift"), encoding: .utf8))
                 .write(to: root.appending(path: "Sources/Billing/Invoice.swift"), atomically: true, encoding: .utf8)
-            _ = CodeIndexer.git(root, ["commit", "-qam", "LAF-12 tweak \(round)"])
+            _ = CodeIndexer.git(root, ["commit", "-qam", "KAN-12 tweak \(round)"])
         }
         return root
     }
@@ -221,10 +221,10 @@ struct KnowledgeTests {
         let around = try await store.neighbors(billingFile)
         #expect(around.contains { $0.edge.kind == "authored" && $0.node.id == "person:ada@example.com" && $0.edge.weight == 4 })
         #expect(around.contains { $0.edge.kind == "changes_with" && $0.node.id == indexer.fileID("Sources/Billing/Invoice.swift") })
-        #expect(around.contains { $0.edge.kind == "touches" && $0.node.id == "ticket:LAF-12" })
+        #expect(around.contains { $0.edge.kind == "touches" && $0.node.id == "ticket:KAN-12" })
         // Search and paths.
         #expect(try await store.search("renew").first?.id == renew)
-        let path = try #require(try await store.path(from: "ticket:LAF-12", to: renew))
+        let path = try #require(try await store.path(from: "ticket:KAN-12", to: renew))
         #expect(path.last?.node.id == renew && path.count == 3, "\(path.map { "\($0.edge.kind) \($0.node.id)" })")
 
         // Nothing changed: nothing parsed. A renamed function replaces the old symbol.
@@ -244,19 +244,19 @@ struct KnowledgeTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try KnowledgeStore(url: nil)
         _ = try await CodeIndexer(root: root, store: store).index()
-        let pr = KnowledgeEntity(id: "pr:acme/api#7", kind: "pr", title: "Renewals for LAF-12", text: "Adds renewals.",
+        let pr = KnowledgeEntity(id: "pr:acme/api#7", kind: "pr", title: "Renewals for KAN-12", text: "Adds renewals.",
                                  links: [KnowledgeLink(to: "repo:acme/api", kind: "in_repo"),
                                          KnowledgeLink(to: "repofile:acme/api:Sources/Billing/Billing.swift", kind: "touches"),
                                          KnowledgeLink(to: "repofile:other/repo:x.swift", kind: "touches")])
         try await KnowledgeLinker.ingest([pr], source: "pull-requests", into: store)
         let around = try await store.neighbors("pr:acme/api#7")
         #expect(Set(around.map { "\($0.edge.kind) \($0.node.id)" }) == [
-            "in_repo repo:\(root.path)", "touches file:\(root.path)/Sources/Billing/Billing.swift", "mentions ticket:LAF-12",
+            "in_repo repo:\(root.path)", "touches file:\(root.path)/Sources/Billing/Billing.swift", "mentions ticket:KAN-12",
         ])
         // Re-ingesting without it removes it.
         try await KnowledgeLinker.ingest([], source: "pull-requests", into: store)
         #expect(try await store.node("pr:acme/api#7") == nil)
-        #expect(KnowledgeLinker.ticketKeys(in: "Fix LAF-12 and OPS-3, see LAF-12; not utf-8 or A-1") == ["LAF-12", "OPS-3"])
+        #expect(KnowledgeLinker.ticketKeys(in: "Fix KAN-12 and OPS-3, see KAN-12; not utf-8 or A-1") == ["KAN-12", "OPS-3"])
     }
 
     @Test func claudeStudiesDirectoriesAndConcepts() async throws {

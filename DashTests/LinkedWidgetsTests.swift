@@ -35,7 +35,7 @@ struct LinkedWidgetsTests {
         #expect(waiting.waiting == ["Jira board"])
 
         // A view publishes a selection, as a plugin widget does when the user picks a ticket.
-        let view = NSHostingView(rootView: Color.clear.reportsSelection(["key": "LAF-1", "labels": ["a", "b"]]).environment(\.widgetLive, host.live(board.id)))
+        let view = NSHostingView(rootView: Color.clear.reportsSelection(["key": "KAN-1", "labels": ["a", "b"]]).environment(\.widgetLive, host.live(board.id)))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 50, height: 50), styleMask: [], backing: .buffered, defer: false)
         window.contentView = view
         view.layoutSubtreeIfNeeded()
@@ -43,7 +43,7 @@ struct LinkedWidgetsTests {
 
         let resolved = DashQL.resolveSelections("tickets ~ $selected(\"Jira board\").key and labels in $selected(\"Jira board\").labels", host: host)
         #expect(resolved.waiting.isEmpty)
-        #expect(resolved.text == "tickets ~ \"LAF-1\" and labels in (\"a\", \"b\")")
+        #expect(resolved.text == "tickets ~ \"KAN-1\" and labels in (\"a\", \"b\")")
         window.contentView = nil
     }
 

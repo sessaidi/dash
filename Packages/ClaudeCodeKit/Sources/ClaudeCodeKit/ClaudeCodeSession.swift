@@ -11,7 +11,7 @@ import Foundation
 /// options.cwd = repo
 /// options.permissionMode = .plan
 /// let session = try ClaudeCodeSession(options: options)
-/// try session.send("Propose a plan for LAF-123")
+/// try session.send("Propose a plan for KAN-123")
 /// for try await message in session.messages {
 ///     if case .assistant(let reply) = message { print(reply.text) }
 ///     if case .result = message { break }

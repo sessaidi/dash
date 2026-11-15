@@ -149,7 +149,7 @@ enum CoreComponents {
         summary: "A request to Dashii inside the note: Dashii does it with all its tools (workspaces, PRs, Jira, clusters…) and writes the answer into the block. Also written as a line starting with @Dashii. Interactive.",
         parameters: [.init("ask", "string", "What to do or answer.", required: true), .init("id", "string", "Set by Dashii when it answers.")],
         acceptsChildren: true,
-        example: "@Dashii(ask: \"Look at the workspaces for LAF-1234 and give me a report\")") { context in
+        example: "@Dashii(ask: \"Look at the workspaces for KAN-1234 and give me a report\")") { context in
         AnyView(DashiiBlockView(context: context))
     }
 

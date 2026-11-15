@@ -12,9 +12,9 @@ struct DashQLTests {
         QueryDataset(name: "pods", summary: "Pods", fields: [.init("name"), .init("namespace", aliases: ["ns"]), .init("status"), .init("restarts", "number"),
                                                              .init("started", "date"), .init("labels", "list")]) { _ in
             [
-                ["name": "api-1", "namespace": "papi-eu", "status": "CrashLoopBackOff", "restarts": 12, "started": "2026-11-15T10:00:00Z", "labels": ["app:api", "tier:web"], "owner": ["login": "sadik"]],
-                ["name": "api-2", "namespace": "papi-eu", "status": "Running", "restarts": 0, "started": "2026-11-10T10:00:00Z", "labels": ["app:api"]],
-                ["name": "worker-1", "namespace": "papi-us", "status": "Error", "restarts": 4, "started": "2026-11-15T11:30:00Z", "labels": ["app:worker"]],
+                ["name": "api-1", "namespace": "bill-eu", "status": "CrashLoopBackOff", "restarts": 12, "started": "2026-11-15T10:00:00Z", "labels": ["app:api", "tier:web"], "owner": ["login": "sadik"]],
+                ["name": "api-2", "namespace": "bill-eu", "status": "Running", "restarts": 0, "started": "2026-11-10T10:00:00Z", "labels": ["app:api"]],
+                ["name": "worker-1", "namespace": "bill-us", "status": "Error", "restarts": 4, "started": "2026-11-15T11:30:00Z", "labels": ["app:worker"]],
                 ["name": "db-0", "namespace": "data", "status": "Running", "restarts": 1, "started": "2026-10-01T00:00:00Z", "labels": []],
             ]
         }
@@ -22,13 +22,13 @@ struct DashQLTests {
 
     private var tickets: QueryDataset {
         QueryDataset(name: "jira", summary: "Tickets", fields: [.init("key"), .init("summary"), .init("assignee")]) { _ in
-            [["key": "LAF-1", "summary": "Crash on start", "assignee": "Sadik"], ["key": "LAF-2", "summary": "Docs", "assignee": "Alex"]]
+            [["key": "KAN-1", "summary": "Crash on start", "assignee": "Sadik"], ["key": "KAN-2", "summary": "Docs", "assignee": "Alex"]]
         }
     }
 
     private var prs: QueryDataset {
         QueryDataset(name: "prs", summary: "PRs", fields: [.init("title"), .init("tickets", "list")]) { _ in
-            [["title": "Fix crash", "tickets": ["LAF-1"]], ["title": "Also LAF-1", "tickets": ["laf-1", "LAF-9"]], ["title": "Nothing", "tickets": []]]
+            [["title": "Fix crash", "tickets": ["KAN-1"]], ["title": "Also KAN-1", "tickets": ["kan-1", "KAN-9"]], ["title": "Nothing", "tickets": []]]
         }
     }
 
@@ -39,18 +39,18 @@ struct DashQLTests {
     }
 
     @Test func pipelineFiltersSortsAndProjects() async throws {
-        #expect(try await names("from pods | where namespace = \"papi-eu\" and restarts > 3") == ["api-1"])
+        #expect(try await names("from pods | where namespace = \"bill-eu\" and restarts > 3") == ["api-1"])
         #expect(try await names("from pods | sort -restarts | take 2") == ["api-1", "worker-1"])
         #expect(try await names("from pods where status in (\"Error\", \"CrashLoopBackOff\") | sort name") == ["api-1", "worker-1"])
         #expect(try await names("from pods | where restarts between 1 and 4 | sort restarts") == ["db-0", "worker-1"])
         #expect(try await names("from pods | where name =~ \"^api-\\\\d$\" and not status = Running") == ["api-1"])
-        let projected = try await engine().run("from pods | where ns = papi-us | select name as pod, restarts")
+        let projected = try await engine().run("from pods | where ns = bill-us | select name as pod, restarts")
         #expect(projected.rows == [["pod": "worker-1", "restarts": 4]])
     }
 
     @Test func shorthandDatesListsAndMe() async throws {
-        #expect(try await names("pods ns:papi status:crash,error restarts>3") == ["api-1", "worker-1"])
-        #expect(try await names("pods -status:Running ns:papi-eu") == ["api-1"])
+        #expect(try await names("pods ns:bill status:crash,error restarts>3") == ["api-1", "worker-1"])
+        #expect(try await names("pods -status:Running ns:bill-eu") == ["api-1"])
         #expect(try await names("from pods | where started > -6h | sort name") == ["api-1", "worker-1"])
         #expect(try await names("from pods | where started < 2026-11-01") == ["db-0"])
         #expect(try await names("from pods | where labels ~ worker") == ["worker-1"])
@@ -60,13 +60,13 @@ struct DashQLTests {
 
     @Test func summariseDistinctAndJoin() async throws {
         let counts = try await engine().run("from pods | count by namespace").rows
-        #expect(counts.first == ["namespace": "papi-eu", "count": 2])
+        #expect(counts.first == ["namespace": "bill-eu", "count": 2])
         let stats = try await engine().run("from pods | summarize count(), max(restarts) as worst, avg(restarts) by status | sort -worst").rows
         #expect(stats.first?["worst"] == 12 && stats.first?["status"] == "CrashLoopBackOff")
         #expect(try await engine().run("from pods | distinct namespace").rows.count == 3)
 
         let joined = try await engine().run("from jira where assignee = me | join prs on key = tickets | select key, prs.title").rows
-        #expect(joined == [["key": "LAF-1", "prs.title": ["Fix crash", "Also LAF-1"]]])
+        #expect(joined == [["key": "KAN-1", "prs.title": ["Fix crash", "Also KAN-1"]]])
     }
 
     @Test func errorsSayWhatWasExpected() async throws {

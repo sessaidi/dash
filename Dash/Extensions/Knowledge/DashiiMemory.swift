@@ -40,7 +40,7 @@ final class DashiiMemory {
         var replaces: String?
         /// What it rests on: the user's words or the tool result it came from (short, sanitized).
         var evidence: String?
-        /// Where it applies: "global", or an extension id or area (jira-board, releases, papi).
+        /// Where it applies: "global", or an extension id or area (jira-board, releases, bill).
         var scope: String?
 
         init(text: String, about: [String], confidence: Confidence, durability: Durability, replaces: String? = nil,
@@ -182,7 +182,7 @@ final class DashiiMemory {
 
         Rules:
         - One sentence per fact, specific (names, repos, tickets). At most 5; usually there are none.
-        - evidence: where it comes from, short ("user said: …", "jira LAF-12 status", "dashql pods result").
+        - evidence: where it comes from, short ("user said: …", "jira KAN-12 status", "dashql pods result").
         - scope: "global", or the extension or area it applies to (jira-board, releases, kubernetes, a repo name).
         - Nothing secret (tokens, passwords, keys), nothing personal beyond work.
         - confidence: "stated" when the user said it, "observed" when it's in tool data, "inferred" otherwise.

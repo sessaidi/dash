@@ -39,10 +39,10 @@ enum DocKind: String, CaseIterable, Identifiable, Sendable {
     /// What the user is asked for before Dashii starts.
     var topicPrompt: String {
         switch self {
-        case .howto: "Which task? e.g. add a localization key in PAPI"
+        case .howto: "Which task? e.g. add a localization key in BILL"
         case .runbook: "Which symptom? e.g. gateway returns 528 for one backend"
         case .postmortem: "Which incident, and when?"
-        case .bugReport: "What goes wrong, and where? e.g. papi-eu pods crash after the W43 release"
+        case .bugReport: "What goes wrong, and where? e.g. bill-eu pods crash after the W43 release"
         case .meetingNotes: "Which meeting? Leave empty for the latest"
         case .dailyNote: "Which day? Leave empty for today"
         case .serviceOverview: "Which service or repository?"

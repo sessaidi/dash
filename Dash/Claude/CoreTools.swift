@@ -118,7 +118,7 @@ enum CoreTools {
             ) { input in try await store.snapshot(uuid(input.toolInput(WidgetID.self).id)) },
             DashiiTool(
                 name: "widget_query",
-                description: "Set a widget's DashQL filter (saved with it): what it shows, filtered, sorted and cut, e.g. `ns:papi-eu status:failing | sort -restarts | take 20`. It may follow another widget's selection: `tickets ~ $selected(\"Jira board\").key`. Empty clears it. read_widget lists the widget's query_fields; the user sees and can edit the query.",
+                description: "Set a widget's DashQL filter (saved with it): what it shows, filtered, sorted and cut, e.g. `ns:bill-eu status:failing | sort -restarts | take 20`. It may follow another widget's selection: `tickets ~ $selected(\"Jira board\").key`. Empty clears it. read_widget lists the widget's query_fields; the user sees and can edit the query.",
                 properties: ["id": JSONSchema.string("Widget id."), "query": JSONSchema.string("DashQL without a source (filter | sort | take), or empty.")],
                 required: ["id", "query"]
             ) { input in

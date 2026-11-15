@@ -110,7 +110,7 @@ enum DashQL {
     // MARK: Linked widgets
 
     /// `$selected("Jira board").key` → the value of `key` in what's selected in that widget, as a
-    /// DashQL literal ("LAF-1", 3, ("a", "b") for a list). `waiting` names the widgets with
+    /// DashQL literal ("KAN-1", 3, ("a", "b") for a list). `waiting` names the widgets with
     /// nothing selected: the query should then not filter at all.
     static func resolveSelections(_ text: String, host: ExtensionHost) -> (text: String, waiting: [String]) {
         var waiting: [String] = []
@@ -145,8 +145,8 @@ enum DashQL {
 
     static let guide = """
         DashQL reads, filters, joins and summarises what Dash knows. A query is a source then stages separated by |:
-          from pods | where namespace = "papi-eu" and restarts > 3 | sort -restarts | take 10 | select name, node, restarts
-          pods ns:papi-eu status:failing restarts>3         shorthand: field:value (contains, a,b for any of), field>3, -field:x (not), free words
+          from pods | where namespace = "bill-eu" and restarts > 3 | sort -restarts | take 10 | select name, node, restarts
+          pods ns:bill-eu status:failing restarts>3         shorthand: field:value (contains, a,b for any of), field>3, -field:x (not), free words
           from jira where assignee = me and status in ("In Progress", "In Review") | join prs on key = ticket | select key, summary, prs.title
           from activity where time > -24h | count by source
           from widget "Failing pods" | where restarts > 5   any widget's live data

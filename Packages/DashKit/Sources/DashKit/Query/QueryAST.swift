@@ -4,8 +4,8 @@ import Foundation
 /// summarise whatever Dash knows: pods, tickets, PRs, releases, activity, notes, any widget's
 /// live data. A query is a source followed by stages:
 ///
-///     from pods | where namespace = "papi-eu" and restarts > 3 | sort -restarts | take 10
-///     pods ns:papi-eu status:failing restarts>3            (shorthand for the same kind of filter)
+///     from pods | where namespace = "bill-eu" and restarts > 3 | sort -restarts | take 10
+///     pods ns:bill-eu status:failing restarts>3            (shorthand for the same kind of filter)
 ///     from jira where assignee = me | join prs on key = ticket | select key, summary, prs.title
 ///     from activity where time > -24h | count by source
 ///     from widget "Failing pods" | where restarts > 5

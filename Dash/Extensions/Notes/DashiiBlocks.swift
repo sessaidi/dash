@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Written either in full, with the answer as the body:
 ///
-///     @Dashii(ask: "Look at the workspaces for LAF-1234 and give me a report", id: k3f9) {
+///     @Dashii(ask: "Look at the workspaces for KAN-1234 and give me a report", id: k3f9) {
 ///       …Dashii's answer…
 ///     }
 ///

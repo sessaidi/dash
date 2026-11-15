@@ -5,7 +5,7 @@ import Testing
 /// The token-lean form tool results reach Dashii in: shorter than JSON, and nothing lost.
 struct CompactFormatTests {
     static let pods: JSONValue = [
-        "namespace": "papi-eu",
+        "namespace": "bill-eu",
         "pods": [
             ["name": "api-1", "status": "Running", "restarts": 0, "ready": true],
             ["name": "api-2", "status": "CrashLoopBackOff", "restarts": 12, "ready": false, "reason": "OOMKilled"],
@@ -33,8 +33,8 @@ struct CompactFormatTests {
         var rows: [JSONValue] = []
         for index in 1...20 {
             let failing = index % 5 == 0
-            var row: [String: JSONValue] = ["namespace": "papi-eu", "age": "3h", "ready": .bool(!failing)]
-            row["name"] = .string("services-presentation-api-7d9f\(index)")
+            var row: [String: JSONValue] = ["namespace": "bill-eu", "age": "3h", "ready": .bool(!failing)]
+            row["name"] = .string("billing-api-7d9f\(index)")
             row["status"] = .string(failing ? "CrashLoopBackOff" : "Running")
             row["restarts"] = .number(Double(index % 7))
             row["node"] = .string("gke-api-pool-\(index % 3)")
@@ -52,7 +52,7 @@ struct CompactFormatTests {
     }
 
     @Test func topLevelArraysAndScalars() throws {
-        let rows: JSONValue = [["key": "LAF-1", "summary": "Fix: login"], ["key": "LAF-2", "summary": "a|b"]]
+        let rows: JSONValue = [["key": "KAN-1", "summary": "Fix: login"], ["key": "KAN-2", "summary": "a|b"]]
         let text = CompactFormat.encode(rows)
         #expect(text.hasPrefix("[2]{key|summary}:"))
         #expect(try CompactFormat.decode(text) == rows)

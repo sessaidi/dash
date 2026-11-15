@@ -50,7 +50,7 @@ struct ToolCallView: View {
         }
     }
 
-    /// "dash · 3 steps: notes_create “PAPI · Architecture”, …" or the tool and its main argument.
+    /// "dash · 3 steps: notes_create “BILL · Architecture”, …" or the tool and its main argument.
     private var summary: String {
         if name == "dash", let script = inputJSON?["script"]?.string {
             let statements = DashScript.statements(script)

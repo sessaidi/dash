@@ -175,7 +175,7 @@ Dashii and agents work in Dash through DashQL. Make your data and actions part o
 - **Datasets** (`QueryDataset`): rows Dashii can query (`from tickets where status = open`), with
   typed fields and `aliases` (other words for the dataset).
 - **Verbs** (`DashQLVerb`): statements mapped to your tools, so Dashii writes
-  `ticket follow LAF-123` instead of a tool call. Words after the action fill `arguments` in
+  `ticket follow KAN-123` instead of a tool call. Words after the action fill `arguments` in
   order; `presets` fix inputs (`ticket unfollow` is `jira_follow` with follow=false). They go
   through the same approvals as the tool.
 

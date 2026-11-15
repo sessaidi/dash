@@ -437,7 +437,7 @@ private struct SuggestionDetails: View {
         let ask: (String) -> Void
         @State private var hovering = false
 
-        /// "LAF-6173 Backend: …" splits into the key and the rest.
+        /// "KAN-6173 Backend: …" splits into the key and the rest.
         private var parts: (key: String?, title: String) {
             if let match = item.title.firstMatch(of: /^([A-Z][A-Z0-9]+-\d+|[\w.-]+\/[\w.-]+#\d+)\s+(.*)$/) {
                 return (String(match.output.1), String(match.output.2))

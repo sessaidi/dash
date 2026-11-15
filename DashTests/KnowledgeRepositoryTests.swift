@@ -18,16 +18,16 @@ struct KnowledgeRepositoryTests {
     @Test func findsCheckoutsAndOrigins() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "dash-find-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let api = try checkout("fubo/services-presentation-api", in: root, origin: "git@github.com:fubotv/services-presentation-api.git")
-        _ = try checkout("fubo/services-user", in: root)
+        let api = try checkout("acme/billing-api", in: root, origin: "git@github.com:acme/billing-api.git")
+        _ = try checkout("acme/users-api", in: root)
         _ = try checkout("perso/dash", in: root)
         // Too deep, and inside node_modules: skipped.
-        _ = try checkout("a/b/c/deep-services", in: root)
-        _ = try checkout("x/node_modules/services-lib", in: root)
-        let found = KnowledgeExtension.findCheckouts(matching: "services", roots: [root])
-        #expect(found.map(\.lastPathComponent) == ["services-presentation-api", "services-user"])
+        _ = try checkout("a/b/c/deep-api", in: root)
+        _ = try checkout("x/node_modules/api-lib", in: root)
+        let found = KnowledgeExtension.findCheckouts(matching: "api", roots: [root])
+        #expect(found.map(\.lastPathComponent) == ["billing-api", "users-api"])
         #expect(KnowledgeExtension.findCheckouts(matching: "", roots: [root]).count == 3)
-        #expect(KnowledgeExtension.originURL(api) == "git@github.com:fubotv/services-presentation-api.git")
+        #expect(KnowledgeExtension.originURL(api) == "git@github.com:acme/billing-api.git")
     }
 
     @Test func toolsAreOffered() {

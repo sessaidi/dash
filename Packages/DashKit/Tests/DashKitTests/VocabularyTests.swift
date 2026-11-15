@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct VocabularyTests {
     @Test func aliasesReachTheDataset() async throws {
-        let jira = QueryDataset(name: "jira", aliases: ["Tickets"], summary: "Tickets") { _ in [["key": "LAF-1"]] }
+        let jira = QueryDataset(name: "jira", aliases: ["Tickets"], summary: "Tickets") { _ in [["key": "KAN-1"]] }
         let result = try await QueryEngine(datasets: [jira]).run("from tickets")
         #expect(result.rows.count == 1)
         #expect(jira.schema["aliases"] == ["tickets"])

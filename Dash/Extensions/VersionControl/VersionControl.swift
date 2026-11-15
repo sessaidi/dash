@@ -150,7 +150,7 @@ final class VCSPreferences {
     }
 }
 
-/// Turns what the user or Claude names ("dash", "~/code/fubo/api", "fubotv/api") into a checkout.
+/// Turns what the user or Claude names ("dash", "~/code/acme/api", "acme/api") into a checkout.
 @MainActor
 enum VCSRepository {
     static func resolve(_ text: String?, host: (any ExtensionContext)?) async throws -> URL {

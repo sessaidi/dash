@@ -1,7 +1,7 @@
 import Foundation
 
 /// A widget's own DashQL query: the filter (and sort, take) the user or Dashii typed in its query
-/// bar, without a source, e.g. `ns:papi-eu status:failing | sort -restarts | take 20`. Widgets
+/// bar, without a source, e.g. `ns:bill-eu status:failing | sort -restarts | take 20`. Widgets
 /// that declare `queryFields` get the bar and apply the query to their rows.
 public struct WidgetQuery: Sendable {
     public let text: String
@@ -52,7 +52,7 @@ public struct WidgetQuery: Sendable {
         return await apply(to: rows).compactMap { $0["__index"]?.int }.compactMap { items.indices.contains($0) ? items[$0] : nil }
     }
 
-    /// The query in plain words for the user ("namespace contains papi-eu · restarts over 3 ·
+    /// The query in plain words for the user ("namespace contains bill-eu · restarts over 3 ·
     /// worst restarts first · top 20"): they ask Dashii in words and read this, not DashQL.
     public var summary: String {
         query.stages.map(Self.describe).filter { !$0.isEmpty }.joined(separator: " · ")

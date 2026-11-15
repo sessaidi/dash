@@ -1,6 +1,6 @@
 import Foundation
 
-/// A statement an extension adds to DashQL, so Dashii and agents can say `ticket follow LAF-123`
+/// A statement an extension adds to DashQL, so Dashii and agents can say `ticket follow KAN-123`
 /// instead of calling a tool by name. Dash maps it to `tool`: the words after the action fill
 /// `arguments` in order, and `key=value` options are passed as they are. It runs through the same
 /// checks as calling the tool directly (approvals, read-only agents, no remote writes).
@@ -11,7 +11,7 @@ public struct DashQLVerb: Sendable, Equatable {
     public let action: String
     /// The tool it runs.
     public let tool: String
-    /// Names, in order, for the words after the action (`ticket follow LAF-123` → key=LAF-123).
+    /// Names, in order, for the words after the action (`ticket follow KAN-123` → key=KAN-123).
     public let arguments: [String]
     /// Inputs it always passes (`ticket unfollow` is `jira_follow` with follow=false); options can't override them.
     public let presets: [String: JSONValue]

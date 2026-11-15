@@ -7,9 +7,9 @@ import Foundation
 /// agents, no remote writes), so the language adds no power, only brevity.
 ///
 ///     from pods where status ~ crash | sort -restarts | take 5
-///     widget "Failing pods" filter ns:papi-eu restarts>3
-///     page "On-call" add kubernetes.pods title="Pods" x=0 y=0 w=6 h=8 config={"namespace":"papi-eu"}
-///     tool jira_follow key=LAF-123
+///     widget "Failing pods" filter ns:bill-eu restarts>3
+///     page "On-call" add kubernetes.pods title="Pods" x=0 y=0 w=6 h=8 config={"namespace":"bill-eu"}
+///     tool jira_follow key=KAN-123
 @MainActor
 struct DashScript {
     let host: ExtensionHost
@@ -152,7 +152,7 @@ struct DashScript {
             guard let name = words.word() else { throw ToolError("tool <name> key=value … (help lists them)") }
             return try await call(name, .object(words.options()))
         default:
-            // A tool name on its own works too: `jira_follow key=LAF-1`.
+            // A tool name on its own works too: `jira_follow key=KAN-1`.
             if tools.contains(where: { $0.name == verb }) { return try await call(verb, .object(words.options())) }
             if let result = try await pluginVerb(verb.lowercased(), &words) { return result }
             let keywords = Set(verbs.map(\.keyword)).sorted()
@@ -161,7 +161,7 @@ struct DashScript {
         }
     }
 
-    /// The statements enabled extensions add (`ticket follow LAF-123`), limited to the tools the caller may use.
+    /// The statements enabled extensions add (`ticket follow KAN-123`), limited to the tools the caller may use.
     var verbs: [DashQLVerb] {
         let allowed = Set(tools.map(\.name))
         return DashQL.verbs(host: host).filter { allowed.contains($0.tool) }
@@ -363,13 +363,13 @@ struct DashScript {
         Work in Dash with statements, one per line, run in order (it stops at the first error):
           from <dataset> … | where … | sort … | take …      read anything (DashQL; `schema` lists datasets)
           widget "Title" [read]                              its data, UI state, actions, filter fields
-          widget "Title" filter ns:papi-eu restarts>3 | sort -restarts | take 20     what it shows (clear: widget "Title" clear)
+          widget "Title" filter ns:bill-eu restarts>3 | sort -restarts | take 20     what it shows (clear: widget "Title" clear)
           widget "Title" do <action> key=value …            e.g. do search text=W43, do select_pod name=api-1
           widget "Title" set key=value … | place x=0 y=0 w=6 h=8 | remove
           page create "Name" icon=bell                       page "Name" [read] | add <kind> title="…" x= y= w= h= config={…} | rename name=… | delete
           show page "Name" | show note "Title" | show notes | show knowledge | show current
           note create "Title" text="…" | note append "Title" text="…" | note read "Title" | note search words
-          remember "fact" about=[LAF-1, owner/repo] | recall [words] | forget obs:… | search <words in the knowledge graph>
+          remember "fact" about=[KAN-1, owner/repo] | recall [words] | forget obs:… | search <words in the knowledge graph>
           sidebar | section create "Ops" | section rename "Ops" name="On-call" | section delete "Ops"
           page "Name" move section="Ops" before="Other page" | page "Name" home on|off
           plugins | plugin "jira-board" on|off|settings       open marketplace | open hooks | open gallery | open jira-board
@@ -379,7 +379,7 @@ struct DashScript {
           (watchers run a query themselves, no Claude, and fire on new rows: prefer them to agents for "tell me when X appears")
           agents | agent create "Release watcher" role="…" instructions="…" integrations=[releases] every_minutes=30 | agent "Name" run | ask "question" | reports | set k=v | delete
           skills | skill use bug-report | skill save <name> when_to_use="…" instructions="…" | skill delete <name>
-          <keyword> <action> <args> key=value …   statements plugins add (ticket follow LAF-1); `help` lists them, `help <keyword>` shows one
+          <keyword> <action> <args> key=value …   statements plugins add (ticket follow KAN-1); `help` lists them, `help <keyword>` shows one
           functions | function logs.digest lines=[…] context="…"   hand a narrow job to a smaller model (JSON answer)
           tool <name> key=value …   (or just <name> key=value …)   any other tool; `help <name>` shows its inputs
         Saved vs temporary: `filter` and `set` are saved with the widget; `do` actions are temporary.

@@ -32,7 +32,7 @@ public protocol DashExtension: AnyObject {
     var datasets: [QueryDataset] { get }
     /// Ready-made hooks for this extension's data: watchers, notifications, agent wake-ups.
     var hookPresets: [HookPresetSpec] { get }
-    /// Statements this extension adds to DashQL (`ticket follow LAF-123`), each mapped to one of its tools.
+    /// Statements this extension adds to DashQL (`ticket follow KAN-123`), each mapped to one of its tools.
     var verbs: [DashQLVerb] { get }
     /// Dashii jobs this extension offers to other extensions, Dashii and agents (`DashiiFunction.erased`).
     var functions: [AnyDashiiFunction] { get }
