@@ -279,6 +279,9 @@ private struct CodeBlockView: View {
     let text: String
     let printing: Bool
     @State private var copied = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var highlighted: AttributedString { SyntaxHighlighter.highlight(text, language: language, scheme: printing ? .light : colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -300,10 +303,10 @@ private struct CodeBlockView: View {
                 }
             }
             if printing {
-                Text(text).font(.callout.monospaced())
+                Text(highlighted).font(.callout.monospaced())
             } else {
                 ScrollView(.horizontal) {
-                    Text(text).font(.callout.monospaced()).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                    Text(highlighted).font(.callout.monospaced()).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
                         .padding(.bottom, 6)
                 }
                 .scrollIndicators(.visible)
