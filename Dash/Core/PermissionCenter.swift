@@ -170,15 +170,25 @@ private struct InputField: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             switch value {
-            case .string(let text):
-                Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(text.contains("\n") ? .callout : .body)
-                    .lineLimit(expanded ? nil : 4)
-                    .textSelection(.enabled)
-                if text.count > 240 || text.split(separator: "\n").count > 4 {
-                    Button(expanded ? "Show less" : "Show all \(text.split(separator: "\n").count) lines") { expanded.toggle() }
+            case .string(let text) where text.count > 160 || text.contains("\n"):
+                // Long text (Markdown, a body, a script): its own box, lines kept, scrolling.
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
+                ScrollView {
+                    Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.callout.monospaced())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(8)
+                }
+                .frame(maxHeight: expanded ? 360 : 150)
+                .background(.background.opacity(0.6), in: .rect(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator.opacity(0.5)))
+                if lines > 8 {
+                    Button(expanded ? "Smaller" : "Taller (\(lines) lines)") { expanded.toggle() }
                         .buttonStyle(.link).font(.caption)
                 }
+            case .string(let text):
+                Text(text).textSelection(.enabled)
             case .array(let items) where items.allSatisfy({ $0.string != nil || $0.double != nil }):
                 Text(items.map { $0.string ?? $0.jsonString() }.joined(separator: ", ")).textSelection(.enabled)
             case .bool(let flag):
