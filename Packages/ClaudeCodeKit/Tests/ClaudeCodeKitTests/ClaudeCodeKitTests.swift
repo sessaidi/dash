@@ -156,3 +156,25 @@ private struct EchoServer: MCPServer {
         MCPToolResult("echo: \(arguments["word"]?.string ?? "")")
     }
 }
+
+/// The in-process MCP handshake is answered without waiting, and the run's MCP status is read.
+struct MCPHandshakeTests {
+    struct Server: MCPServer {
+        let name = "dash"
+        var toolList: [JSON]? { [["name": "ping"]] }
+        func listTools() async -> [JSON] { [] }
+        func callTool(name: String, arguments: JSON) async -> MCPToolResult { MCPToolResult("") }
+    }
+
+    @Test func handshakeAndToolListNeedNoWork() {
+        let server = Server()
+        #expect(server.immediateAnswer(["jsonrpc": "2.0", "id": 1, "method": "initialize"])?["result"]?["serverInfo"]?["name"] == "dash")
+        #expect(server.immediateAnswer(["jsonrpc": "2.0", "id": 2, "method": "tools/list"])?["result"]?["tools"] == [["name": "ping"]])
+        #expect(server.immediateAnswer(["jsonrpc": "2.0", "id": 3, "method": "tools/call"]) == nil)
+    }
+
+    @Test func initReportsEachServersStatus() {
+        let message = SystemMessage(["type": "system", "subtype": "init", "mcp_servers": [["name": "dash", "status": "failed"]]])
+        #expect(message.mcpServers == ["dash": "failed"])
+    }
+}

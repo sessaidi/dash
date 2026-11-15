@@ -41,6 +41,8 @@ public struct SystemMessage: Sendable, Equatable {
     public let cwd: String?
     public let tools: [String]
     public let permissionMode: String?
+    /// The MCP servers' status at the start of a run: "connected", "failed", "pending"… by name.
+    public let mcpServers: [String: String]
     public let raw: JSON
 
     init(_ json: JSON) {
@@ -50,6 +52,9 @@ public struct SystemMessage: Sendable, Equatable {
         cwd = json["cwd"]?.string
         tools = json["tools"]?.array?.compactMap(\.string) ?? []
         permissionMode = json["permissionMode"]?.string
+        mcpServers = Dictionary((json["mcp_servers"]?.array ?? []).compactMap { server in
+            server["name"]?.string.map { ($0, server["status"]?.string ?? "") }
+        }, uniquingKeysWith: { _, last in last })
         raw = json
     }
 }
@@ -183,12 +188,37 @@ public struct MCPToolResult: Sendable, Equatable {
 /// Claude Code talks to it over the control channel; its tools appear as `mcp__<name>__<tool>`.
 public protocol MCPServer: Sendable {
     var name: String { get }
+    /// The tool descriptions when they're known up front: the handshake is then answered on the
+    /// spot, without waiting for a free thread (the CLI gives up after 30 seconds).
+    var toolList: [JSON]? { get }
     /// MCP tool descriptions: `{"name", "description", "inputSchema"}`.
     func listTools() async -> [JSON]
     func callTool(name: String, arguments: JSON) async -> MCPToolResult
 }
 
 extension MCPServer {
+    public var toolList: [JSON]? { nil }
+
+    /// The answer to a message that needs no work (the handshake, notifications, the tool list
+    /// when known), or nil when it must go through `handle`.
+    func immediateAnswer(_ message: JSON) -> JSON? {
+        let method = message["method"]?.string ?? ""
+        guard method == "initialize" || method.hasPrefix("notifications/") || (method == "tools/list" && toolList != nil) else { return nil }
+        let id = message["id"] ?? .null
+        switch method {
+        case "initialize":
+            return ["jsonrpc": "2.0", "id": id, "result": [
+                "protocolVersion": message["params"]?["protocolVersion"] ?? "2025-06-18",
+                "capabilities": ["tools": [:]],
+                "serverInfo": ["name": .string(name), "version": "1.0.0"],
+            ]]
+        case "tools/list":
+            return ["jsonrpc": "2.0", "id": id, "result": ["tools": .array(toolList ?? [])]]
+        default:
+            return ["jsonrpc": "2.0", "id": id, "result": [:]]
+        }
+    }
+
     /// Answers one JSON-RPC message from Claude Code.
     func handle(_ message: JSON) async -> JSON {
         let id = message["id"] ?? .null

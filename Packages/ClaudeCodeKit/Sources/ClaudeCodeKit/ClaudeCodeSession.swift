@@ -205,6 +205,14 @@ public final class ClaudeCodeSession: @unchecked Sendable {
         if request["subtype"]?.string == "mcp_message" {
             let server = mcpServers[request["server_name"]?.string ?? ""]
             let message = request["message"] ?? .null
+            // The handshake is answered here, on the reading thread: a Task could wait for a free
+            // thread longer than the CLI's 30-second connection timeout.
+            if let answer = server?.immediateAnswer(message) {
+                try? write(["type": "control_response", "response": [
+                    "subtype": "success", "request_id": .string(id), "response": ["mcp_response": answer],
+                ]])
+                return
+            }
             Task { [weak self] in
                 let response: JSON = await server?.handle(message)
                     ?? ["jsonrpc": "2.0", "id": message["id"] ?? .null, "error": ["code": -32601, "message": "Unknown MCP server"]]

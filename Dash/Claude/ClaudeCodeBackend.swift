@@ -77,6 +77,7 @@ struct DashMCPServer: MCPServer {
     let tools: [ClaudeCodeKit.JSON]
     let call: @Sendable (String, ClaudeCodeKit.JSON) async -> MCPToolResult
 
+    var toolList: [ClaudeCodeKit.JSON]? { tools }
     func listTools() async -> [ClaudeCodeKit.JSON] { tools }
 
     func callTool(name: String, arguments: ClaudeCodeKit.JSON) async -> MCPToolResult {
