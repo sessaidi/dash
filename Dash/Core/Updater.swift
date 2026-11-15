@@ -182,7 +182,12 @@ final class Updater {
         }
         switch status {
         case 200: break
-        case 404: throw UpdateError("No release found in \(repository). Is the repository private and `gh` not logged in?")
+        case 404:
+            // Also 404 for a repository with no release yet: tell the two apart.
+            let (_, repoStatus) = try await get(URL(string: "https://api.github.com/repos/\(repository)")!, token: token)
+            throw UpdateError(repoStatus == 200
+                ? "\(repository) has no published release yet (scripts/release.sh, then gh release create)."
+                : "\(repository) wasn't found. If it's private, log in with `gh auth login`.")
         default: throw UpdateError("GitHub answered \(status).")
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
