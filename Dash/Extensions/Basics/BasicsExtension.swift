@@ -11,7 +11,7 @@ final class BasicsExtension: DashExtension {
     let systemImage = "square.grid.2x2"
     let metadata = ExtensionMetadata(version: "1.0.0", summary: "Notes and Claude usage.", category: .productivity, homepage: "https://github.com/sessaidi/dash")
     var widgets: [WidgetType] {
-        [WidgetType(NoteWidget.self), WidgetType(ClaudeUsageWidget.self), WidgetType(WorkspaceAnalyticsWidget.self), WidgetType(ActivityHeatmapWidget.self)]
+        [WidgetType(NoteWidget.self), WidgetType(DataWidget.self), WidgetType(ClaudeUsageWidget.self), WidgetType(WorkspaceAnalyticsWidget.self), WidgetType(ActivityHeatmapWidget.self)]
     }
 
     private weak var host: (any ExtensionContext)?

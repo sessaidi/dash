@@ -15,6 +15,18 @@ struct LinkedWidgetsTests {
         return host
     }
 
+    @Test func dataWidgetRunsAnyDataset() async throws {
+        let host = try make()
+        _ = try host.dashboard.add(kind: "note", title: "Alpha")
+        _ = try host.dashboard.add(kind: "note", title: "Beta")
+        let config = DataWidget.Config(dataset: "widgets", query: "where kind = note | sort title | select title", view: "table")
+        let result = try await DataWidget.run(config, host: host)
+        #expect(result.rows.map { $0["title"]?.string } == ["Alpha", "Beta"])
+        let counts = try await DataWidget.run(.init(dataset: "widgets", query: "count by kind", view: "counts"), host: host)
+        #expect(counts.rows.first?["count"]?.double ?? 0 >= 2)
+        #expect(host.widgetType("dash.data") != nil)
+    }
+
     @Test func linkedQueriesFollowTheSelection() async throws {
         let host = try make()
         let board = try host.dashboard.add(kind: "note", title: "Jira board")

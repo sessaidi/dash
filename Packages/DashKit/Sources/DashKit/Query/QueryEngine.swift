@@ -268,7 +268,7 @@ public struct QueryEngine {
     }
 
     /// A row value as a date: ISO 8601 text, or seconds since 1970.
-    static func date(_ value: JSONValue) -> Date? {
+    public static func date(_ value: JSONValue) -> Date? {
         switch value {
         case .string(let text):
             return ISO8601DateFormatter().date(from: text)
