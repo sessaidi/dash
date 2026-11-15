@@ -339,10 +339,10 @@ struct DashScript {
 
     /// Statements: one per line (or separated by `;`), outside quotes and brackets.
     static func statements(_ script: String) -> [String] {
-        var statements: [String] = [], current = "", quote: Character?, depth = 0
+        var statements: [String] = [], current = "", quote: Character?, depth = 0, escaped = false
         for character in script {
             if let open = quote {
-                if character == open { quote = nil }
+                if escaped { escaped = false } else if character == "\\" { escaped = true } else if character == open { quote = nil }
                 current.append(character)
                 continue
             }
@@ -403,9 +403,9 @@ struct DashArgs {
         guard let first = rest.first else { return nil }
         if first == "\"" || first == "'" {
             let body = rest.dropFirst()
-            guard let end = body.firstIndex(of: first) else { defer { rest = "" }; return String(body) }
+            guard let end = Self.closingQuote(first, in: body) else { defer { rest = "" }; return Self.unescape(body) }
             defer { rest = String(body[body.index(after: end)...]) }
-            return String(body[..<end])
+            return Self.unescape(body[..<end])
         }
         // A `key=value` is an option, not a word.
         let token = rest.prefix { !$0.isWhitespace }
@@ -444,7 +444,7 @@ struct DashArgs {
             case "\"", "'":
                 let quote = value.first!
                 let body = value.dropFirst()
-                let end = body.firstIndex(of: quote) ?? body.endIndex
+                let end = Self.closingQuote(quote, in: body) ?? body.endIndex
                 raw = value[value.startIndex..<(end < body.endIndex ? body.index(after: end) : end)]
             case "[", "{":
                 var depth = 0, inQuote = false, end = value.endIndex
@@ -467,13 +467,48 @@ struct DashArgs {
         return options
     }
 
+    /// Where a quoted text ends: the next `quote` not escaped with a backslash.
+    static func closingQuote(_ quote: Character, in body: Substring) -> Substring.Index? {
+        var escaped = false
+        for index in body.indices {
+            if escaped { escaped = false; continue }
+            if body[index] == "\\" { escaped = true; continue }
+            if body[index] == quote { return index }
+        }
+        return nil
+    }
+
+    /// `\n`, `\t`, `\"`, `\'` and `\\` in a quoted text, as Dashii writes them in statements.
+    static func unescape(_ text: Substring) -> String {
+        guard text.contains("\\") else { return String(text) }
+        var result = ""
+        var escaped = false
+        for character in text {
+            if escaped {
+                switch character {
+                case "n": result.append("\n")
+                case "t": result.append("\t")
+                case "r": break
+                default: result.append(character)
+                }
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaped { result.append("\\") }
+        return result
+    }
+
     static func value(_ raw: String) -> JSONValue {
         if raw.hasPrefix("{") || raw.hasPrefix("[\""), let json = try? JSONValue.parse(Data(raw.utf8)) { return json }
         if raw.hasPrefix("["), raw.hasSuffix("]") {
             return .array(raw.dropFirst().dropLast().split(separator: ",").map { value($0.trimmingCharacters(in: .whitespaces)) })
         }
         if (raw.hasPrefix("\"") && raw.hasSuffix("\"")) || (raw.hasPrefix("'") && raw.hasSuffix("'")), raw.count >= 2 {
-            return .string(String(raw.dropFirst().dropLast()))
+            return .string(unescape(raw.dropFirst().dropLast()))
         }
         if let number = Double(raw) { return .number(number) }
         if raw == "true" { return .bool(true) }

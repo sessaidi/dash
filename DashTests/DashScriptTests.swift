@@ -83,3 +83,21 @@ struct DashScriptTests {
         #expect(!host.dashboard.pages().contains { $0.name == "Later" })
     }
 }
+
+/// Quoted values in statements: escapes are honoured, so Markdown with quotes and newlines survives.
+@MainActor
+struct DashArgsEscapeTests {
+    @Test func quotedValuesUnescape() {
+        var words = DashArgs(##"notes_create title="Say \"hi\"" markdown="# T\n\nline \"two\"\n" n=3"##)
+        _ = words.word()
+        let options = words.options()
+        #expect(options["title"] == "Say \"hi\"")
+        #expect(options["markdown"] == "# T\n\nline \"two\"\n")
+        #expect(options["n"] == 3)
+    }
+
+    @Test func statementsDontSplitInsideEscapedQuotes() {
+        let script = #"note create "A" text="x \"; y\" z""# + "\nsidebar"
+        #expect(DashScript.statements(script).count == 2)
+    }
+}
