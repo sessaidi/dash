@@ -168,9 +168,10 @@ private struct FlowChips: View {
     }
 
     @ViewBuilder private var chips: some View {
-        ForEach(items, id: \.0) { key, value in
+        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            let (key, value) = item
             HStack(spacing: 4) {
-                Text(key).foregroundStyle(.secondary)
+                if !key.isEmpty { Text(key).foregroundStyle(.secondary) }
                 Text(value).fontWeight(.medium).lineLimit(1)
             }
             .font(.caption)
@@ -210,9 +211,10 @@ struct ValueView: View {
         case .array(let items):
             if items.isEmpty {
                 Text("none").font(.caption).foregroundStyle(.secondary)
+            } else if items.allSatisfy(ValueView.isScalar), items.allSatisfy({ ($0.string?.count ?? 0) <= 40 }) {
+                FlowChips(items: items.prefix(30).enumerated().map { ("", $1.string ?? $1.jsonString()) } + (items.count > 30 ? [("", "+\(items.count - 30)")] : []))
             } else if items.allSatisfy(ValueView.isScalar) {
-                Text(items.prefix(12).map { $0.string ?? $0.jsonString() }.joined(separator: ", ") + (items.count > 12 ? " … +\(items.count - 12)" : ""))
-                    .font(.caption).textSelection(.enabled)
+                RowList(lines: items.map { $0.string ?? $0.jsonString() })
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(Array(items.prefix(6).enumerated()), id: \.offset) { _, item in
@@ -235,6 +237,32 @@ struct ValueView: View {
         guard let object = value.object else { return value.string ?? value.jsonString() }
         for key in ["title", "name", "key", "id", "path", "summary"] { if let text = object[key]?.string { return text } }
         return object.values.compactMap(\.string).first ?? value.jsonString()
+    }
+}
+
+/// Long list items, one per row: "name: what it does" as a bold name and a dimmed description;
+/// the first few, then a button for the rest.
+private struct RowList: View {
+    let lines: [String]
+    @State private var all = false
+
+    var body: some View {
+        let shown = all ? lines : Array(lines.prefix(8))
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
+                if let colon = line.range(of: ": "), line.distance(from: line.startIndex, to: colon.lowerBound) <= 40 {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(line[..<colon.lowerBound]).font(.caption.monospaced().weight(.semibold))
+                        Text(line[colon.upperBound...]).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else {
+                    Text(line).font(.caption).lineLimit(2)
+                }
+            }
+            if lines.count > 8 {
+                Button(all ? "Show less" : "Show \(lines.count - 8) more") { all.toggle() }.buttonStyle(.link).font(.caption2)
+            }
+        }
     }
 }
 
