@@ -49,13 +49,13 @@ plugins/Tickets/
 │   │   ├── BoardWidget.swift        manifest: kind, names, sizes, Config, configSchema, actions
 │   │   ├── BoardProvider.swift      WidgetDataProvider: Config → Snapshot
 │   │   ├── BoardSnapshot.swift      plain Sendable data, with a sample for previews
-│   │   └── BoardView.swift          renders a Snapshot, picks a layout from WidgetSizeClass
+│   │   └── BoardView.swift          renders a Snapshot, picks a layout from WidgetLayout
 │   └── Presets.swift                hook presets
 └── Tests/
 ```
 
 Views never fetch: they render a snapshot, so the gallery preview, tests and the real widget
-share one view. Write one view that adapts to `WidgetSizeClass` (compact, regular, large)
+share one view. Write one view that adapts to `WidgetLayout` (narrow, medium, wide, large)
 rather than one view per size; split a size into its own file only when its layout really differs.
 
 ## Entry point
@@ -131,12 +131,13 @@ struct BoardProvider: WidgetDataProvider {
 }
 
 static func content(config: Binding<BoardConfig>, context: WidgetContext) -> some View {
-    ProvidedWidget(BoardProvider(host: context.host), config: config.wrappedValue) { snapshot, size in
-        BoardView(snapshot: snapshot, size: size)
+    ProvidedWidget(BoardProvider(host: context.host), config: config.wrappedValue) { snapshot, layout in
+        BoardView(snapshot: snapshot, layout: layout)
     }
 }
 
-static func preview(config: BoardConfig) -> some View { BoardView(snapshot: .sample, size: .regular) }
+/// Previews are measured like the real card, so `\.widgetLayout` drives the same layouts.
+static func preview(config: BoardConfig) -> some View { BoardResponsiveView(snapshot: .sample) }
 ```
 
 ### Dashii tools and functions

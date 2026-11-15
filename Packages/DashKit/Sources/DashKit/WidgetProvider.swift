@@ -14,8 +14,8 @@ import SwiftUI
 ///     }
 ///
 ///     static func content(config: Binding<TicketsConfig>, context: WidgetContext) -> some View {
-///         ProvidedWidget(TicketsProvider(host: context.host), config: config.wrappedValue) { snapshot, size in
-///             TicketsView(snapshot: snapshot, size: size)
+///         ProvidedWidget(TicketsProvider(host: context.host), config: config.wrappedValue) { snapshot, layout in
+///             TicketsView(snapshot: snapshot, layout: layout)
 ///         }
 ///     }
 ///
@@ -38,26 +38,6 @@ public enum WidgetRefresh: Sendable, Equatable {
     var interval: Duration? {
         if case .every(let interval) = self { return interval }
         return nil
-    }
-}
-
-/// How much room a widget has, from its size on screen: views pick a layout from it instead of
-/// shipping one view per preset size.
-public enum WidgetSizeClass: Sendable, Comparable {
-    /// A number or a short list.
-    case compact
-    case regular
-    /// Room for a table with detail.
-    case large
-
-    public init(_ size: CGSize) {
-        if size.width < 300 || size.height < 200 {
-            self = .compact
-        } else if size.width >= 560, size.height >= 360 {
-            self = .large
-        } else {
-            self = .regular
-        }
     }
 }
 
@@ -135,10 +115,12 @@ public struct ProvidedWidget<Provider: WidgetDataProvider, Content: View>: View 
     @State private var visible = false
     let config: Provider.Config
     let loadingTitle: String
-    let content: (Provider.Snapshot, WidgetSizeClass) -> Content
+    let content: (Provider.Snapshot, WidgetLayout) -> Content
 
+    /// `content` gets the snapshot and the room it has (`layout.family`: narrow, medium, wide,
+    /// large): give each family its own layout rather than stretching one.
     public init(_ provider: @autoclosure () -> Provider, config: Provider.Config, loading: String = "Loading…",
-                @ViewBuilder content: @escaping (Provider.Snapshot, WidgetSizeClass) -> Content) {
+                @ViewBuilder content: @escaping (Provider.Snapshot, WidgetLayout) -> Content) {
         _loader = State(initialValue: WidgetSnapshotLoader(provider: provider()))
         self.config = config
         loadingTitle = loading
@@ -149,7 +131,7 @@ public struct ProvidedWidget<Provider: WidgetDataProvider, Content: View>: View 
         GeometryReader { geometry in
             Group {
                 if let snapshot = loader.snapshot {
-                    content(snapshot, WidgetSizeClass(geometry.size))
+                    content(snapshot, WidgetLayout(size: geometry.size))
                         .overlay(alignment: .topTrailing) { staleBadge }
                 } else if let error = loader.error {
                     StateView(.failed(message: error), action: ("Retry", { Task { await loader.load(config) } }))

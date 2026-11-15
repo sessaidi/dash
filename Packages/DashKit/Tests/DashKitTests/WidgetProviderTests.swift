@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import DashKit
+import DashKitUI
 
 /// The snapshot loader behind `ProvidedWidget`: loads, keeps the last good snapshot, goes stale.
 @MainActor
@@ -34,9 +35,10 @@ struct WidgetProviderTests {
         #expect(loader.isStale(now: .now.addingTimeInterval(130)))
     }
 
-    @Test func sizeClasses() {
-        #expect(WidgetSizeClass(CGSize(width: 240, height: 300)) == .compact)
-        #expect(WidgetSizeClass(CGSize(width: 400, height: 300)) == .regular)
-        #expect(WidgetSizeClass(CGSize(width: 700, height: 400)) == .large)
+    @Test func familiesBySize() {
+        #expect(WidgetLayout(size: CGSize(width: 240, height: 300)).family == .narrow)
+        #expect(WidgetLayout(size: CGSize(width: 400, height: 300)).family == .medium)
+        #expect(WidgetLayout(size: CGSize(width: 700, height: 200)).family == .wide)
+        #expect(WidgetLayout(size: CGSize(width: 700, height: 400)).family == .large)
     }
 }
