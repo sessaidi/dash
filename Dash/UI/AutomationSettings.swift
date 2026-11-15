@@ -20,20 +20,27 @@ struct AutomationSettings: View {
 
 // MARK: - Rules
 
-/// Global rules plus one entry per extension (its default shown until customized).
+/// Global rules plus one entry per extension (its own rules shown until customized), edited as
+/// a list: each rule a sentence with a kind (Always, Never, Prefer, Note) and an on/off switch.
 struct RulesEditor: View {
     /// Shows just this scope (an extension's detail page); nil lists every scope.
     var only: String?
     @Environment(ExtensionHost.self) private var host
     @State private var selection = "global"
-    @State private var text = ""
+    @State private var rules: [Rule] = []
     @State private var enabled = true
+    @State private var saved: [Rule] = []
     @State private var revision = 0
+    @FocusState private var focused: UUID?
 
     private var scopes: [(id: String, name: String, icon: String)] {
         [("global", "Everything", "globe")] + host.extensions.filter { host.isEnabled($0) && $0.id != "marketplace" }
             .map { ($0.id, $0.name, $0.systemImage) }
     }
+
+    private var store: AutomationStore { AutomationStore.shared }
+    private var customized: Bool { store.rule(selection) != nil }
+    private var changed: Bool { rules != saved || enabled != (store.rule(selection)?.enabled ?? true) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -42,7 +49,7 @@ struct RulesEditor: View {
                     HStack {
                         Label(scope.name, systemImage: scope.icon)
                         Spacer()
-                        if AutomationStore.shared.rules(scope.id) != nil { Circle().fill(.tint).frame(width: 6, height: 6) }
+                        if store.rule(scope.id) != nil { Circle().fill(.tint).frame(width: 6, height: 6).help("Customized") }
                     }
                     .tag(scope.id)
                 }
@@ -53,34 +60,59 @@ struct RulesEditor: View {
             }
             Form {
                 Section {
-                    TextEditor(text: $text)
-                        .font(.body.monospaced())
-                        .frame(minHeight: 220)
-                        .scrollContentBackground(.hidden)
-                    Toggle("Use these rules", isOn: $enabled)
+                    if rules.isEmpty {
+                        Text(selection == "global" ? "No rules yet. Add one: “Always answer in French”, “Never start agents without asking”…"
+                                                   : "This plugin has no rules. Add one to steer how Dashii uses it.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach($rules) { $rule in
+                        RuleRow(rule: $rule, focused: $focused) { rules.removeAll { $0.id == rule.id } }
+                    }
+                    .onMove { rules.move(fromOffsets: $0, toOffset: $1) }
                     HStack {
-                        if let defaults = defaultRules, AutomationStore.shared.rule(selection) != nil {
-                            Button("Reset to Plugin Default") {
-                                AutomationStore.shared.resetRules(selection)
-                                text = defaults
-                                enabled = true
+                        Menu {
+                            ForEach(Rule.Kind.allCases, id: \.self) { kind in
+                                Button(kind.title, systemImage: kind.systemImage) { add(kind) }
+                            }
+                        } label: {
+                            Label("Add Rule", systemImage: "plus")
+                        } primaryAction: {
+                            add(.always)
+                        }
+                        .fixedSize()
+                        Spacer()
+                        Button("Ask Dashii to Improve", systemImage: "sparkles") {
+                            host.draftForClaude("Review the rules for \(selection == "global" ? "everything" : selection) (rules_show) and propose better ones (automation_set_rules): ")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                } header: {
+                    HStack {
+                        Text(selection == "global" ? "Rules for every conversation" : "Rules for \(scopes.first { $0.id == selection }?.name ?? selection)")
+                        Spacer()
+                        Toggle("Use these rules", isOn: $enabled).toggleStyle(.switch).controlSize(.small)
+                    }
+                } footer: {
+                    Text(selection == "global"
+                         ? "Dashii follows these everywhere: the chat, plugin tasks, hooks. Turned-off rules stay here but aren't sent."
+                         : "Dashii follows these whenever this plugin's tools or AI tasks are used. Turned-off rules stay here but aren't sent.")
+                }
+                Section {
+                    HStack {
+                        if customized, selection != "global" {
+                            Button("Reset to Plugin Rules") {
+                                store.resetRules(selection)
+                                load(selection)
                                 revision += 1
                             }
                         }
                         Spacer()
-                        Button("Save") {
-                            AutomationStore.shared.setRules(selection, text: text, enabled: enabled)
-                            revision += 1
-                        }
-                        .keyboardShortcut("s", modifiers: .command)
-                        .buttonStyle(.borderedProminent)
+                        if changed { Button("Revert") { load(selection) } }
+                        Button("Save") { save() }
+                            .keyboardShortcut("s", modifiers: .command)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!changed)
                     }
-                } header: {
-                    Text(selection == "global" ? "Rules for every conversation" : "Rules for \(scopes.first { $0.id == selection }?.name ?? selection)")
-                } footer: {
-                    Text(selection == "global"
-                         ? "Dashii follows these everywhere: the chat, plugin tasks, hooks. Like a CLAUDE.md for Dash."
-                         : "Dashii follows these whenever this plugin's tools or AI tasks are used.")
                 }
             }
             .formStyle(.grouped)
@@ -88,13 +120,72 @@ struct RulesEditor: View {
         .onAppear { load(only ?? selection) }
     }
 
-    private var defaultRules: String? { host.extensions.first { $0.id == selection }?.defaultRules }
+    private func add(_ kind: Rule.Kind) {
+        let rule = Rule(kind, "")
+        rules.append(rule)
+        focused = rule.id
+    }
+
+    private func save() {
+        let set = RuleSet(rules.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })
+        store.setRules(selection, text: set.markdown, enabled: enabled)
+        load(selection)
+        revision += 1
+    }
 
     private func load(_ scope: String) {
         selection = scope
-        let saved = AutomationStore.shared.rule(scope)
-        text = saved?.text ?? defaultRules ?? ""
-        enabled = saved?.enabled ?? true
+        rules = store.ruleSet(scope).rules
+        saved = rules
+        enabled = store.rule(scope)?.enabled ?? true
+    }
+}
+
+/// One rule: its kind, its sentence, on/off, delete.
+private struct RuleRow: View {
+    @Binding var rule: Rule
+    var focused: FocusState<UUID?>.Binding
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Menu {
+                ForEach(Rule.Kind.allCases, id: \.self) { kind in
+                    Button(kind.title, systemImage: kind.systemImage) { rule.kind = kind }
+                }
+            } label: {
+                Label(rule.kind.title, systemImage: rule.kind.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .frame(width: 84, alignment: .leading)
+            TextField("What Dashii should do", text: $rule.text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...6)
+                .focused(focused, equals: rule.id)
+                .foregroundStyle(rule.enabled ? .primary : .secondary)
+                .strikethrough(!rule.enabled, color: .secondary)
+            Toggle("", isOn: $rule.enabled).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                .help(rule.enabled ? "Turn off (kept, not sent to Dashii)" : "Turn on")
+            Button(role: .destructive, action: delete) { Image(systemName: "trash") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Delete this rule")
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var tint: Color {
+        switch rule.kind {
+        case .always: .green
+        case .never: .red
+        case .prefer: .blue
+        case .note: .secondary
+        @unknown default: .secondary
+        }
     }
 }
 

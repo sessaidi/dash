@@ -130,12 +130,13 @@ enum AppTools {
                        properties: ["scope": JSONSchema.string("global or an extension id.")], required: ["scope"]) { input in
                 let scope = input["scope"]?.string ?? "global"
                 let custom = store.rule(scope)
-                let shipped = scope == "global" ? nil : host.extensions.first { $0.id == scope }?.defaultRules
+                let shipped = store.shippedRules(scope)
                 return ["scope": .string(scope), "in_use": store.rules(scope).map(JSONValue.string) ?? .null,
-                        "customized": .bool(custom != nil), "default": shipped.map(JSONValue.string) ?? .null]
+                        "customized": .bool(custom != nil), "default": shipped.isEmpty ? .null : .string(shipped.markdown),
+                        "list": .string(store.ruleSet(scope).markdown)]
             },
-            DashiiTool(name: "automation_set_rules", description: "Propose new rules for Dashii for a scope (global or an extension id): the user sees the full text and approves before anything changes. Read rules_show first and keep what still applies; empty text goes back to the extension's default.",
-                       properties: ["scope": JSONSchema.string("global or an extension id."), "text": JSONSchema.string("The rules, Markdown.")],
+            DashiiTool(name: "automation_set_rules", description: "Propose new rules for Dashii for a scope (global or an extension id): the user sees them and approves before anything changes. Read rules_show first and keep what still applies (its `list`). One rule per line: `- Always: …`, `- Never: …`, `- Prefer: …`, or `- …` for context; `- [off] …` keeps a rule turned off. Empty text goes back to the extension's default.",
+                       properties: ["scope": JSONSchema.string("global or an extension id."), "text": JSONSchema.string("The rules, one `- ` line each.")],
                        required: ["scope", "text"], requiresApproval: true) { input in
                 let scope = input["scope"]?.string ?? "global", text = input["text"]?.string ?? ""
                 if text.isEmpty { store.resetRules(scope) } else { store.setRules(scope, text: text) }

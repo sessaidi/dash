@@ -17,10 +17,21 @@ final class AutomationStore {
         try? context?.fetch(FetchDescriptor<AutomationRule>(predicate: #Predicate { $0.scope == scope })).first
     }
 
-    /// The rules in force for a scope: the user's (if enabled), else the extension's default.
+    /// The rules in force for a scope, as Dashii reads them: the user's list (if on), else the
+    /// extension's own. Rules turned off in the list aren't sent.
     func rules(_ scope: String) -> String? {
-        if let saved = rule(scope) { return saved.enabled && !saved.text.trimmed.isEmpty ? saved.text : nil }
-        return scope == "global" ? nil : host?.extensions.first { $0.id == scope }?.defaultRules
+        if let saved = rule(scope) { return saved.enabled ? RuleSet.parse(saved.text).instructions : nil }
+        return shippedRules(scope).instructions
+    }
+
+    /// An extension's own rules (none for global).
+    func shippedRules(_ scope: String) -> RuleSet {
+        scope == "global" ? RuleSet() : host?.extensions.first { $0.id == scope }?.rules ?? RuleSet()
+    }
+
+    /// The list the user edits: their version, else the extension's own.
+    func ruleSet(_ scope: String) -> RuleSet {
+        rule(scope).map { RuleSet.parse($0.text) } ?? shippedRules(scope)
     }
 
     func setRules(_ scope: String, text: String, enabled: Bool = true) {

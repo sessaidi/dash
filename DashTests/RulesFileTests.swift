@@ -25,7 +25,7 @@ struct RulesFileTests {
         #expect(await script.run("rules global")["result"]?["customized"] == false)
         #expect(await script.run("rules global text=\"Answer in English.\"")["error"] == nil)
         let shown = await script.run("rules global")
-        #expect(shown["result"]?["in_use"] == "Answer in English." && shown["result"]?["customized"] == true)
+        #expect(shown["result"]?["in_use"] == "- Answer in English." && shown["result"]?["customized"] == true)
         AutomationStore.shared.resetRules("global")
     }
 }

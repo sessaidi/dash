@@ -47,6 +47,9 @@ public protocol DashExtension: AnyObject {
     /// Instructions Dashii follows whenever this extension's tools or AI tasks are used; the
     /// user can edit them (Settings › Automation › Rules).
     var defaultRules: String? { get }
+    /// The same as a list (what users toggle and edit): declare it with `RuleSet { Rule.never(…) }`,
+    /// or leave the default, which reads `defaultRules` (Rules/<id>.md).
+    var rules: RuleSet { get }
     /// `/commands` it offers; the user can customize them.
     var defaultCommands: [CommandDefinition] { get }
     /// The activity events it emits, for the user's hooks.
@@ -80,6 +83,7 @@ extension DashExtension {
     /// By default, the Markdown file `Rules/<id>.md` (or `<id>.rules.md`) shipped in the
     /// extension's bundle: rules are text, edited without touching code. nil when there's none.
     public var defaultRules: String? { RulesFile.load(id: id, bundle: Bundle(for: type(of: self))) }
+    public var rules: RuleSet { RuleSet.parse(defaultRules ?? "") }
     public var defaultCommands: [CommandDefinition] { [] }
     public var events: [EventDefinition] { [] }
     public var knowledge: [KnowledgeEntity] { [] }
