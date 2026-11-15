@@ -13,6 +13,22 @@ packages:
   SwiftMarkdown:
     url: https://github.com/swiftlang/swift-markdown
     exactVersion: 0.7.3
+  # Tree-sitter: precise parsing for the knowledge graph (Swift, Go, TypeScript/JavaScript, Python).
+  SwiftTreeSitter:
+    url: https://github.com/tree-sitter/swift-tree-sitter
+    exactVersion: 0.10.0
+  TreeSitterSwift:
+    url: https://github.com/alex-pinkus/tree-sitter-swift
+    exactVersion: 0.7.4-with-generated-files
+  TreeSitterGo:
+    url: https://github.com/tree-sitter/tree-sitter-go
+    exactVersion: 0.25.0
+  TreeSitterTypeScript:
+    url: https://github.com/tree-sitter/tree-sitter-typescript
+    exactVersion: 0.23.2
+  TreeSitterPython:
+    url: https://github.com/tree-sitter/tree-sitter-python
+    exactVersion: 0.23.6
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -32,6 +48,16 @@ targets:
         product: DashKit
       - package: SwiftMarkdown
         product: Markdown
+      - package: SwiftTreeSitter
+        product: SwiftTreeSitter
+      - package: TreeSitterSwift
+        product: TreeSitterSwift
+      - package: TreeSitterGo
+        product: TreeSitterGo
+      - package: TreeSitterTypeScript
+        product: TreeSitterTypeScript
+      - package: TreeSitterPython
+        product: TreeSitterPython
     entitlements:
       path: Dash/Dash.entitlements
       properties:

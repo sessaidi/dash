@@ -1,8 +1,10 @@
 import Foundation
 
 /// What the indexer reads from one source file: declarations, imports, and the names each
-/// declaration calls. Line-based and per language: fast and dependency-free, good enough to
-/// map a codebase (names resolve to symbols later, by name).
+/// declaration calls. Swift, Go, TypeScript/JavaScript and Python are parsed with tree-sitter
+/// (`TreeSitterParser`); other languages, and files tree-sitter can't handle, with the
+/// line-based rules below: fast and dependency-free, good enough to map a codebase (names
+/// resolve to symbols later, by name).
 struct ParsedFile: Sendable, Equatable {
     struct Symbol: Sendable, Equatable {
         var name: String
@@ -15,6 +17,9 @@ struct ParsedFile: Sendable, Equatable {
         var signature: String
         /// Names called inside its body: `foo(` and `x.foo(`.
         var calls: Set<String>
+        /// Supertypes, adopted protocols, implemented interfaces, embedded Go structs and
+        /// interfaces, as written without generic arguments: `Sendable`, `io.Reader`.
+        var inherits: [String] = []
     }
 
     var language: String
@@ -74,6 +79,17 @@ enum CodeParser {
             parsed.language = "vue"
             return parsed
         }
+        guard let tree = TreeSitterParser.parse(text, language: language) else { return parseLines(text, language: language) }
+        if tree.clean { return tree.parsed }
+        // Tree-sitter recovers from syntax errors (or syntax newer than its grammar), but can
+        // lose declarations doing so: the line-based parser wins when it finds more.
+        let lines = parseLines(text, language: language)
+        return lines.symbols.count > tree.parsed.symbols.count ? lines : tree.parsed
+    }
+
+    /// The line-based parser: per-language regular expressions on each line, brace depth
+    /// (indentation for Python) for nesting and extents. The fallback for tree-sitter.
+    static func parseLines(_ text: String, language: String) -> ParsedFile {
         let lines = text.components(separatedBy: "\n")
         let rules = Rules.for(language)
         var symbols: [ParsedFile.Symbol] = []
@@ -123,8 +139,9 @@ enum CodeParser {
                 symbols.append(ParsedFile.Symbol(
                     name: declaration.name, kind: kind, container: container, line: index + 1,
                     endLine: endLine(from: index, lines: lines, language: language),
-                    signature: String(trimmed.prefix(200)), calls: []))
-                if ["type", "struct", "class", "interface", "enum", "protocol", "extension", "actor", "trait", "impl", "object", "record"].contains(declaration.kind) {
+                    signature: String(trimmed.prefix(200)), calls: [],
+                    inherits: typeKinds.contains(declaration.kind) ? inherits(trimmed, language: language) : []))
+                if typeKinds.contains(declaration.kind) {
                     containers.append((declaration.name, level))
                 }
             }
@@ -160,6 +177,43 @@ enum CodeParser {
     }
 
     // MARK: Helpers
+
+    /// Declarations that hold members.
+    static let typeKinds: Set<String> = ["type", "struct", "class", "interface", "enum", "protocol", "extension", "actor", "trait", "impl", "object", "record"]
+
+    /// The supertypes named on a type's declaration line: Swift and Kotlin `: A, B`, Java and
+    /// TypeScript `extends`/`implements`, Python `class A(B)`, Rust `impl Trait for X`.
+    static func inherits(_ declaration: String, language: String) -> [String] {
+        var lists: [String] = []
+        switch language {
+        case "swift":
+            let pattern = #"\b(?:class|struct|enum|protocol|actor|extension)\s+[\w.]+\s*(?:<[^>]*>)?\s*:\s*(.+?)\s*(?:\bwhere\b|\{|$)"#
+            if let list = firstMatch(pattern, in: declaration) { lists.append(list) }
+        case "kotlin":
+            let pattern = #"\b(?:class|interface|object)\s+\w+\s*(?:<[^>]*>)?\s*(?:(?:public|private|protected|internal)?\s*(?:constructor)?\s*\(.*\))?\s*:\s*(.+?)\s*(?:\bwhere\b|\{|$)"#
+            if let list = firstMatch(pattern, in: declaration) { lists.append(list) }
+        case "java", "typescript", "javascript":
+            if let list = firstMatch(#"\bextends\s+(.+?)\s*(?:\bimplements\b|\{|$)"#, in: declaration) { lists.append(list) }
+            if let list = firstMatch(#"\bimplements\s+(.+?)\s*(?:\{|$)"#, in: declaration) { lists.append(list) }
+        case "python":
+            if let list = firstMatch(#"^class\s+\w+\s*\((.*)\)\s*:"#, in: declaration) { lists.append(list) }
+        case "rust":
+            if let name = firstMatch(#"^(?:unsafe\s+)?impl(?:<[^>]*>)?\s+([\w:]+)(?:<[^>]*>)?\s+for\s+"#, in: declaration) { lists.append(name) }
+        default: break
+        }
+        return lists.flatMap { list -> [String] in
+            // Generic and constructor arguments go first: their commas don't separate supertypes.
+            var flat = list
+            while let range = flat.range(of: #"<[^<>]*>|\([^()]*\)"#, options: .regularExpression) { flat.removeSubrange(range) }
+            return flat.split(separator: ",").compactMap { item -> String? in
+                // Without attributes (`@unchecked Sendable`); keyword arguments (`metaclass=M`) aren't types.
+                let words = item.split(separator: " ").filter { !$0.hasPrefix("@") }
+                guard !item.contains("="), let name = words.last.map(String.init),
+                      name.range(of: #"^[A-Za-z_$][\w$.:]*$"#, options: .regularExpression) != nil else { return nil }
+                return name
+            }
+        }
+    }
 
     private static func indentation(_ line: String) -> Int {
         line.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
