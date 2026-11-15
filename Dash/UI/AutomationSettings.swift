@@ -440,7 +440,7 @@ private struct HookForm: View {
 
     // MARK: Action
 
-    private enum ActionKind: String, CaseIterable { case prompt, command, note, notify, tool, shell, requireApproval, block }
+    private enum ActionKind: String, CaseIterable { case prompt, command, note, notify, agent, tool, shell, requireApproval, block }
 
     private var actionKind: Binding<ActionKind> {
         Binding(get: {
@@ -450,6 +450,7 @@ private struct HookForm: View {
             case .note: .note
             case .notify: .notify
             case .tool: .tool
+            case .agent: .agent
             case .shell: .shell
             case .requireApproval: .requireApproval
             case .block: .block
@@ -462,6 +463,7 @@ private struct HookForm: View {
             case .notify: hook.action = .notify(title: "{{event.title}}", body: "{{event.detail}}")
             case .tool: hook.action = .tool(name: host.availableTools.first?.name ?? "", input: "{}")
             case .shell: hook.action = .shell(command: "")
+            case .agent: hook.action = .agent(id: AgentHub.shared.entries.first?.id ?? "", context: "{{count}} new: {{rows}}")
             case .requireApproval: hook.action = .requireApproval(message: "Claude wants to run {{tool.name}}.")
             case .block: hook.action = .block(message: "Not allowed by the user's hook.")
             }
@@ -475,6 +477,7 @@ private struct HookForm: View {
             Text("Run a /command").tag(ActionKind.command)
             Text("Create a note").tag(ActionKind.note)
             Text("Notify me").tag(ActionKind.notify)
+            Text("Wake an agent").tag(ActionKind.agent)
             Text("Run a tool").tag(ActionKind.tool)
             Text("Run a shell command").tag(ActionKind.shell)
             if case .beforeTool = hook.trigger {
@@ -514,6 +517,15 @@ private struct HookForm: View {
             }
             TextEditor(text: Binding(get: { input }, set: { hook.action = .tool(name: name, input: $0) }))
                 .font(.body.monospaced()).frame(minHeight: 70).scrollContentBackground(.hidden)
+        case .agent(let id, let context):
+            Picker("Agent", selection: Binding(get: { id }, set: { hook.action = .agent(id: $0, context: context) })) {
+                if id.isEmpty { Text("Pick an agent").tag("") }
+                ForEach(AgentHub.shared.entries, id: \.id) { Text($0.agent.name).tag($0.id) }
+            }
+            TextField("What to tell it", text: Binding(get: { context }, set: { hook.action = .agent(id: id, context: $0) }), axis: .vertical)
+                .lineLimit(1...4)
+            Text("The agent runs only when this hook fires, with what it found, then reports its findings like a scheduled run.")
+                .font(.caption).foregroundStyle(.secondary)
         case .shell(let command):
             TextField("Command", text: Binding(get: { command }, set: { hook.action = .shell(command: $0) }), prompt: Text("e.g. say {{event.title}}"))
                 .font(.body.monospaced())

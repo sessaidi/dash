@@ -193,6 +193,10 @@ final class HookEngine {
                 output = try await tool.run(json).jsonString()
             case .shell(let command):
                 output = try await shell(fill(command), hook: hook)
+            case .agent(let id, let context):
+                guard !id.isEmpty, AgentHub.shared.entry(id) != nil else { throw ToolError("Pick the agent this hook wakes.") }
+                let report = try await AgentHub.shared.run(id, reason: "Woken by “\(hook.name)”: \(fill(context))")
+                output = "\(report.status.rawValue): \(report.summary)"
             case .requireApproval, .block:
                 output = "Only applies before a tool runs."
             }

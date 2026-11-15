@@ -127,6 +127,9 @@ enum HookAction: Codable, Hashable {
     case notify(title: String, body: String)
     /// Run one of Dash's tools with a JSON input.
     case tool(name: String, input: String)
+    /// Wake a background agent with what the trigger found ({{rows}}…): agents run when needed,
+    /// not on a timer. `id` is the agent's id (Settings › Automation › Agents).
+    case agent(id: String, context: String)
     /// A shell command; asks every time before running.
     case shell(command: String)
     /// Before a tool: ask the user first.
@@ -141,6 +144,7 @@ enum HookAction: Codable, Hashable {
         case .note(let title, _, _): "Create note “\(title)”"
         case .notify: "Notify me"
         case .tool(let name, _): "Run \(name)"
+        case .agent(let id, _): id.isEmpty ? "Wake an agent (pick one)" : "Wake agent \(id)"
         case .shell: "Run a shell command"
         case .requireApproval: "Ask me first"
         case .block: "Block it"
