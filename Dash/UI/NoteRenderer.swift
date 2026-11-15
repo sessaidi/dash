@@ -100,7 +100,12 @@ struct NoteBlockView: View {
                     .overlay(alignment: .leading) { Capsule().fill(.tertiary).frame(width: 3) }
             }
         case .code(let language, let text):
-            CodeBlockView(language: language, text: text, printing: context.printing)
+            // Mermaid flowcharts draw natively; other diagrams stay as code.
+            if language?.lowercased() == "mermaid", let graph = MermaidGraph.parse(text) {
+                MermaidView(graph: graph)
+            } else {
+                CodeBlockView(language: language, text: text, printing: context.printing)
+            }
         case .rule:
             Divider()
         case .table(let header, let rows):
