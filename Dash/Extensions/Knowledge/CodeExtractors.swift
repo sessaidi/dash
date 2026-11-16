@@ -26,6 +26,12 @@ import Foundation
 //   table:<schema>.<name>        a database table or view (schema "public" when nothing says).
 //                                Signature "table account.users (id, email, …)" from its
 //                                migrations replayed in order (or its ORM model). Shared.
+//   workload:<repo id>:<Kind>/<name>  a Deployment, StatefulSet, DaemonSet, CronJob, Job, Rollout,
+//                                Cloud Run service/job or Helm release, from manifests, Helm
+//                                values (base and overlays merged) or Terraform. Signature
+//                                "Deployment users-api · image … · 2–10 replicas · port 8080";
+//                                env names, hosts, routes, ConfigMap/Secret names in the summary.
+//   image:<name>                 a container image, without its tag. Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -39,6 +45,8 @@ import Foundation
 //   topic (a Pub/Sub subscription) —consumes→ topic
 //   file     —migrates→ table      table —defined_in→ file (an ORM model)
 //   symbol (or file, view) —reads_table→ table, —writes_table→ table    (resolved by ServiceLinks)
+//   workload —defined_in→ file     service —deploys→ workload      workload —uses_image→ image
+//   workload —sets_env→ env        host (an Ingress/HTTPRoute host) —about→ workload, service
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -79,9 +87,10 @@ struct Extraction: Sendable {
 
 enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
-    static let version = "extract-v3"
+    static let version = "extract-v4"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(), MessagingExtractor(), DatabaseExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.

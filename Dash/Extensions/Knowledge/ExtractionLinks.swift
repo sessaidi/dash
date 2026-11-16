@@ -8,6 +8,8 @@ enum ExtractionLinks {
     static let source = "code-links"
     /// Refs whose names are folders of the repository ("" is its root); the others name functions.
     static let pathKinds: Set<String> = ["runs"]
+    /// Refs a family's own pass resolves (workload facts, …), not names of functions.
+    static let familyKinds: Set<String> = [RuntimeExtractor.factKind]
 
     static func link(repo: String, store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         let root = String(repo.dropFirst(5))
@@ -15,6 +17,7 @@ enum ExtractionLinks {
         let deployed = try await services(repo: repo, root: root, store: store)
         edges += deployed
         let refs = try await store.refs(repo: repo)
+        edges += try await WorkloadLinks.link(repo: repo, root: root, refs: refs, store: store)
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
             let directories = Set(try await store.nodes(kind: "directory", repo: repo, limit: 100_000).map(\.path))
@@ -23,7 +26,7 @@ enum ExtractionLinks {
                 let prefix = ("file:" + root + "/").count
                 try await store.upsert(TableHistory.nodes(TableHistory.replay(facts.map { (String($0.file.dropFirst(prefix)), $0.ref) })))
             }
-            for (file, ref) in refs where !ServiceLinks.refKinds.contains(ref.kind) && !DatabaseExtractor.refKinds.contains(ref.kind) {
+            for (file, ref) in refs where !ServiceLinks.refKinds.contains(ref.kind) && !DatabaseExtractor.refKinds.contains(ref.kind) && !familyKinds.contains(ref.kind) {
                 if pathKinds.contains(ref.kind) {
                     guard let path = ref.names.first else { continue }
                     if path.isEmpty {
