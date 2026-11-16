@@ -471,4 +471,68 @@ struct KnowledgeOperationsTests {
         #expect(dark.signature == "Feature flag dark-mode (OpenFeature)" && dark.summary == "Defined in flags.flagd.json, enabled, variants off, on.")
         #expect(try await targets(dark.id, "defined_in", store: store) == [indexer.fileID("flags.flagd.json")])
     }
+
+    // MARK: Config keys
+
+    @Test func findsConfigKeysAndTheirReaders() async throws {
+        let root = try makeFixtureRepo([
+            "config/production.toml": """
+                title = "billing"
+                [Kafka]
+                Brokers = ["kafka-a:80",
+                  "kafka-b:80"]
+                Topic = "events"
+                [Postmark]
+                ApiKey = "hunter2-postmark"
+                """,
+            "config/settings.yaml": "server:\n  port: 8080\n  tls: {}\nfeatures:\n  - search\n",
+            "config/deploy.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n",
+            "appsettings.json": #"{"Logging": {"Level": "Info"}, "1": "x"}"#,
+            "locales/en.json": #"{"greeting": "hello"}"#,
+            "package.json": #"{"name": "billing", "version": "1.0.0"}"#,
+            "internal/config/load.go": """
+                package config
+
+                import "github.com/spf13/viper"
+
+                func Port() int { return viper.GetInt("server.port") }
+                """,
+            "internal/kafka/config.go": """
+                package kafka
+
+                type Config struct {
+                \tBrokers []string `toml:"brokers"`
+                \tTopic   string   `toml:"topic"`
+                \tOther   string   `toml:"nothing_matches"`
+                }
+                """,
+            "web/db.ts": "import config from 'config';\n\nexport function dbUrl() {\n  return config.get('database.url');\n}\n",
+            "app/settings.py": "import configparser\n\ndef host(cfg):\n    return cfg.get(\"database\", \"host\")\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        #expect(try await targets(indexer.fileID("config/production.toml"), "sets_config", store: store)
+            == ["config:title", "config:kafka.brokers", "config:kafka.topic", "config:postmark.apikey"])
+        #expect(try await targets(indexer.fileID("config/settings.yaml"), "sets_config", store: store) == ["config:server.port", "config:server.tls", "config:features"])
+        #expect(try await targets(indexer.fileID("appsettings.json"), "sets_config", store: store) == ["config:logging.level"])
+        for path in ["config/deploy.yaml", "locales/en.json", "package.json"] {
+            #expect(try await targets(indexer.fileID(path), "sets_config", store: store).isEmpty)
+        }
+        #expect(try await store.node("config:kafka.brokers")?.name == "Kafka.Brokers")
+
+        func readers(_ key: String) async throws -> Set<String> {
+            Set(try await store.neighbors("config:" + key, kinds: ["reads_config"]).filter(\.incoming).map { "\($0.node.path)#\($0.node.name) \($0.edge.weight)" })
+        }
+        #expect(try await readers("server.port") == ["internal/config/load.go#Port 1.0"])
+        #expect(try await readers("kafka.brokers") == ["internal/kafka/config.go#Config 0.8"])
+        #expect(try await readers("kafka.topic") == ["internal/kafka/config.go#Config 0.8"])
+        #expect(try await readers("database.url") == ["web/db.ts#dbUrl 1.0"])
+        #expect(try await readers("database.host") == ["app/settings.py#host 1.0"])
+        #expect(try await store.node("config:database.url")?.signature == "Config key database.url")
+
+        // Values are never kept.
+        let everything = try await store.nodes("SELECT * FROM nodes", []).flatMap { [$0.name, $0.signature, $0.summary] }
+        #expect(!everything.contains { $0.contains("hunter2") || $0.contains("kafka-a") })
+    }
 }

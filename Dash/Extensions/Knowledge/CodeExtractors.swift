@@ -38,6 +38,7 @@ import Foundation
 //                                its steps in the summary.
 //   flag:<key>                   a feature flag (LaunchDarkly, OpenFeature, Unleash, … or a
 //                                wrapper); language the system. Shared.
+//   config:<dotted.key>          a configuration key, lowercased (name as written). Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -56,6 +57,7 @@ import Foundation
 //   file (a Dockerfile, compose file) —uses_image→ image
 //   ci_job   —defined_in→ file     ci_job —uses_image→ image       ci_job —deploys→ service (or —about→)
 //   symbol (or file) —checks_flag→ flag     flag —defined_in→ file (flagd)
+//   file     —sets_config→ config  symbol (or file) —reads_config→ config (struct tags: link pass, below 1)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -99,7 +101,7 @@ enum CodeExtractors {
     static let version = "extract-v4"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
-                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor()]
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
