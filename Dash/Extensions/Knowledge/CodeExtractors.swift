@@ -42,7 +42,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v2"
 
-    static let all: [any CodeExtractor] = []
+    static let all: [any CodeExtractor] = [ServiceExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
@@ -260,6 +260,19 @@ enum SourceScan {
         return regex(pattern).matches(in: text, range: NSRange(location: 0, length: string.length)).map { match in
             (0..<match.numberOfRanges).map { match.range(at: $0).location == NSNotFound ? "" : string.substring(with: match.range(at: $0)) }
         }
+    }
+
+    /// A path relative to `directory` inside the repository ("" for its root), nil when it leaves it.
+    static func join(_ directory: String, _ relative: String) -> String? {
+        var parts = relative.hasPrefix("/") ? [] : directory.split(separator: "/").map(String.init)
+        for part in relative.split(separator: "/").map(String.init) {
+            switch part {
+            case ".", "": continue
+            case "..": if parts.isEmpty { return nil } else { parts.removeLast() }
+            default: parts.append(part)
+            }
+        }
+        return parts.joined(separator: "/")
     }
 
     static func isTest(_ path: String) -> Bool {

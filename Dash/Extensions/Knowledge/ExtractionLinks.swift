@@ -12,6 +12,7 @@ enum ExtractionLinks {
     static func link(repo: String, store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         let root = String(repo.dropFirst(5))
         var edges: [KnowledgeEdge] = []
+        edges += try await services(repo: repo, root: root, store: store)
         let refs = try await store.refs(repo: repo)
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
@@ -31,6 +32,26 @@ enum ExtractionLinks {
         }
         try await store.replaceLinks(repo: repo, edges)
         try await store.pruneShared(kinds: sharedKinds)
+    }
+
+    /// Services no file defines any more go; the others are deployed by the repository and say
+    /// where they're defined.
+    private static func services(repo: String, root: String, store: KnowledgeStore) async throws -> [KnowledgeEdge] {
+        var edges: [KnowledgeEdge] = []
+        var changed: [KnowledgeNode] = []
+        for service in try await store.nodes(kind: "service", repo: repo, limit: 10_000) {
+            let definitions = try await store.neighbors(service.id, kinds: ["defined_in"], limit: 50).filter { !$0.incoming }.map(\.node.path).sorted()
+            if definitions.isEmpty {
+                try await store.removeNode(service.id)
+                continue
+            }
+            edges.append(KnowledgeEdge(src: repo, dst: service.id, kind: "deploys", source: source))
+            var node = service
+            node.signature = "Defined in " + definitions.prefix(4).joined(separator: ", ") + (definitions.count > 4 ? " and \(definitions.count - 4) more" : "")
+            if node.signature != service.signature { changed.append(node) }
+        }
+        try await store.upsert(changed)
+        return edges
     }
 
     /// Edges from a ref to the functions its names stand for: the first name that resolves wins,
