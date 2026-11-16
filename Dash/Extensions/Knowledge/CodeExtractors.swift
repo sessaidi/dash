@@ -42,7 +42,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v2"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
@@ -162,6 +162,55 @@ final class ExtractionInput {
             best = index
         }
         return best.map { symbolIDs[$0] }
+    }
+
+    /// The innermost function or method around a line.
+    func function(at line: Int) -> ParsedFile.Symbol? {
+        parsed.symbols.filter { ["function", "method"].contains($0.kind) && $0.line <= line && line <= max($0.endLine, $0.line) }
+            .max { $0.line < $1.line }
+    }
+
+    /// What a method is called on, read backwards from the "." before its name: `s.mux` in
+    /// `s.mux.Get(`, `r.With(auth)` in `r.With(auth).Get(`.
+    func receiver(before dot: Int) -> String {
+        var index = dot - 1
+        var depth = 0
+        while index >= 0 {
+            let unit = units[index]
+            if unit == 41 || unit == 93 { depth += 1 }
+            else if unit == 40 || unit == 91 { if depth == 0 { break }; depth -= 1 }
+            else if depth == 0, !(SourceScan.isIdentifier(unit) || unit == 46) { break }
+            index -= 1
+        }
+        return index + 1 < dot ? string.substring(with: NSRange(location: index + 1, length: dot - index - 1)) : ""
+    }
+
+    /// The text from the start of the line up to `offset`.
+    func lineText(before offset: Int) -> String {
+        let start = lineStarts[line(at: offset) - 1]
+        return offset > start ? string.substring(with: NSRange(location: start, length: offset - start)) : ""
+    }
+
+    /// Calls chained after `offset`: `.Methods("GET").Name("x")` → [("Methods", …), ("Name", …)].
+    func chain(after offset: Int) -> [(name: String, arguments: [NSRange], end: Int)] {
+        var result: [(String, [NSRange], Int)] = []
+        var index = offset
+        while true {
+            while index < units.count, SourceScan.isSpace(units[index]) { index += 1 }
+            guard index < units.count, units[index] == 46 else { break }
+            var end = index + 1
+            while end < units.count, SourceScan.isIdentifier(units[end]) { end += 1 }
+            let name = string.substring(with: NSRange(location: index + 1, length: end - index - 1))
+            guard !name.isEmpty, end < units.count, units[end] == 40, let call = arguments(at: end) else { break }
+            result.append((name, call.ranges, call.end))
+            index = call.end
+        }
+        return result
+    }
+
+    /// The offset of the bracket closing the one at `open` (`(`, `[` or `{`).
+    func closing(at open: Int) -> Int? {
+        SourceScan.arguments(units, at: open, limit: 200_000).map { $0.end - 1 }
     }
 
     /// The first declaration starting on or within a few lines after `line` (what a decorator decorates).
@@ -338,9 +387,9 @@ enum SourceScan {
         return parts
     }
 
-    /// See `ExtractionInput.arguments(at:limit:)`.
+    /// See `ExtractionInput.arguments(at:limit:)`; also reads `[…]` and `{…}` (their items split at commas).
     static func arguments(_ units: [unichar], at open: Int, limit: Int) -> (ranges: [NSRange], end: Int)? {
-        guard open < units.count, units[open] == 40 else { return nil }
+        guard open < units.count, let closer: unichar = [40: 41, 91: 93, 123: 125][units[open]] else { return nil }
         var ranges: [NSRange] = []
         var depth = 0
         var start = open + 1
@@ -372,7 +421,7 @@ enum SourceScan {
             case 40, 91, 123: depth += 1
             case 41, 93, 125:
                 if depth == 0 {
-                    guard unit == 41 else { return nil }
+                    guard unit == closer else { return nil }
                     add(index)
                     return (ranges, index + 1)
                 }
@@ -387,7 +436,12 @@ enum SourceScan {
         return nil
     }
 
-    private static func isSpace(_ unit: unichar) -> Bool { unit == 32 || unit == 9 || unit == 10 || unit == 13 }
+    static func isSpace(_ unit: unichar) -> Bool { unit == 32 || unit == 9 || unit == 10 || unit == 13 }
+
+    /// A letter, digit, `_` or `$` (ASCII: identifiers in route code are).
+    static func isIdentifier(_ unit: unichar) -> Bool {
+        (unit >= 48 && unit <= 57) || (unit >= 65 && unit <= 90) || (unit >= 97 && unit <= 122) || unit == 95 || unit == 36
+    }
 
     /// Top-level Go string constants and variables: name → expression.
     static func goConstants(_ text: String) -> [String: String] {

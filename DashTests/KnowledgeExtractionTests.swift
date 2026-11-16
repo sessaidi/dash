@@ -224,4 +224,309 @@ struct KnowledgeExtractionTests {
         #expect(input.line(at: (input.text as NSString).range(of: "const v1").location) == 7)
         #expect(input.symbol(at: 9) == "sym:\(root.path)/api/server.go#routes")
     }
+
+    // MARK: Endpoints
+
+    /// "METHOD /path" → best handler name for the endpoints a fixture file declares.
+    private func routes(_ root: URL, _ path: String) throws -> [String: String] {
+        let extraction = EndpointExtractor().extract(try extractionInput(root, path))
+        var result: [String: String] = [:]
+        for node in extraction.nodes {
+            result[String(node.id.dropFirst("endpoint:".count))] = extraction.refs.first { $0.src == node.id }?.names.first ?? ""
+        }
+        return result
+    }
+
+    @Test func normalizesEndpointPathsAndHandlers() {
+        #expect(EndpointExtractor.normalize("/users/:id/plans/{plan_id}") == "/users/{}/plans/{}")
+        #expect(EndpointExtractor.normalize("users/<int:pk>/") == "/users/{}")
+        #expect(EndpointExtractor.normalize("/invoices/[id]") == "/invoices/{}")
+        #expect(EndpointExtractor.normalize("/files/*path") == "/files/*")
+        #expect(EndpointExtractor.normalize("/legacy/(?P<slug>[\\w-]+)/$") == "/legacy/{}")
+        #expect(EndpointExtractor.normalize("https://billing.acme.test//v1/plans?all=1") == "/v1/plans")
+        #expect(EndpointExtractor.clean("/users/:id/") == "/users/:id")
+        #expect(EndpointExtractor.join("/api/", "/users") == "/api/users" && EndpointExtractor.join("/api", "/") == "/api")
+
+        #expect(EndpointExtractor.handlerNames("hf.Handle(handlers.Invoices.Get)") == ["handlers.Invoices.Get"])
+        #expect(EndpointExtractor.handlerNames("applyMiddlewares(middlewares.Auth, hf.Handle(h.Create))") == ["h.Create", "middlewares.Auth"])
+        #expect(EndpointExtractor.handlerNames("users.Get(repo)") == ["users.Get", "repo"])
+        #expect(EndpointExtractor.handlerNames(#"http.StripPrefix("/static/", files)"#) == ["files"])
+        #expect(EndpointExtractor.handlerNames("views.AccountView.as_view()") == ["views.AccountView"])
+        #expect(EndpointExtractor.handlerNames("(req, res) => res.send('ok')").isEmpty && EndpointExtractor.handlerNames("async (req) => {}").isEmpty)
+        #expect(EndpointExtractor.handlerNames("asyncHandler(orders.create)") == ["orders.create"])
+        #expect(EndpointExtractor.handlerNames("func(w http.ResponseWriter, r *http.Request) {}").isEmpty)
+    }
+
+    @Test func findsGoRoutes() throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/acme\n",
+            "internal/paths/paths.go": "package paths\n\nconst Service = \"/billing\"\n",
+            "cmd/gateway/routes.go": """
+                package main
+
+                import (
+                \t"net/http"
+
+                \t"goji.io"
+                \t"goji.io/pat"
+                \t"example.com/acme/internal/paths"
+                )
+
+                func (s *Server) routes() {
+                \tall := goji.SubMux()
+                \ts.mux.Handle(pat.New(paths.Service+"/*"), all)
+                \tall.Handle(pat.Get("/invoices/:id"), hf.Handle(handlers.Invoices.Get))
+                \tall.Handle(pat.Post("/invoices"), applyMiddlewares(middlewares.Auth, hf.Handle(handlers.Invoices.Create)))
+                \ts.mux.Handle(pat.New("/health"), health)
+                \ts.mux.HandleFunc(pat.Get("/version"), func(w http.ResponseWriter, r *http.Request) {})
+                \ttraced := newTraced(cfg, all)
+                \ttraced.Handle(pat.Get("/plans"), handlers.Plans.List)
+                \ts.mux.Handle(pat.New("/admin/*"), adminMux)
+                }
+                """,
+            "api/chi.go": """
+                package api
+
+                import "github.com/go-chi/chi/v5"
+
+                func Router() http.Handler {
+                \tr := chi.NewRouter()
+                \tr.Get("/", index)
+                \tr.Route("/v1", func(r chi.Router) {
+                \t\tr.Get("/users/{userID}", users.Show)
+                \t\tr.With(auth).Post("/users", users.Create)
+                \t})
+                \tr.Mount("/admin", adminRouter())
+                \treturn r
+                }
+
+                func adminRouter() http.Handler {
+                \tr := chi.NewRouter()
+                \tr.Delete("/cache", clearCache)
+                \treturn r
+                }
+                """,
+            "api/mux.go": """
+                package api
+
+                import "github.com/gorilla/mux"
+
+                func routes(r *mux.Router) {
+                \tapi := r.PathPrefix("/api").Subrouter()
+                \tapi.HandleFunc("/orders/{id:[0-9]+}", getOrder).Methods("GET", "HEAD")
+                \tapi.Path("/orders").Methods(http.MethodPost).HandlerFunc(createOrder)
+                }
+                """,
+            "api/gin.go": """
+                package api
+
+                import "github.com/gin-gonic/gin"
+
+                func Setup(r *gin.Engine) {
+                \tv1 := r.Group("/v1")
+                \tv1.GET("/plans/:id", plans.Get)
+                \tv1.Handle("PUT", "/plans/:id", plans.Update)
+                \tclient.Get("/not-a-route")
+                }
+                """,
+            "cmd/billing-api/main.go": """
+                package main
+
+                import "net/http"
+
+                func main() {
+                \tmux := http.NewServeMux()
+                \tmux.HandleFunc("GET /invoices/{id}", showInvoice)
+                \tmux.Handle("/static/", http.StripPrefix("/static/", files))
+                \thttp.ListenAndServe(":8080", mux)
+                }
+                """,
+            "api/chi_test.go": "package api\n\nfunc TestX() {\n\tr.Get(\"/test-only\", h)\n}\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(try routes(root, "cmd/gateway/routes.go") == [
+            "GET /billing/invoices/{}": "handlers.Invoices.Get", "POST /billing/invoices": "handlers.Invoices.Create",
+            "ANY /health": "health", "GET /version": "", "GET /billing/plans": "handlers.Plans.List",
+        ])
+        #expect(try routes(root, "api/chi.go") == ["GET /": "index", "GET /v1/users/{}": "users.Show", "POST /v1/users": "users.Create", "DELETE /admin/cache": "clearCache"])
+        #expect(try routes(root, "api/mux.go") == ["GET /api/orders/{}": "getOrder", "HEAD /api/orders/{}": "getOrder", "POST /api/orders": "createOrder"])
+        #expect(try routes(root, "api/gin.go") == ["GET /v1/plans/{}": "plans.Get", "PUT /v1/plans/{}": "plans.Update"])
+        #expect(try routes(root, "cmd/billing-api/main.go") == ["GET /invoices/{}": "showInvoice", "ANY /static": "files"])
+        #expect(!EndpointExtractor().accepts(path: "api/chi_test.go", language: "go"))
+
+        let node = try #require(EndpointExtractor().extract(try extractionInput(root, "api/chi.go")).nodes.first { $0.id == "endpoint:GET /v1/users/{}" })
+        #expect(node.name == "GET /v1/users/{userID}" && node.language == "chi" && node.signature == "GET /v1/users/{} → users.Show")
+    }
+
+    @Test func findsScriptRoutes() throws {
+        let root = try makeFixtureRepo([
+            "web/server.ts": """
+                import express from 'express'
+
+                const app = express()
+                const api = express.Router()
+                api.get('/users/:id', auth, users.show)
+                api.route('/orders').get(orders.list).post(asyncHandler(orders.create))
+                app.use('/api/v1', api)
+                app.get('/health', (req, res) => res.send('ok'))
+                axios.get('/remote', { timeout: 5 })
+                """,
+            "web/koa.js": "const Router = require('@koa/router')\nconst router = new Router({ prefix: '/koa' })\nrouter.del('/x', h)\nrouter.post('/items', items.add)\n",
+            "web/fastify.ts": """
+                import Fastify from 'fastify'
+
+                const app = Fastify({ logger: true })
+                app.route({ method: ['GET', 'HEAD'], url: '/plans', handler: plans.list })
+                """,
+            "web/users.controller.ts": """
+                import { Controller, Get, Post } from '@nestjs/common'
+
+                @Controller('users')
+                export class UsersController {
+                  @Get(':id')
+                  findOne(id: string) {
+                    return id
+                  }
+
+                  @Post()
+                  create() {}
+                }
+                """,
+            "web/pages/api/invoices/[id].ts": "export default function handler(req, res) {\n  res.json({})\n}\n",
+            "web/app/(shop)/billing/[plan]/route.ts": "export async function GET(request: Request) {\n  return Response.json({})\n}\n\nexport async function POST() {}\n",
+            "web/client.ts": "import axios from 'axios'\n\nexport const load = () => axios.get('/users/1', { params: {} })\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let base = "sym:\(root.path)/web/"
+        let express = try routes(root, "web/server.ts")
+        #expect(express == [
+            "GET /api/v1/users/{}": "users.show", "GET /api/v1/orders": "orders.list", "POST /api/v1/orders": "orders.create", "GET /health": "",
+        ])
+        #expect(try routes(root, "web/koa.js") == ["DELETE /koa/x": "h", "POST /koa/items": "items.add"])
+        #expect(try routes(root, "web/fastify.ts") == ["GET /plans": "plans.list", "HEAD /plans": "plans.list"])
+        #expect(try routes(root, "web/users.controller.ts") == [
+            "GET /users/{}": base + "users.controller.ts#UsersController.findOne", "POST /users": base + "users.controller.ts#UsersController.create",
+        ])
+        #expect(try routes(root, "web/pages/api/invoices/[id].ts") == ["ANY /api/invoices/{}": base + "pages/api/invoices/[id].ts#handler"])
+        #expect(try routes(root, "web/app/(shop)/billing/[plan]/route.ts") == [
+            "GET /billing/{}": base + "app/(shop)/billing/[plan]/route.ts#GET", "POST /billing/{}": base + "app/(shop)/billing/[plan]/route.ts#POST",
+        ])
+        #expect(try routes(root, "web/client.ts").isEmpty)
+    }
+
+    @Test func findsPythonAndVaporRoutes() throws {
+        let root = try makeFixtureRepo([
+            "api/app.py": """
+                from flask import Flask, Blueprint
+
+                app = Flask(__name__)
+                bp = Blueprint("invoices", __name__, url_prefix="/invoices")
+
+                @bp.route("/<int:invoice_id>", methods=["GET", "DELETE"])
+                def invoice(invoice_id):
+                    return ""
+
+                @app.get("/health")
+                def health():
+                    return "ok"
+
+                app.register_blueprint(bp, url_prefix="/api")
+                """,
+            "api/routers.py": """
+                from fastapi import APIRouter, FastAPI
+
+                router = APIRouter(prefix="/plans")
+
+                @router.post("/{plan_id}/renew")
+                async def renew(plan_id: str):
+                    ...
+
+                app = FastAPI()
+                app.include_router(router, prefix="/v2")
+                """,
+            "api/urls.py": """
+                from django.urls import include, path, re_path
+                from . import views
+
+                urlpatterns = [
+                    path("accounts/<int:pk>/", views.AccountView.as_view(), name="account"),
+                    re_path(r"^legacy/(?P<slug>[\\w-]+)/$", views.legacy),
+                    path("admin/", include("admin.urls")),
+                ]
+                """,
+            "Sources/App/routes.swift": """
+                import Vapor
+
+                func routes(_ app: Application) throws {
+                    app.get("health") { req in "ok" }
+                    let users = app.grouped("api", "users")
+                    users.get(":id", use: UserController.show)
+                    users.on(.DELETE, ":id", use: UserController.delete)
+                    app.group("admin") { admin in
+                        admin.post("reindex") { req async throws -> HTTPStatus in .ok }
+                    }
+                    if let id = req.parameters.get("id") { print("in") }
+                }
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let base = "sym:\(root.path)/api/"
+        #expect(try routes(root, "api/app.py") == [
+            "GET /api/invoices/{}": base + "app.py#invoice", "DELETE /api/invoices/{}": base + "app.py#invoice", "GET /health": base + "app.py#health",
+        ])
+        #expect(try routes(root, "api/routers.py") == ["POST /v2/plans/{}/renew": base + "routers.py#renew"])
+        #expect(try routes(root, "api/urls.py") == ["ANY /accounts/{}": "views.AccountView", "ANY /legacy/{}": "views.legacy"])
+        #expect(try routes(root, "Sources/App/routes.swift") == [
+            "GET /health": "", "GET /api/users/{}": "UserController.show", "DELETE /api/users/{}": "UserController.delete", "POST /admin/reindex": "",
+        ])
+    }
+
+    @Test func linksEndpointsToHandlersAndServices() async throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/acme\n",
+            "apps/billing-api/Dockerfile": "FROM golang:1.23\n",
+            "apps/billing-api/main.go": """
+                package main
+
+                import "github.com/go-chi/chi/v5"
+
+                func main() {
+                \tr := chi.NewRouter()
+                \tr.Get("/invoices/{id}", handlers.ShowInvoice)
+                \tr.Post("/invoices", handlers.CreateInvoice)
+                }
+                """,
+            "apps/billing-api/handlers/invoices.go": "package handlers\n\nfunc ShowInvoice(w http.ResponseWriter, r *http.Request) {}\n\nfunc CreateInvoice(w http.ResponseWriter, r *http.Request) {}\n",
+            "web/package.json": #"{"name": "web", "scripts": {"start": "next start"}}"#,
+            "web/pages/api/ping.ts": "export default function handler(req, res) {\n  res.json({})\n}\n",
+            "scripts/serve.py": "from flask import Flask\n\napp = Flask(__name__)\n\n@app.get(\"/metrics\")\ndef metrics():\n    return \"\"\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        var indexer = CodeIndexer(root: root, store: store)
+        indexer.readHistory = false
+        _ = try await indexer.index()
+        let repo = indexer.repoID
+
+        let show = try await store.neighbors(EndpointExtractor.id(method: "GET", path: "/invoices/{}"))
+        #expect(show.contains { $0.edge.kind == "handled_by" && $0.node.id == "sym:\(root.path)/apps/billing-api/handlers/invoices.go#ShowInvoice" })
+        #expect(show.contains { $0.edge.kind == "defined_in" && $0.node.id == indexer.fileID("apps/billing-api/main.go") })
+        func exposed(_ service: String) async throws -> Set<String> {
+            Set(try await store.neighbors(ServiceExtractor.id(repo: repo, name: service), kinds: ["exposes"]).filter { !$0.incoming }.map(\.node.id))
+        }
+        #expect(try await exposed("billing-api") == ["endpoint:GET /invoices/{}", "endpoint:POST /invoices"])
+        // Endpoints outside any service folder are nobody's when there are several services.
+        #expect(try await exposed("web") == ["endpoint:ANY /api/ping"])
+        let ping = try await store.neighbors("endpoint:ANY /api/ping", kinds: ["handled_by"])
+        #expect(ping.first?.node.id == "sym:\(root.path)/web/pages/api/ping.ts#handler" && ping.first?.edge.weight == 1)
+        #expect(try await store.node("endpoint:GET /metrics") != nil)
+        #expect(try await store.search("invoices", kinds: ["endpoint"]).count == 2)
+
+        // A route that goes takes its endpoint, handler edge and exposure with it.
+        try "package main\n\nimport \"github.com/go-chi/chi/v5\"\n\nfunc main() {\n\tr := chi.NewRouter()\n\tr.Post(\"/invoices\", handlers.CreateInvoice)\n}\n"
+            .write(to: root.appending(path: "apps/billing-api/main.go"), atomically: true, encoding: .utf8)
+        _ = try await indexer.index()
+        #expect(try await store.node("endpoint:GET /invoices/{}") == nil)
+        #expect(try await exposed("billing-api") == ["endpoint:POST /invoices"])
+    }
 }
