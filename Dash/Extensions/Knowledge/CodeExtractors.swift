@@ -6,7 +6,8 @@ import Foundation
 //
 //   service:<repo id>:<name>     something the repository deploys or runs: a Dockerfile, Helm
 //                                chart, Kubernetes workload, compose service, package.json start
-//                                script or Go command. Signature "Defined in <files>".
+//                                script or Go command. Signature "Defined in <files>", with the
+//                                Dockerfile's ports and command ("· port 8080 · runs /app/server").
 //   endpoint:<METHOD> <path>     an HTTP route, from code or an OpenAPI document. Parameters are
 //                                written {}, the method ANY when it isn't known. Shared. Its
 //                                name keeps the path as written; its language is the framework.
@@ -47,6 +48,7 @@ import Foundation
 //   symbol (or file, view) —reads_table→ table, —writes_table→ table    (resolved by ServiceLinks)
 //   workload —defined_in→ file     service —deploys→ workload      workload —uses_image→ image
 //   workload —sets_env→ env        host (an Ingress/HTTPRoute host) —about→ workload, service
+//   file (a Dockerfile, compose file) —uses_image→ image
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -90,7 +92,7 @@ enum CodeExtractors {
     static let version = "extract-v4"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
-                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor()]
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.

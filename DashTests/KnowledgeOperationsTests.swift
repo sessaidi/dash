@@ -237,4 +237,50 @@ struct KnowledgeOperationsTests {
         #expect(try await store.node(worker.id) == nil)
         #expect(try await store.node("image:ghcr.io/acme/billing-worker") == nil)
     }
+
+    // MARK: Containers
+
+    @Test func readsDockerfilesAndComposeImages() async throws {
+        let multiStage = """
+            # syntax=docker/dockerfile:1
+            ARG GO_VERSION=1.23
+            FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS build
+            EXPOSE 9999
+            RUN go build \\
+                -o /out/server ./cmd/server
+            FROM build AS test
+            FROM gcr.io/distroless/static:nonroot
+            COPY --from=build /out/server /app/server
+            EXPOSE 8080/tcp 9090
+            ENTRYPOINT ["/app/server", "--token=ghp_abcdefghijklmnopqrstuvwxyz0123456789"]
+            CMD ["serve"]
+            """
+        let dockerfile = ContainerExtractor.dockerfile(multiStage)
+        #expect(dockerfile.images == ["golang", "gcr.io/distroless/static"])
+        #expect(dockerfile.facts.prefix(2) == ["port=8080", "port=9090"])
+        #expect(dockerfile.facts.last == "cmd=serve")
+        let entrypoint = try #require(dockerfile.facts.first { $0.hasPrefix("entrypoint=") })
+        #expect(entrypoint.hasPrefix("entrypoint=/app/server") && !entrypoint.contains("ghp_abcdefghij"))
+        #expect(ContainerExtractor.dockerfile("FROM scratch\nCOPY app /\n").images.isEmpty)
+
+        let root = try makeFixtureRepo([
+            "apps/billing/Dockerfile": "FROM node:20-alpine\nEXPOSE 3000\nCMD node server.js\n",
+            "apps/billing/server.js": "require('http').createServer().listen(3000)\n",
+            "docker-compose.yml": """
+                services:
+                  billing:
+                    build: apps/billing
+                  db:
+                    image: postgres:16
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        #expect(try await targets(indexer.fileID("apps/billing/Dockerfile"), "uses_image", store: store) == ["image:node"])
+        #expect(try await targets(indexer.fileID("docker-compose.yml"), "uses_image", store: store) == ["image:postgres"])
+        #expect(try await store.node("image:postgres")?.signature == "Container image postgres")
+        let billing = try #require(try await store.node(ServiceExtractor.id(repo: indexer.repoID, name: "billing")))
+        #expect(billing.signature == "Defined in apps/billing/Dockerfile, docker-compose.yml · port 3000 · runs node server.js")
+    }
 }

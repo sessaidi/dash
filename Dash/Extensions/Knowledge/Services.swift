@@ -35,12 +35,8 @@ struct ServiceExtractor: CodeExtractor {
         var found: [(name: String, folder: String?, line: Int, signature: String)] = []
         switch file.language {
         case "dockerfile":
-            let parts = file.fileName.split(separator: ".", maxSplits: 1).map(String.init)
-            let suffix = parts.count == 2 && parts[0] == "Dockerfile" ? parts[1].lowercased() : ""
-            let folder = Self.codeFolder(of: file.directory, name: nil)
-            let base = folder.isEmpty ? file.repoName : (folder as NSString).lastPathComponent
-            let name = suffix.isEmpty || Self.variants.contains(suffix) ? base : base + "-" + suffix
-            found.append((name, folder, 1, "Dockerfile"))
+            let service = Self.dockerfileService(file)
+            found.append((service.name, service.folder, 1, "Dockerfile"))
         case "yaml":
             found += yaml(file)
         case "json":
@@ -67,6 +63,16 @@ struct ServiceExtractor: CodeExtractor {
             if let folder = service.folder { result.refs.append(KnowledgeRef(src: id, kind: "runs", names: [folder], line: service.line)) }
         }
         return result
+    }
+
+    /// The service a Dockerfile builds: named after its code folder (the repository at its root),
+    /// `Dockerfile.<suffix>` adding the suffix unless it's a variant of the same image.
+    static func dockerfileService(_ file: ExtractionInput) -> (name: String, folder: String) {
+        let parts = file.fileName.split(separator: ".", maxSplits: 1).map(String.init)
+        let suffix = parts.count == 2 && parts[0] == "Dockerfile" ? parts[1].lowercased() : ""
+        let folder = codeFolder(of: file.directory, name: nil)
+        let base = folder.isEmpty ? file.repoName : (folder as NSString).lastPathComponent
+        return (suffix.isEmpty || variants.contains(suffix) ? base : base + "-" + suffix, folder)
     }
 
     /// `<name>` for a file directly in a `cmd/<name>/` folder.
