@@ -12,7 +12,7 @@ struct KnowledgeView: View {
     @State private var selected: KnowledgeNode?
     @State private var history: [KnowledgeNode] = []
 
-    static let kinds = ["", "repo", "directory", "file", "symbol", "service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
+    static let kinds = ["", "repo", "directory", "file", "symbol", "service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table", "workload", "image", "ci_job", "flag", "config", "owner", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -134,7 +134,7 @@ struct KnowledgeRow: View {
     private var subtitle: String {
         if !node.path.isEmpty { return node.line > 0 ? "\(node.path):\(node.line)" : node.path }
         if !node.summary.isEmpty { return node.summary }
-        if ["service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table"].contains(node.kind), !node.signature.isEmpty { return node.signature }
+        if ["service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table", "workload", "image", "ci_job", "flag", "config", "owner", "package"].contains(node.kind), !node.signature.isEmpty { return node.signature }
         return node.kind
     }
 
@@ -155,6 +155,13 @@ struct KnowledgeRow: View {
         case "graphql_field": "curlybraces"
         case "topic": "megaphone"
         case "table": "tablecells"
+        case "workload": "cpu"
+        case "image": "square.3.layers.3d"
+        case "ci_job": "gearshape.2"
+        case "flag": "flag"
+        case "config": "slider.horizontal.3"
+        case "owner": "person.2"
+        case "doc": "doc.richtext"
         case "concept": "lightbulb"
         case "ticket": "checklist"
         case "pr": "arrow.triangle.pull"
