@@ -617,6 +617,7 @@ final class KnowledgeExtension: DashExtension {
 
     var tools: [DashiiTool] {
         memoryTools + analysisTools + [
+            serviceMapTool,
             DashiiTool(
                 name: "knowledge_search",
                 description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, services (what a repository deploys: Dockerfiles, charts, manifests), HTTP endpoints (\"GET /users/{}\", with the function handling them), concepts, docs (Confluence pages about the repositories), tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
