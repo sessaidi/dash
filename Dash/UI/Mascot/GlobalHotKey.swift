@@ -47,6 +47,9 @@ final class DashAppDelegate: NSObject, NSApplicationDelegate {
     /// Light or dark as chosen in Settings › Appearance, before the first window shows.
     func applicationWillFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { Appearance.shared.apply() }
+        // An uncaught Objective-C exception can end Dash without a macOS crash report: keep it
+        // for the crash notice at the next launch.
+        NSSetUncaughtExceptionHandler { exception in CrashReports.saveException(exception) }
     }
 
     /// Preferences are saved a moment after they change; save what's pending before quitting.

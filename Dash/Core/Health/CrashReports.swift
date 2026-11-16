@@ -52,6 +52,10 @@ struct CrashReport: Identifiable, Equatable, Sendable {
             return "Dash stopped itself on purpose because something impossible happened: \(reason.replacingOccurrences(of: "Fatal error: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines))."
         }
         if exception.hasPrefix("EXC_BAD_ACCESS") { return "Dash read or wrote memory it no longer owned (a use-after-free or a bad pointer)." }
+        if reason.contains("Update Constraints in Window") {
+            return "A window's layout kept changing its own size in a loop, and macOS stopped Dash. A view's size depended on itself."
+        }
+        if exception.contains("uncaught exception") { return "macOS stopped Dash on an error it couldn't recover from: \(reason)" }
         if reason.contains("Library not loaded") || reason == "Library missing" { return "A framework Dash needs was missing when it started." }
         if exception.contains("SIGTRAP") || exception.contains("EXC_BREAKPOINT") {
             return "Dash hit a safety check and stopped (for example a value used from the wrong thread, or a forced unwrap of nothing)."
@@ -135,6 +139,38 @@ struct CrashReport: Identifiable, Equatable, Sendable {
 
 enum CrashReports {
     static var folder: URL { FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/DiagnosticReports") }
+    /// Where the uncaught-exception handler writes, one file per exception.
+    static var exceptionsFolder: URL { URL.applicationSupportDirectory.appending(path: "Dash/Exceptions") }
+
+    /// Saves an uncaught exception as a small `.ips`-like report Dash reads like macOS's own.
+    nonisolated static func saveException(_ exception: NSException, to folder: URL = exceptionsFolder) {
+        let now = Date.now
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSS Z"
+        let header: [String: Any] = ["app_name": "Dash", "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"]
+        let frames: [[String: Any]] = exception.callStackSymbols.map { ["imageIndex": 0, "symbol": Self.symbol(fromCallStackLine: $0)] }
+        let body: [String: Any] = [
+            "captureTime": formatter.string(from: now), "procPath": Bundle.main.executablePath ?? "",
+            "exception": ["type": exception.name.rawValue, "signal": "uncaught exception"],
+            "asi": ["AppKit": [exception.reason ?? ""]],
+            "usedImages": [["name": "Dash"]], "threads": [["triggered": true, "frames": frames]],
+        ]
+        guard let head = try? JSONSerialization.data(withJSONObject: header), let rest = try? JSONSerialization.data(withJSONObject: body) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = "Dash-exception-\(Int(now.timeIntervalSince1970)).ips"
+        try? (head + Data("\n".utf8) + rest).write(to: folder.appending(path: name))
+    }
+
+    /// "3   AppKit   0x00000001a0ffb778 -[NSWindow …] + 1716" → "AppKit: -[NSWindow …]"
+    nonisolated static func symbol(fromCallStackLine line: String) -> String {
+        let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 4 else { return line }
+        let image = parts[1]
+        var symbol = parts.dropFirst(3).joined(separator: " ")
+        if let plus = symbol.range(of: " + ", options: .backwards) { symbol = String(symbol[..<plus.lowerBound]) }
+        return "\(image): \(symbol)"
+    }
 
     /// The running app's executable: only its crashes count (development builds and test runs
     /// crash on their own, from another path).
@@ -142,7 +178,8 @@ enum CrashReports {
 
     /// Dash's crash reports, newest first (at most `limit`); with `executable`, only that app's.
     static func all(in folder: URL = folder, limit: Int = 20, executable: String? = currentExecutable) -> [CrashReport] {
-        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+        let folders = folder == Self.folder ? [folder, exceptionsFolder] : [folder]
+        let files = folders.flatMap { (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] }
             .filter { $0.lastPathComponent.hasPrefix("Dash-") && $0.pathExtension == "ips" }
         let dated = files.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
             .sorted { $0.1 > $1.1 }
