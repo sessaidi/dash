@@ -1092,6 +1092,175 @@ struct KnowledgeExtractionTests {
         #expect(nest.edges.filter { $0.kind == "handled_by" }.map { $0.dst.split(separator: "#").last ?? "" } == ["InvoicesResolver.findAll", "InvoicesResolver.voidInvoice"])
     }
 
+    // MARK: Messaging
+
+    @Test func findsTopicsWithTheirPublishersAndConsumers() throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/acme\n",
+            "events/publisher.go": """
+                package events
+
+                import (
+                \t"cloud.google.com/go/pubsub/v2"
+                \t"github.com/aws/aws-sdk-go-v2/aws"
+                \t"github.com/aws/aws-sdk-go-v2/service/sqs"
+                \t"github.com/segmentio/kafka-go"
+                )
+
+                const invoicesTopic = "invoices"
+
+                type Config struct {
+                \tRefundsTopic string `env:"REFUNDS_TOPIC" envDefault:"refunds"`
+                \tAuditTopic   string `env:"AUDIT_TOPIC"`
+                \tQueueURL     string `env:"JOBS_QUEUE_URL"`
+                }
+
+                func Publish(client *pubsub.Client) {
+                \tclient.Publisher(invoicesTopic).Publish(ctx, msg)
+                \tclient.Publisher("projects/acme/topics/payments")
+                }
+
+                func Listen(client *pubsub.Client) {
+                \tsub := client.Subscriber("invoices-sub")
+                \t_ = sub
+                }
+
+                func Writers(cfg Config) *kafka.Writer {
+                \ttopic := cfg.RefundsTopic
+                \t_ = &kafka.Writer{Addr: kafka.TCP("broker:9092"), Topic: topic}
+                \treturn &kafka.Writer{Topic: cfg.AuditTopic}
+                }
+
+                func Read() *kafka.Reader {
+                \treturn kafka.NewReader(kafka.ReaderConfig{Brokers: []string{"broker:9092"}, GroupID: "billing", Topic: "user-events"})
+                }
+
+                func Poll(client *sqs.Client, cfg Config) {
+                \tclient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{QueueUrl: aws.String(cfg.QueueURL)})
+                \tclient.SendMessage(ctx, &sqs.SendMessageInput{QueueUrl: aws.String("https://sqs.eu-west-1.amazonaws.com/123456789012/emails")})
+                }
+                """,
+            "web/src/events.ts": """
+                import { Kafka } from 'kafkajs'
+                import { PubSub } from '@google-cloud/pubsub'
+                import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs'
+
+                const TOPIC = process.env.ORDERS_TOPIC ?? 'orders'
+
+                export async function publishOrder(producer, order) {
+                  await producer.send({ topic: TOPIC, messages: [{ value: JSON.stringify(order) }] })
+                }
+
+                export async function consume(consumer) {
+                  await consumer.subscribe({ topics: ['orders', 'refunds'], fromBeginning: false })
+                }
+
+                export function notify(pubsub: PubSub) {
+                  return pubsub.topic('notifications').publishMessage({ data })
+                }
+
+                export function enqueue(sqs: SQSClient) {
+                  return sqs.send(new SendMessageCommand({ QueueUrl: process.env.EMAILS_QUEUE_URL, MessageBody: 'x' }))
+                }
+                """,
+            "jobs/worker.py": """
+                import os
+                import boto3
+                from kafka import KafkaConsumer, KafkaProducer
+                from google.cloud import pubsub_v1
+
+                TOPIC = os.getenv("EVENTS_TOPIC", "user-events")
+
+
+                def consume():
+                    consumer = KafkaConsumer(TOPIC, "audit", bootstrap_servers="broker:9092", group_id="jobs")
+                    return consumer
+
+
+                def produce(producer):
+                    producer.send("refunds", b"{}")
+
+
+                def subscribe(subscriber):
+                    path = subscriber.subscription_path("acme", "invoices-sub")
+                    return path
+
+
+                def poll(sqs):
+                    return sqs.receive_message(QueueUrl=os.environ["JOBS_QUEUE_URL"], MaxNumberOfMessages=10)
+                """,
+            "infra/pubsub.tf": """
+                resource "google_pubsub_topic" "invoices" {
+                  name = "invoices"
+                }
+
+                resource "google_pubsub_subscription" "billing" {
+                  name  = "invoices-billing"
+                  topic = google_pubsub_topic.invoices.name
+                }
+
+                resource "aws_sqs_queue" "emails" {
+                  name = "emails-${var.env}"
+                }
+                """,
+            "deploy/topics.yaml": """
+                apiVersion: kafka.strimzi.io/v1beta2
+                kind: KafkaTopic
+                metadata:
+                  name: user-events-topic
+                  labels:
+                    strimzi.io/cluster: main
+                spec:
+                  topicName: user-events
+                ---
+                apiVersion: pubsub.cnrm.cloud.google.com/v1beta1
+                kind: PubSubSubscription
+                metadata:
+                  name: payments-sub
+                spec:
+                  topicRef:
+                    name: payments
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        func uses(_ path: String) throws -> Set<String> {
+            Set(MessagingExtractor().extract(try extractionInput(root, path)).edges.map { "\($0.src.split(separator: "#").last ?? "") \($0.kind) \($0.dst)" })
+        }
+        let go = try uses("events/publisher.go")
+        #expect(go == [
+            "Publish publishes topic:pubsub:invoices", "Publish publishes topic:pubsub:payments",
+            "Listen consumes topic:pubsub:invoices-sub",
+            "Writers publishes topic:kafka:refunds", "Writers publishes topic:kafka:$AUDIT_TOPIC",
+            "Read consumes topic:kafka:user-events",
+            "Poll consumes topic:sqs:$JOBS_QUEUE_URL", "Poll publishes topic:sqs:emails",
+        ])
+        let script = try uses("web/src/events.ts")
+        #expect(script == [
+            "publishOrder publishes topic:kafka:orders", "consume consumes topic:kafka:orders", "consume consumes topic:kafka:refunds",
+            "notify publishes topic:pubsub:notifications", "enqueue publishes topic:sqs:$EMAILS_QUEUE_URL",
+        ])
+        let python = try uses("jobs/worker.py")
+        #expect(python == [
+            "consume consumes topic:kafka:user-events", "consume consumes topic:kafka:audit", "produce publishes topic:kafka:refunds",
+            "subscribe consumes topic:pubsub:invoices-sub", "poll consumes topic:sqs:$JOBS_QUEUE_URL",
+        ])
+        let nodes = MessagingExtractor().extract(try extractionInput(root, "events/publisher.go")).nodes
+        #expect(nodes.first { $0.id == "topic:pubsub:invoices-sub" }?.signature == "Pub/Sub subscription invoices-sub")
+        #expect(nodes.first { $0.id == "topic:kafka:$AUDIT_TOPIC" }?.signature == "Kafka topic named by the environment variable AUDIT_TOPIC")
+
+        let terraform = MessagingExtractor().extract(try extractionInput(root, "infra/pubsub.tf"))
+        #expect(Set(terraform.nodes.map(\.id)) == ["topic:pubsub:invoices", "topic:pubsub:invoices-billing", "topic:sqs:emails-{}"])
+        #expect(terraform.edges.contains(KnowledgeEdge(src: "topic:pubsub:invoices-billing", dst: "topic:pubsub:invoices", kind: "consumes")))
+        let manifests = MessagingExtractor().extract(try extractionInput(root, "deploy/topics.yaml"))
+        #expect(manifests.nodes.map(\.id) == ["topic:kafka:user-events", "topic:pubsub:payments-sub"])
+        #expect(manifests.edges.contains(KnowledgeEdge(src: "topic:pubsub:payments-sub", dst: "topic:pubsub:payments", kind: "consumes")))
+
+        let topics = [MessagingExtractor.node(system: "pubsub", name: "invoices"), MessagingExtractor.node(system: "pubsub", name: "invoices-sub", subscription: true),
+                      MessagingExtractor.node(system: "pubsub", name: "payments-sub", subscription: true), MessagingExtractor.node(system: "pubsub", name: "payments")]
+        #expect(ServiceLinks.subscriptionTopics(topics, declared: ["topic:pubsub:payments-sub"]).map { "\($0.src) \($0.dst) \($0.weight)" }
+                == ["topic:pubsub:invoices-sub topic:pubsub:invoices 0.6"])
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",

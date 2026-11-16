@@ -47,7 +47,31 @@ enum ServiceLinks {
             let byName = Dictionary(grouping: rpcServices, by: \.name)
             for ref in try await store.refs(kinds: refKinds) { edges += rpcTargets(ref, services: byName) }
         }
+
+        let topics = try await store.nodes(kind: "topic", limit: 100_000)
+        if topics.contains(where: { $0.signature.hasPrefix("Pub/Sub subscription") }) {
+            let declared = Set(try await store.pairs(kind: "consumes", dstPrefix: "topic:pubsub:").map(\.src).filter { $0.hasPrefix("topic:") })
+            edges += subscriptionTopics(topics, declared: declared)
+        }
         try await store.upsert(edges)
+    }
+
+    // MARK: Messaging
+
+    /// Pub/Sub subscriptions no declaration ties to their topic, named after it (`events-sub`,
+    /// `events-subscription`, `events_sub`): `consumes` that topic at 0.6.
+    static func subscriptionTopics(_ topics: [KnowledgeNode], declared: Set<String>) -> [KnowledgeEdge] {
+        let pubsub = topics.filter { $0.language == "pubsub" }
+        let topicIDs = Set(pubsub.filter { !$0.signature.hasPrefix("Pub/Sub subscription") }.map(\.id))
+        var edges: [KnowledgeEdge] = []
+        for subscription in pubsub where subscription.signature.hasPrefix("Pub/Sub subscription") && !declared.contains(subscription.id) {
+            for suffix in ["-subscription", "_subscription", ".subscription", "-sub", "_sub", ".sub"] where subscription.name.hasSuffix(suffix) {
+                let topic = MessagingExtractor.id("pubsub", String(subscription.name.dropLast(suffix.count)))
+                if topicIDs.contains(topic) { edges.append(KnowledgeEdge(src: subscription.id, dst: topic, kind: "consumes", weight: 0.6, source: source)) }
+                break
+            }
+        }
+        return edges
     }
 
     // MARK: gRPC
