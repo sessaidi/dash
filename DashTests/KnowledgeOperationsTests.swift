@@ -654,4 +654,61 @@ struct KnowledgeOperationsTests {
         _ = try await indexer.index()
         #expect(try await store.node(RepoDocExtractor.id(root: root.path, path: "docs/runbook.rst")) == nil)
     }
+
+    // MARK: Dependencies
+
+    @Test func readsDependencyManifests() {
+        typealias Dependency = DependencyExtractor.Dependency
+        #expect(DependencyExtractor.goRequires("module x\n\nrequire github.com/a/b v1.0.0\nrequire (\n\tgithub.com/c/d v0.2.0\n\tgithub.com/e/f v1.1.0 // indirect\n)\n")
+            == [Dependency(name: "github.com/a/b", version: "v1.0.0"), Dependency(name: "github.com/c/d", version: "v0.2.0")])
+        #expect(DependencyExtractor.requirements("# tools\nrequests[socks]>=2.31, <3  # http\n-r base.txt\nDjango==4.2\ngit+https://host/x.git\nboto3\n")
+            == [Dependency(name: "requests", version: ">=2.31,<3"), Dependency(name: "Django", version: "==4.2"), Dependency(name: "boto3", version: "")])
+        let pyproject = DependencyExtractor.pyproject("[project]\nname = \"billing\"\ndependencies = [\n  \"fastapi>=0.110\",\n  'pydantic',\n]\n[tool.poetry.dependencies]\npython = \"^3.12\"\nhttpx = { version = \"0.27\" }\n")
+        #expect(pyproject.name == "billing" && pyproject.dependencies.map(\.name) == ["fastapi", "pydantic", "httpx"] && pyproject.dependencies.last?.version == "0.27")
+        let cargo = DependencyExtractor.cargo("[package]\nname = \"billing-cli\"\n\n[dependencies]\nserde = { version = \"1.0\", features = [\"derive\"] }\nanyhow = \"1\"\n\n[dev-dependencies.tokio]\nversion = \"1.37\"\n")
+        #expect(cargo.name == "billing-cli" && cargo.dependencies == [Dependency(name: "serde", version: "1.0"), Dependency(name: "anyhow", version: "1"), Dependency(name: "tokio", version: "1.37")])
+        #expect(DependencyExtractor.swiftPackages(#"""
+            dependencies: [
+                .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+                .package(url: "https://github.com/acme/kit", .upToNextMajor(from: "2.0.0")),
+                .package(url: "https://github.com/acme/edge", branch: "main"),
+                .package(path: "../Local"),
+            ]
+            """#) == [Dependency(name: "swift-argument-parser", version: "1.3.0"), Dependency(name: "kit", version: "2.0.0"), Dependency(name: "edge", version: "branch main")])
+    }
+
+    @Test func linksRepositoriesThroughTheirDependencies() async throws {
+        let shared = try makeFixtureRepo(["go.mod": "module github.com/acme/shared\n\ngo 1.22\n", "log/log.go": "package log\n"])
+        let billing = try makeFixtureRepo([
+            "go.mod": "module github.com/acme/billing-api\n\nrequire (\n\tgithub.com/acme/shared v1.2.0\n\tgithub.com/spf13/viper v1.9.1\n\tgolang.org/x/sys v0.1.0 // indirect\n)\n",
+            "main.go": "package main\n\nimport \"github.com/spf13/viper\"\n\nfunc main() { viper.GetString(\"x\") }\n",
+            "web/package.json": #"{"name": "@acme/web", "dependencies": {"express": "^4.19.0", "@acme/ui": "file:../ui"}, "devDependencies": {"jest": "29.7.0"}}"#,
+            "web/tsconfig.json": "{}\n",
+            "tools/requirements.txt": "requests==2.32.0\n",
+        ])
+        let users = try makeFixtureRepo(["go.mod": "module github.com/acme/users-api\n\nrequire github.com/spf13/viper v1.8.0\n"])
+        defer { for root in [shared, billing, users] { try? FileManager.default.removeItem(at: root) } }
+        let store = try KnowledgeStore(url: nil)
+        _ = try await index(shared, store: store)
+        let indexer = try await index(billing, store: store)
+        _ = try await index(users, store: store)
+
+        #expect(try await targets(indexer.repoID, "depends_on", store: store)
+            == ["pkg:go:github.com/acme/shared", "pkg:go:github.com/spf13/viper", "repo:" + shared.path])
+        #expect(try await targets("dir:" + billing.path + "/web", "depends_on", store: store) == ["pkg:typescript:express", "pkg:typescript:jest"])
+        #expect(try await targets("dir:" + billing.path + "/tools", "depends_on", store: store) == ["pkg:python:requests"])
+        #expect(try await targets("pkg:go:github.com/acme/shared", "defined_in", store: store) == ["file:" + shared.path + "/go.mod"])
+        let viper = try #require(try await store.node("pkg:go:github.com/spf13/viper"))
+        let names = [billing, users].map(\.lastPathComponent).sorted()
+        let versions = ["v1.9.1 in " + billing.lastPathComponent, "v1.8.0 in " + users.lastPathComponent]
+        #expect(viper.signature == "Go module · " + (names[0] == billing.lastPathComponent ? versions : versions.reversed()).joined(separator: ", "))
+        #expect(try await store.node("pkg:typescript:jest")?.signature == "npm package · 29.7.0 (dev) in " + billing.lastPathComponent)
+        // The import and the manifest name the same package.
+        #expect(try await targets(indexer.fileID("main.go"), "imports", store: store) == ["pkg:go:github.com/spf13/viper"])
+
+        try "module github.com/acme/billing-api\n".write(to: billing.appending(path: "go.mod"), atomically: true, encoding: .utf8)
+        _ = try await indexer.index()
+        #expect(try await targets(indexer.repoID, "depends_on", store: store).isEmpty)
+        #expect(try await store.node("pkg:go:github.com/spf13/viper")?.signature == "Go module · v1.8.0 in " + users.lastPathComponent)
+    }
 }

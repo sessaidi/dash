@@ -65,7 +65,32 @@ enum ServiceLinks {
             try await store.insertMissing(tables.placeholders)
             edges += tables.edges
         }
+
+        edges += try await store.repositoryDependencies().map { KnowledgeEdge(src: $0.src, dst: $0.dst, kind: "depends_on", source: source) }
+        try await describePackages(store: store)
         try await store.upsert(edges)
+    }
+
+    // MARK: Packages
+
+    static let packageLabels = ["go": "Go module", "typescript": "npm package", "javascript": "npm package", "python": "Python package",
+                                "swift": "Swift package", "rust": "Rust crate"]
+
+    /// Each package manifests depend on says which versions which repositories use:
+    /// "Go module · v1.9.1 in billing-api, v1.8.0 in users-api".
+    static func describePackages(store: KnowledgeStore) async throws {
+        var uses: [String: Set<String>] = [:]
+        for (package, repo, version) in try await store.dependencyVersions() {
+            uses[package, default: []].insert(version + " in " + (repo as NSString).lastPathComponent)
+        }
+        var changed: [KnowledgeNode] = []
+        for var node in try await store.nodes(kind: "package", limit: 1_000_000) {
+            let list = (uses[node.id] ?? []).sorted { $0.components(separatedBy: " in ").last! < $1.components(separatedBy: " in ").last! }
+            let label = packageLabels[node.language] ?? "Package"
+            let signature = list.isEmpty ? "" : label + " · " + list.prefix(10).joined(separator: ", ") + (list.count > 10 ? " and \(list.count - 10) more" : "")
+            if node.signature != signature { node.signature = signature; changed.append(node) }
+        }
+        try await store.upsert(changed)
     }
 
     // MARK: Messaging
