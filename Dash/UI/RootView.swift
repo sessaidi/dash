@@ -16,6 +16,7 @@ struct RootView: View {
     @AppStorage("sidebar.compact", store: DashDefaults.shared) private var compact = false
     @AppStorage("chat.folded", store: DashDefaults.shared) private var chatFolded = false
     @AppStorage("chat.width", store: DashDefaults.shared) private var chatWidth = 400.0
+    @AppStorage("chat.expanded", store: DashDefaults.shared) private var chatExpanded = false
 
     /// Home's width with both panels open, but never narrower than a comfortable reading
     /// width when the panels leave room for it.
@@ -25,7 +26,7 @@ struct RootView: View {
     }
 
     private func homeWidth(window: Double, free: Double) -> Double {
-        let withPanelsOpen = window - 221 - (chat.isPanelVisible ? chatWidth : 0)
+        let withPanelsOpen = window - 221 - (chat.isPanelVisible ? ChatSidePanel.width(chatWidth, expanded: chatExpanded, window: window) : 0)
         return max(min(free, max(withPanelsOpen, 720)), 320)
     }
 
@@ -38,8 +39,10 @@ struct RootView: View {
         let isNotes = host.mainView == "notes"
         let isHome = host.mainView == "page" && (pages.first { $0.id == host.selectedPageID } ?? pages.first)?.showsHome == true
         let leading = (compact ? 64.0 : 220.0) + 1
-        let trailing = !chat.isPanelVisible ? 0 : (chatFolded ? ChatSidePanel.railWidth : chatWidth)
         GeometryReader { geometry in
+        let trailing = !chat.isPanelVisible ? 0
+            : chatFolded ? ChatSidePanel.railWidth
+            : ChatSidePanel.width(chatWidth, expanded: chatExpanded, window: geometry.size.width)
         ZStack(alignment: .trailing) {
             ZStack(alignment: .leading) {
             Group {
@@ -75,7 +78,7 @@ struct RootView: View {
             }
             .padding(.trailing, trailing)
             // Always present: its width animates to zero when hidden, so it slides in and out.
-            ChatSidePanel(visible: chat.isPanelVisible)
+            ChatSidePanel(visible: chat.isPanelVisible, window: geometry.size.width)
         }
         }
         .animation(.smooth(duration: 0.32), value: chat.isPanelVisible)

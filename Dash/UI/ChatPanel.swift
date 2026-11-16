@@ -7,6 +7,9 @@ struct ChatPanel: View {
     @State private var showingHistory = false
     /// Folds the panel into its narrow rail.
     var onFold: (() -> Void)?
+    /// Expanded to most of the window (the side panel), and the button that toggles it.
+    var expanded = false
+    var onExpand: (() -> Void)?
     @Environment(ChatSession.self) private var chat
     @Environment(AppSettings.self) private var settings
     @Environment(ExtensionHost.self) private var host
@@ -64,6 +67,12 @@ struct ChatPanel: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .help("Start a new conversation")
+            if let onExpand {
+                Button(expanded ? "Restore Width" : "Expand", systemImage: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", action: onExpand)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help(expanded ? "Back to your width" : "Expand the panel over most of the window")
+            }
             if let onFold {
                 Button("Fold Panel", systemImage: "sidebar.trailing", action: onFold)
                     .labelStyle(.iconOnly)
@@ -560,38 +569,62 @@ struct CodeText: View {
 /// hiding and folding slide instead of popping.
 struct ChatSidePanel: View {
     var visible = true
+    /// The window's width: the panel's maximum and its expanded width follow it.
+    var window = 1400.0
     @Environment(ChatSession.self) private var chat
     @Environment(ExtensionHost.self) private var host
     @AppStorage("chat.folded", store: DashDefaults.shared) private var folded = false
     @AppStorage("chat.width", store: DashDefaults.shared) private var width = 400.0
+    /// Expanded: most of the window, for long answers; the arrows button toggles it.
+    @AppStorage("chat.expanded", store: DashDefaults.shared) private var expanded = false
     @State private var dragStart: Double?
+    @State private var gripHovered = false
 
-    static let widthRange = 320.0...720.0
+    static let minWidth = 320.0
+    static let defaultWidth = 400.0
     static let railWidth = 52.0
 
-    private var shownWidth: Double { visible ? (folded ? Self.railWidth : width) : 0 }
+    /// The widest the panel can be dragged: three quarters of the window, leaving the sidebar and
+    /// 280 points of content.
+    static func maxWidth(window: Double) -> Double { max(minWidth, min(window * 0.75, window - 221 - 280)) }
+
+    /// The panel's width: the dragged width (kept within the window), or most of it when expanded.
+    static func width(_ dragged: Double, expanded: Bool, window: Double) -> Double {
+        expanded ? maxWidth(window: window) : min(max(dragged, minWidth), maxWidth(window: window))
+    }
+
+    private var current: Double { Self.width(width, expanded: expanded, window: window) }
+    private var shownWidth: Double { visible ? (folded ? Self.railWidth : current) : 0 }
 
     var body: some View {
         HStack(spacing: 0) {
             Divider()
                 .overlay {
                     if !folded {
-                        // A wider invisible grip over the divider for resizing.
-                        Color.clear
-                            .frame(width: 8)
+                        // A wide grip over the divider: drag to resize (it lights up on hover),
+                        // double-click to go back to the default width.
+                        Rectangle()
+                            .fill(gripHovered || dragStart != nil ? Color.accentColor.opacity(0.5) : .clear)
+                            .frame(width: gripHovered || dragStart != nil ? 3 : 1)
+                            .frame(width: 12)
                             .contentShape(.rect)
-                            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                            .onHover { inside in
+                                gripHovered = inside
+                                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                            }
                             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                                 .onChanged { value in
-                                    if dragStart == nil { dragStart = width }
-                                    width = min(max((dragStart ?? width) - value.translation.width, Self.widthRange.lowerBound), Self.widthRange.upperBound)
+                                    if dragStart == nil { dragStart = current; expanded = false }
+                                    width = min(max((dragStart ?? width) - value.translation.width, Self.minWidth), Self.maxWidth(window: window))
                                 }
                                 .onEnded { _ in dragStart = nil })
+                            .onTapGesture(count: 2) { withAnimation(.smooth(duration: 0.25)) { expanded = false; width = Self.defaultWidth } }
+                            .help("Drag to resize · double-click for the default width")
                     }
                 }
             ZStack(alignment: .topLeading) {
-                ChatPanel(onFold: { toggle() })
-                    .frame(width: width)
+                ChatPanel(onFold: { toggle() }, expanded: expanded, onExpand: { withAnimation(.smooth(duration: 0.3)) { expanded.toggle() } })
+                    .frame(width: current)
                     .opacity(folded ? 0 : 1)
                     .allowsHitTesting(!folded)
                 rail
