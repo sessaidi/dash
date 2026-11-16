@@ -204,13 +204,16 @@ final class ChatSession {
         The chat panel is narrow. Keep answers short, and after changing something say in one line what changed.
         """
 
-    func send(_ text: String) {
+    /// Sends a message, with the files dropped on the chat (images and PDFs as themselves, text
+    /// files inline).
+    func send(_ text: String, attachments: [ChatAttachment] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isRunning else { return }
-        transcript.append(ChatEntry(id: UUID().uuidString, kind: .user(trimmed)))
+        guard !trimmed.isEmpty || !attachments.isEmpty, !isRunning else { return }
+        let files = attachments.map { "📎 \($0.name)" }.joined(separator: "\n")
+        transcript.append(ChatEntry(id: UUID().uuidString, kind: .user([trimmed, files].filter { !$0.isEmpty }.joined(separator: "\n\n"))))
         // "/standup …" runs the command's prompt; the transcript keeps what was typed.
-        let prompt = AutomationStore.shared.expand(trimmed) ?? trimmed
-        task = Task { await runClaudeCode(prompt) }
+        let prompt = AutomationStore.shared.expand(trimmed) ?? (trimmed.isEmpty ? "Look at the attached files." : trimmed)
+        task = Task { await runClaudeCode(prompt, attachments: attachments) }
     }
 
     func stop() {
@@ -323,7 +326,7 @@ final class ChatSession {
 
     // MARK: Claude Code session
 
-    private func runClaudeCode(_ text: String) async {
+    private func runClaudeCode(_ text: String, attachments: [ChatAttachment] = []) async {
         isRunning = true
         defer {
             isRunning = false
@@ -347,7 +350,7 @@ final class ChatSession {
             codeStarted = Date()
             turnToolsConnected = sessionToolsConnected
             codeLiveID = UUID().uuidString
-            try session.send(prompt)
+            try session.send(content: [["type": "text", "text": .string(prompt)]] + attachments.map(\.block))
             let result: ResultMessage = try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { codeTurn = $0 }
             } onCancel: {
