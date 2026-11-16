@@ -87,6 +87,9 @@ final class ChatSession {
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The last activity event Claude has been told about.
     @ObservationIgnored private var lastActivityID = 0
+    /// Context blocks already sent in this conversation (the catalogs, the view): sent again only
+    /// when they change, since earlier messages stay in the conversation.
+    @ObservationIgnored private var sentContext: [String: String] = [:]
     /// Claude Code backend: one long-lived session per conversation (restarted with `--resume`
     /// when the tool set changes), and the turn waiting for its result.
     @ObservationIgnored private var code: ClaudeCodeSession?
@@ -197,7 +200,8 @@ final class ChatSession {
         (and memory_forget for what was wrong).
 
         What the user is looking at (the page and its widgets, or the open note) arrives in <current-view> \
-        tags with each message. "This", "here", "this note", "these pods" refer to it: act on it without asking \
+        tags with each message (<current-view unchanged="true"/> when it's the same as the last one you were sent). \
+        "This", "here", "this note", "these pods" refer to it: act on it without asking \
         which one. Call view_current to read the view's live data or the open note, and view_show to open a page \
         or note, for example to show what you just made or changed.
 
@@ -222,8 +226,16 @@ final class ChatSession {
         if let code { Task { try? await code.interrupt() } }
     }
 
+    /// True the first time `text` is sent under `key` in this conversation, and when it changed.
+    private func fresh(_ key: String, _ text: String) -> Bool {
+        guard sentContext[key] != text else { return false }
+        sentContext[key] = text
+        return true
+    }
+
     func reset() {
         stop()
+        sentContext = [:]
         saveConversation()
         transcript = []
         live = []
@@ -337,10 +349,11 @@ final class ChatSession {
         let previousActivityID = lastActivityID
         let turnStart = transcript.count
         let memory = host.ext(KnowledgeExtension.self)?.memory
-        var prompt = "<current-view>\(ViewContext.summary(host: host))</current-view>\n\n\(text)"
-        if let known = await memory?.context(for: text + "\n" + ViewContext.summary(host: host)) { prompt = known + "\n" + prompt }
-        if let skills = Skills.catalog(in: host.context) { prompt = skills + "\n" + prompt }
-        if let experts = AgentHub.shared.catalog { prompt = experts + "\n" + prompt }
+        let view = ViewContext.summary(host: host)
+        var prompt = (fresh("view", view) ? "<current-view>\(view)</current-view>" : "<current-view unchanged=\"true\"/>") + "\n\n\(text)"
+        if let known = await memory?.context(for: text + "\n" + view) { prompt = known + "\n" + prompt }
+        if let skills = Skills.catalog(in: host.context), fresh("skills", skills) { prompt = skills + "\n" + prompt }
+        if let experts = AgentHub.shared.catalog, fresh("experts", experts) { prompt = experts + "\n" + prompt }
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
             prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }
@@ -373,6 +386,8 @@ final class ChatSession {
             }
         } catch {
             lastActivityID = previousActivityID
+            // The context may not have arrived: send it whole next time.
+            sentContext = [:]
             transcript += live
             DashLog.error("Claude Code turn failed: \(error.localizedDescription)", category: "claude")
             DashiiHealth.shared.record(source: "chat", toolsConnected: turnToolsConnected, ok: false,
