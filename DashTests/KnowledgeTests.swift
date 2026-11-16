@@ -307,6 +307,9 @@ struct KnowledgeRealRepoTests {
         print("KG \(root.lastPathComponent): \(report) first \(first) again \(again) counts \(counts.sorted { $0.key < $1.key })")
         let query = ProcessInfo.processInfo.environment["KG_QUERY"] ?? "user"
         for node in try await store.search(query, limit: 5) { print("KG search \(query): \(node.kind) \(node.qualified) \(node.path):\(node.line)") }
+        if let kind = ProcessInfo.processInfo.environment["KG_DUMP"] {
+            for node in try await store.nodes(kind: kind, limit: 2000) { print("KG \(kind): \(node.signature)") }
+        }
         #expect(report.parsed > 0)
     }
 }

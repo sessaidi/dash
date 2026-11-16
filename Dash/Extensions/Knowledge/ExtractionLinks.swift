@@ -12,7 +12,8 @@ enum ExtractionLinks {
     static func link(repo: String, store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         let root = String(repo.dropFirst(5))
         var edges: [KnowledgeEdge] = []
-        edges += try await services(repo: repo, root: root, store: store)
+        let deployed = try await services(repo: repo, root: root, store: store)
+        edges += deployed
         let refs = try await store.refs(repo: repo)
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
@@ -30,6 +31,7 @@ enum ExtractionLinks {
                 }
             }
         }
+        edges += try await exposes(repo: repo, root: root, services: deployed.map(\.dst), runs: edges.filter { $0.kind == "runs" }, store: store)
         try await store.replaceLinks(repo: repo, edges)
         try await store.pruneShared(kinds: sharedKinds)
     }
@@ -54,6 +56,30 @@ enum ExtractionLinks {
         return edges
     }
 
+    /// Which service serves each endpoint defined in the repository: the one whose code folder is
+    /// the closest around the endpoint's file (the repository's only service otherwise).
+    private static func exposes(repo: String, root: String, services: [String], runs: [KnowledgeEdge], store: KnowledgeStore) async throws -> [KnowledgeEdge] {
+        guard !services.isEmpty else { return [] }
+        var folders: [String: [String]] = [:]
+        for edge in runs {
+            folders[edge.src, default: []].append(edge.dst == repo ? "" : String(edge.dst.dropFirst(("dir:" + root + "/").count)))
+        }
+        var edges: [KnowledgeEdge] = []
+        for (endpoint, path) in try await store.definitions(repo: repo, idPrefix: "endpoint:") {
+            var best: [String] = []
+            var depth = -1
+            for (service, paths) in folders {
+                for folder in paths where folder.isEmpty || path.hasPrefix(folder + "/") {
+                    let length = folder.isEmpty ? 0 : folder.split(separator: "/").count
+                    if length > depth { best = [service]; depth = length } else if length == depth, !best.contains(service) { best.append(service) }
+                }
+            }
+            if best.isEmpty && services.count == 1 { best = services }
+            edges += best.map { KnowledgeEdge(src: $0, dst: endpoint, kind: "exposes", source: source) }
+        }
+        return edges
+    }
+
     /// Edges from a ref to the functions its names stand for: the first name that resolves wins,
     /// weighted like calls (0.95 same file, 0.85 a type or package the name points at, 0.7 same
     /// directory, 0.6 the only one, 0.3 split between up to three).
@@ -61,6 +87,8 @@ enum ExtractionLinks {
         let path = String(file.dropFirst(("file:" + root + "/").count))
         let directory = (path as NSString).deletingLastPathComponent
         for candidate in ref.names {
+            // Known exactly (the decorated function, a file's exported handler).
+            if candidate.hasPrefix("sym:") { return [KnowledgeEdge(src: ref.src, dst: candidate, kind: ref.kind, source: source)] }
             let parts = candidate.split(separator: ".").map(String.init)
             guard let name = parts.last, let ids = index[name], !ids.isEmpty else { continue }
             func location(_ id: String) -> String { CodeIndexer.path(ofSymbol: id, root: root) }
@@ -96,6 +124,19 @@ extension KnowledgeStore {
         defer { sqlite3_finalize(statement) }
         bind(statement, [repo])
         while sqlite3_step(statement) == SQLITE_ROW { result[text(statement, 0), default: []].append(text(statement, 1)) }
+        return result
+    }
+
+    /// Shared nodes whose id starts with `idPrefix` defined in a repository's files, with the file's path.
+    func definitions(repo: String, idPrefix: String) throws -> [(id: String, path: String)] {
+        let statement = try prepare("""
+            SELECT e.src, f.path FROM edges e JOIN nodes f ON f.id = e.dst
+            WHERE e.kind = 'defined_in' AND f.repo = ?1 AND f.kind = 'file' AND e.src >= ?2 AND e.src < ?3
+            """)
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo, idPrefix, String(idPrefix.dropLast()) + String(UnicodeScalar(idPrefix.unicodeScalars.last!.value + 1)!)])
+        var result: [(String, String)] = []
+        while sqlite3_step(statement) == SQLITE_ROW { result.append((text(statement, 0), text(statement, 1))) }
         return result
     }
 
