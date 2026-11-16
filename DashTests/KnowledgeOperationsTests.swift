@@ -535,4 +535,60 @@ struct KnowledgeOperationsTests {
         let everything = try await store.nodes("SELECT * FROM nodes", []).flatMap { [$0.name, $0.signature, $0.summary] }
         #expect(!everything.contains { $0.contains("hunter2") || $0.contains("kafka-a") })
     }
+
+    // MARK: Owners
+
+    @Test func matchesCodeOwnersPatternsLikeGitHub() throws {
+        func matches(_ pattern: String, _ path: String) throws -> Bool {
+            let regex = try #require(OwnershipExtractor.regex(pattern))
+            return regex.firstMatch(in: path, range: NSRange(location: 0, length: (path as NSString).length)) != nil
+        }
+        #expect(try matches("*", "apps/billing/main.go"))
+        #expect(try matches("*.js", "web/src/app.js") && !matches("*.js", "web/src/app.ts"))
+        #expect(try matches("/apps/billing/", "apps/billing/api/routes.go") && !matches("/apps/billing/", "tools/apps/billing/x.go"))
+        #expect(try matches("apps/", "tools/apps/x.go"))
+        #expect(try matches("docs/*", "docs/intro.md") && !matches("docs/*", "docs/guides/intro.md"))
+        #expect(try matches("**/logs", "logs/a.txt") && matches("**/logs", "build/logs/a.txt"))
+        #expect(try matches("apps/*/main.go", "apps/billing/main.go") && !matches("apps/*/main.go", "apps/billing/cmd/main.go"))
+    }
+
+    @Test func assignsCodeOwnersWithTheFewestEdges() async throws {
+        let root = try makeFixtureRepo([
+            ".github/CODEOWNERS": """
+                # Default owners
+                *                         @acme/platform
+                /apps/billing/            @acme/billing ada@acme.com
+                /apps/billing/legacy.go
+                *.md                      @acme/docs
+                """,
+            "apps/billing/main.go": "package main\n",
+            "apps/billing/api/routes.go": "package api\n",
+            "apps/billing/legacy.go": "package main\n",
+            "apps/users/main.go": "package main\n",
+            "tools/gen.go": "package tools\n",
+            "README.md": "# Shop\n",
+        ], git: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        func owns(_ owner: String) async throws -> Set<String> {
+            Set(try await targets(OwnershipExtractor.id(owner), "owns", store: store).map { id in
+                id.hasPrefix("dir:") ? String(id.dropFirst(("dir:" + root.path + "/").count)) + "/" : String(id.dropFirst(("file:" + root.path + "/").count))
+            })
+        }
+        #expect(try await owns("@acme/platform") == [".github/", "apps/users/", "tools/"])
+        #expect(try await owns("@acme/billing") == ["apps/billing/main.go", "apps/billing/api/"])
+        #expect(try await owns("ada@acme.com") == ["apps/billing/main.go", "apps/billing/api/"])
+        #expect(try await owns("@acme/docs") == ["README.md"])
+        let team = try #require(try await store.node(OwnershipExtractor.id("@acme/billing")))
+        #expect(team.signature == "Code owner @acme/billing" && team.language == "team")
+        let person = try await store.query("SELECT dst FROM edges WHERE src = 'owner:ada@acme.com' AND kind = 'about'", limit: 5)
+        #expect(person.compactMap { $0["dst"]?.string } == ["person:ada@acme.com"])
+
+        // One owner for everything: a single edge to the repository.
+        try "* @acme/platform\n".write(to: root.appending(path: ".github/CODEOWNERS"), atomically: true, encoding: .utf8)
+        _ = try await indexer.index()
+        #expect(try await targets(OwnershipExtractor.id("@acme/platform"), "owns", store: store) == [indexer.repoID])
+        #expect(try await store.node(OwnershipExtractor.id("@acme/billing")) == nil)
+    }
 }
