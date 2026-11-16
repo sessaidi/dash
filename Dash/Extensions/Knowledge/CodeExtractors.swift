@@ -25,7 +25,9 @@ import Foundation
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
 // handler's name resolved to a symbol, the folder a service runs) are kept as refs and made by
 // `ExtractionLinks` once the repository is indexed, under the source "code-links". Shared nodes
-// nothing points at any more are dropped there too.
+// nothing points at any more are dropped there too. Then `ServiceLinks` looks across repositories
+// (source "service-links"): host —about→ service, and calls_endpoint from a call no repository
+// defines to the routes it likely reaches (weight below 1).
 
 /// Finds one family of things in a file (services, endpoints, …): deterministic and local, no
 /// model and no network, cheap enough to run on every changed file.
