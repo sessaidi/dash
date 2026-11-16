@@ -38,6 +38,16 @@ struct KnowledgeEdge: Sendable, Hashable {
     var source: String = ""
 }
 
+/// An edge an extractor can't make from one file: `src` gets a `kind` edge to whatever `names`
+/// (best first) turn out to be once the whole repository is indexed, such as a route's handler
+/// function or the folder a service runs. Kept per file, resolved by `ExtractionLinks`.
+struct KnowledgeRef: Sendable, Hashable {
+    var src: String
+    var kind: String
+    var names: [String]
+    var line: Int = 0
+}
+
 /// A neighbour seen from a node: the edge and the node at its other end.
 struct KnowledgeNeighbor: Sendable, Hashable {
     var edge: KnowledgeEdge
@@ -103,6 +113,9 @@ actor KnowledgeStore {
             CREATE TABLE IF NOT EXISTS symbol_calls(src TEXT NOT NULL, name TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY(src, name)) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS symbol_calls_name ON symbol_calls(repo, name);
             CREATE TABLE IF NOT EXISTS vectors(id TEXT PRIMARY KEY, repo TEXT, hash TEXT, vector BLOB);
+            CREATE TABLE IF NOT EXISTS refs(file TEXT NOT NULL, repo TEXT NOT NULL, src TEXT NOT NULL, kind TEXT NOT NULL, names TEXT NOT NULL, line INTEGER);
+            CREATE INDEX IF NOT EXISTS refs_file ON refs(file);
+            CREATE INDEX IF NOT EXISTS refs_repo ON refs(repo);
             """)
     }
 
@@ -158,11 +171,15 @@ actor KnowledgeStore {
         }
     }
 
-    /// Replaces a file's nodes and outgoing edges. Symbols that vanished lose their incoming
-    /// edges too; the ones that stay keep edges other files point at them.
-    func replaceFile(repo: String, path: String, nodes: [KnowledgeNode], edges: [KnowledgeEdge]) throws {
+    /// Replaces a file's nodes, outgoing edges, the edges extractors filed under it and its refs.
+    /// Symbols that vanished lose their incoming edges too; the ones that stay keep edges other
+    /// files point at them.
+    func replaceFile(repo: String, path: String, nodes: [KnowledgeNode], edges: [KnowledgeEdge], refs: [KnowledgeRef] = []) throws {
+        let file = "file:" + String(repo.dropFirst(5)) + "/" + path
         let old = try strings("SELECT id FROM nodes WHERE repo = ?1 AND path = ?2 AND kind IN ('file', 'symbol', 'decision')", [repo, path])
         let kept = Set(nodes.map(\.id))
+        try run("DELETE FROM edges WHERE source = ?1", [file])
+        try run("DELETE FROM refs WHERE file = ?1", [file])
         for id in old {
             try run("DELETE FROM edges WHERE src = ?1 AND source = 'code'", [id])
             if !kept.contains(id) {
@@ -172,20 +189,43 @@ actor KnowledgeStore {
         }
         try upsert(nodes)
         try upsert(edges)
+        guard !refs.isEmpty else { return }
+        let statement = try prepare("INSERT INTO refs(file, repo, src, kind, names, line) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+        defer { sqlite3_finalize(statement) }
+        for ref in refs {
+            sqlite3_reset(statement)
+            bind(statement, [file, repo, ref.src, ref.kind, ref.names.joined(separator: "\n"), ref.line])
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw error("insert ref") }
+        }
     }
 
     struct FileGraph: Sendable {
         var path: String
         var nodes: [KnowledgeNode]
         var edges: [KnowledgeEdge]
+        var refs: [KnowledgeRef] = []
     }
 
     /// `replaceFile` for many files in one transaction (an empty graph removes the file).
     func replaceFiles(repo: String, _ files: [FileGraph]) throws {
         guard !files.isEmpty else { return }
         try transaction {
-            for file in files { try replaceFile(repo: repo, path: file.path, nodes: file.nodes, edges: file.edges) }
+            for file in files { try replaceFile(repo: repo, path: file.path, nodes: file.nodes, edges: file.edges, refs: file.refs) }
         }
+    }
+
+    /// A repository's refs with the file each came from.
+    func refs(repo: String) throws -> [(file: String, ref: KnowledgeRef)] {
+        let statement = try prepare("SELECT file, src, kind, names, line FROM refs WHERE repo = ?1")
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo])
+        var result: [(String, KnowledgeRef)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            result.append((text(statement, 0), KnowledgeRef(src: text(statement, 1), kind: text(statement, 2),
+                                                            names: text(statement, 3).components(separatedBy: "\n"),
+                                                            line: Int(sqlite3_column_int64(statement, 4)))))
+        }
+        return result
     }
 
     /// Inserts nodes that don't exist yet, leaving existing ones alone (placeholders such as a
@@ -220,6 +260,10 @@ actor KnowledgeStore {
         try run("DELETE FROM nodes WHERE repo = ?1 OR id = ?1", [repo])
         try run("DELETE FROM symbol_calls WHERE repo = ?1", [repo])
         try run("DELETE FROM vectors WHERE repo = ?1", [repo])
+        // Edges extractors filed under the repository's files ("file:<root>/…"), between shared nodes too.
+        let files = "file:" + String(repo.dropFirst(5)) + "/"
+        try run("DELETE FROM edges WHERE source >= ?1 AND source < ?2", [files, String(files.dropLast()) + "0"])
+        try run("DELETE FROM refs WHERE repo = ?1", [repo])
     }
 
     /// Drops the edges one writer made (e.g. "git" before re-reading history, an extension's
