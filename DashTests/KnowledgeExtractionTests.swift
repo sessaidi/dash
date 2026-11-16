@@ -676,6 +676,112 @@ struct KnowledgeExtractionTests {
         #expect(try await store.node(defined.id)?.signature == defined.signature)
     }
 
+    /// A Go service in one repository; a web app and a job calling it from another.
+    private func makeServiceAndClients() throws -> (server: URL, clients: URL) {
+        let server = try makeFixtureRepo([
+            "go.mod": "module example.com/billing\n",
+            "billing-api/Dockerfile": "FROM golang:1.23\n",
+            "billing-api/main.go": """
+                package main
+
+                import "github.com/go-chi/chi/v5"
+
+                func main() {
+                \tr := chi.NewRouter()
+                \tr.Get("/v1/invoices/{id}", getInvoice)
+                \tr.Post("/v1/invoices/{id}/refunds", refund)
+                \tr.Get("/v1/plans", listPlans)
+                }
+
+                func getInvoice(w http.ResponseWriter, r *http.Request) {}
+                func refund(w http.ResponseWriter, r *http.Request) {}
+                func listPlans(w http.ResponseWriter, r *http.Request) {}
+                """,
+        ])
+        let clients = try makeFixtureRepo([
+            "web/src/api.ts": """
+                const BILLING = process.env.BILLING_API_URL
+
+                export function loadInvoice(id: string) {
+                  return fetch(`${BILLING}/v1/invoices/${id}`)
+                }
+
+                export function refund(id: string) {
+                  return fetch(`${BILLING}/v1/invoices/${id}/refunds`, { method: 'POST' })
+                }
+                """,
+            "jobs/sync.py": """
+                import os
+                import requests
+
+                BASE = os.environ["BILLING_API_URL"]
+
+
+                def sync_invoice(invoice_id):
+                    return requests.get(f"{BASE}/invoices/{invoice_id}")
+
+
+                def plans(base, method):
+                    return requests.request(method, base + "/v1/plans")
+                """,
+        ])
+        return (server, clients)
+    }
+
+    @Test func linksCallsAcrossRepositories() async throws {
+        let (server, clients) = try makeServiceAndClients()
+        defer { for url in [server, clients] { try? FileManager.default.removeItem(at: url) } }
+        let store = try KnowledgeStore(url: nil)
+        for root in [server, clients] {
+            var indexer = CodeIndexer(root: root, store: store)
+            indexer.readHistory = false
+            _ = try await indexer.index()
+        }
+        let service = ServiceExtractor.id(repo: "repo:" + server.path, name: "billing-api")
+        func callers(_ endpoint: String) async throws -> [String: Double] {
+            var result: [String: Double] = [:]
+            for neighbor in try await store.neighbors(endpoint, kinds: ["calls_endpoint"]) where neighbor.incoming {
+                result[String(neighbor.node.id.split(separator: "#").last ?? "")] = neighbor.edge.weight
+            }
+            return result
+        }
+
+        // The same route id on both sides; a prefix the job's base URL carries; a method it doesn't say.
+        #expect(try await callers("endpoint:GET /v1/invoices/{}") == ["loadInvoice": 1, "sync_invoice": 0.9])
+        #expect(try await callers("endpoint:POST /v1/invoices/{}/refunds") == ["refund": 1])
+        #expect(try await callers("endpoint:GET /v1/plans") == ["plans": 0.8])
+        let about = try await store.neighbors("host:BILLING_API_URL", kinds: ["about"]).filter { !$0.incoming }
+        #expect(about.map(\.node.id) == [service] && about.first?.edge.weight == 0.9)
+        #expect(try await store.node("endpoint:GET /invoices/{}")?.signature == "GET /invoices/{}")
+
+        // A client file that goes takes its calls with it.
+        var again = CodeIndexer(root: clients, store: store)
+        again.readHistory = false
+        try FileManager.default.removeItem(at: clients.appending(path: "web/src/api.ts"))
+        _ = try await again.index()
+        #expect(try await callers("endpoint:GET /v1/invoices/{}") == ["sync_invoice": 0.9])
+        #expect(try await callers("endpoint:POST /v1/invoices/{}/refunds").isEmpty)
+
+        // The service's repository goes: its routes are only called now, and nothing points into it.
+        try await store.removeRepo("repo:" + server.path)
+        try await ServiceLinks.link(store: store)
+        #expect(try await store.node("endpoint:GET /v1/plans") == nil)
+        #expect(try await store.node("endpoint:GET /v1/invoices/{}") == nil)
+        #expect(try await store.node("endpoint:GET /invoices/{}")?.signature == "GET /invoices/{}")
+        #expect(try await store.neighbors("host:BILLING_API_URL", kinds: ["about"]).isEmpty)
+
+        #expect(ServiceLinks.hostWords("VITE_PLANS_API_BASE_URL") == ["plans", "api"])
+        #expect(ServiceLinks.hostWords("users-api.default.svc.cluster.local") == ["users", "api"])
+        #expect(ServiceLinks.hostWords("localhost").isEmpty && ServiceLinks.hostWords("10.0.0.1").isEmpty)
+        func named(_ names: String...) -> [KnowledgeNode] {
+            names.enumerated().map { KnowledgeNode(id: "service:r\($0.offset):\($0.element)", kind: "service", name: $0.element, qualified: $0.element, source: "code") }
+        }
+        #expect(ServiceLinks.serviceMatches(host: "users.acme.test", services: named("users-api", "web")).weight == 0.6)
+        #expect(ServiceLinks.serviceMatches(host: "USERS_SERVICE_URL", services: named("users-api", "users-worker")).ids == ["service:r0:users-api"])
+        #expect(ServiceLinks.serviceMatches(host: "users.acme.test", services: named("users-api", "users-svc")).ids.isEmpty)
+        #expect(ServiceLinks.serviceMatches(host: "api.acme.test", services: named("api")).ids == ["service:r0:api"])
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",

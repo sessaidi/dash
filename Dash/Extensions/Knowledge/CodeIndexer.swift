@@ -151,7 +151,10 @@ struct CodeIndexer: Sendable {
         // What extractors found that needs the whole repository: handlers, run folders, …
         report.extractTime = timings.values.reduce(.zero, +)
         if report.parsed > 0 || report.removed > 0 || !extractStored {
-            report.linkTime = try await ContinuousClock().measure { try await ExtractionLinks.link(repo: repoID, store: store, sharedKinds: extractors.flatMap(\.sharedKinds)) }
+            report.linkTime = try await ContinuousClock().measure {
+                try await ExtractionLinks.link(repo: repoID, store: store, sharedKinds: extractors.flatMap(\.sharedKinds))
+                try await ServiceLinks.link(store: store, sharedKinds: extractors.flatMap(\.sharedKinds))
+            }
             let each = timings.sorted { $0.key < $1.key }.map { "\($0.key) \(Self.milliseconds($0.value))" }.joined(separator: ", ")
             DashLog.info("Indexed \(root.lastPathComponent): \(report.parsed) of \(report.files) files parsed; extractors \(Self.milliseconds(report.extractTime))"
                          + (each.isEmpty ? "" : " (\(each))") + ", links \(Self.milliseconds(report.linkTime))", category: "knowledge")

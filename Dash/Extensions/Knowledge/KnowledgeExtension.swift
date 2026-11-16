@@ -385,6 +385,7 @@ final class KnowledgeExtension: DashExtension {
         if Self.remote(at: path) != nil { try? FileManager.default.removeItem(atPath: path) }
         Task {
             try? await store?.removeRepo("repo:" + path)
+            if let store { try? await ServiceLinks.link(store: store) }
             counts = (try? await store?.counts()) ?? [:]
             revision += 1
         }
