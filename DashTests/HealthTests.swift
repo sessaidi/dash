@@ -70,3 +70,18 @@ struct CrashReadabilityTests {
         #expect(trap.explanation.contains("safety check"))
     }
 }
+
+/// Uncaught exceptions are kept and shown like crash reports.
+struct ExceptionReportTests {
+    @Test func anUncaughtExceptionBecomesAReport() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "exceptions-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let exception = NSException(name: .genericException, reason: "The window has been marked as needing another Update Constraints in Window pass", userInfo: nil)
+        CrashReports.saveException(exception, to: folder)
+        let report = try #require(CrashReports.all(in: folder, executable: nil).first)
+        #expect(report.exception == "NSGenericException (uncaught exception)")
+        #expect(report.explanation.contains("layout kept changing"))
+        #expect(CrashReports.symbol(fromCallStackLine: "3   AppKit                              0x00000001a0ffb778 -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints] + 1716")
+                == "AppKit: -[NSWindow(NSDisplayCycle) _postWindowNeedsUpdateConstraints]")
+    }
+}
