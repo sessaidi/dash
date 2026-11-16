@@ -155,15 +155,63 @@ struct HealthPane: View {
     }
 }
 
-/// One crash: what happened and where, with Copy and Show in Finder.
+/// One crash, readable: when and which version, what happened in plain words, where in Dash's
+/// code (file and line), the full trace folded away, and Copy / Show in Finder.
 struct CrashDetail: View {
     let crash: CrashReport
+    @State private var showsTrace = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ScrollView {
-                Text(crash.summary).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Badge("Dash \(crash.version)", tone: .info)
+                Text(crash.date.formatted(date: .abbreviated, time: .shortened)).font(.callout)
+                Text("· \(crash.date.formatted(.relative(presentation: .named)))").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Badge(crash.exception, tone: .danger)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("What happened").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(crash.explanation).fixedSize(horizontal: false, vertical: true)
+            }
+            let places = crash.places()
+            if !places.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Where in Dash").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(Array(places.enumerated()), id: \.offset) { index, frame in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: index == 0 ? "exclamationmark.circle.fill" : "arrow.turn.left.up")
+                                .foregroundStyle(index == 0 ? Color.red : Color.secondary)
+                                .frame(width: 14)
+                            Text(frame.name).font(.callout.monospaced()).lineLimit(2).truncationMode(.middle)
+                            Spacer(minLength: 6)
+                            if let place = frame.place {
+                                Text(place).font(.caption.monospaced())
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(.quaternary, in: .capsule)
+                            }
+                        }
+                        .help(frame.symbol)
+                    }
+                }
+                .padding(10)
+                .background(.background.secondary, in: .rect(cornerRadius: 8))
+            }
+            DisclosureGroup("Full trace (\(crash.details.count) frames)", isExpanded: $showsTrace) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(crash.details.enumerated()), id: \.offset) { _, frame in
+                            Text("\(frame.image)  \(frame.symbol)\(frame.place.map { "  (\($0))" } ?? "")")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(frame.own ? .primary : .secondary)
+                        }
+                    }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 160)
+            }
+            .font(.caption)
             HStack {
                 Button("Copy Report", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
@@ -176,28 +224,46 @@ struct CrashDetail: View {
     }
 }
 
-/// Shown once after Dash crashed: what happened, and ways to report or understand it.
+/// Shown once after Dash crashed: each crash readable, with ways to report or understand it.
 struct CrashNoticeSheet: View {
     let crashes: [CrashReport]
     let ask: (String) -> Void
     let done: () -> Void
+    @State private var index = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(crashes.count == 1 ? "Dash quit unexpectedly" : "Dash quit unexpectedly \(crashes.count) times", systemImage: "exclamationmark.triangle.fill")
-                .font(.title3.weight(.semibold)).foregroundStyle(.orange)
-            Text("Here's what macOS recorded. Nothing was sent anywhere.").foregroundStyle(.secondary)
-            if let crash = crashes.first { CrashDetail(crash: crash).frame(minHeight: 220) }
+        let crash = crashes[min(index, crashes.count - 1)]
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(crashes.count == 1 ? "Dash quit unexpectedly" : "Dash quit unexpectedly \(crashes.count) times")
+                        .font(.title3.weight(.semibold))
+                    Text("Here's what macOS recorded. Nothing was sent anywhere.").foregroundStyle(.secondary)
+                }
+                Spacer()
+                if crashes.count > 1 {
+                    HStack(spacing: 4) {
+                        Button { index = max(index - 1, 0) } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
+                        Text("\(index + 1) of \(crashes.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Button { index = min(index + 1, crashes.count - 1) } label: { Image(systemName: "chevron.right") }.disabled(index == crashes.count - 1)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Divider()
+            CrashDetail(crash: crash)
+            Divider()
             HStack {
                 Button("Ask Dashii to Explain", systemImage: "sparkles") {
-                    if let crash = crashes.first { ask("Dash crashed. Explain in plain words what likely happened and what to check, from this crash report:\n\n\(crash.summary)") }
+                    ask("Dash crashed. Explain in plain words what likely happened and what to check, from this crash report:\n\n\(crash.summary)")
                     done()
                 }
                 Spacer()
                 Button("OK") { done() }.keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(width: 620)
+        .padding(22)
+        .frame(width: 640)
     }
 }
