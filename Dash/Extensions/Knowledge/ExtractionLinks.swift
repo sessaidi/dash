@@ -18,7 +18,12 @@ enum ExtractionLinks {
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
             let directories = Set(try await store.nodes(kind: "directory", repo: repo, limit: 100_000).map(\.path))
-            for (file, ref) in refs where !ServiceLinks.refKinds.contains(ref.kind) {
+            let facts = refs.filter { $0.ref.kind == DatabaseExtractor.factKind }
+            if !facts.isEmpty {
+                let prefix = ("file:" + root + "/").count
+                try await store.upsert(TableHistory.nodes(TableHistory.replay(facts.map { (String($0.file.dropFirst(prefix)), $0.ref) })))
+            }
+            for (file, ref) in refs where !ServiceLinks.refKinds.contains(ref.kind) && !DatabaseExtractor.refKinds.contains(ref.kind) {
                 if pathKinds.contains(ref.kind) {
                     guard let path = ref.names.first else { continue }
                     if path.isEmpty {
