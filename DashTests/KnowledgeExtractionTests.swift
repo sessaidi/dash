@@ -1527,6 +1527,88 @@ struct KnowledgeExtractionTests {
         #expect(label.isEmpty)
     }
 
+    /// A billing repository serving a gRPC service, publishing a topic and migrating a table; a
+    /// notifier in another repository calling, consuming and reading them.
+    @Test func dashiiMapsRPCsTopicsAndTablesAcrossRepositories() async throws {
+        let billing = try makeFixtureRepo([
+            "go.mod": "module example.com/billing\n",
+            "billing-api/Dockerfile": "FROM golang:1.23\n",
+            "proto/acme/billing/v1/billing.proto": Self.billingProto,
+            "db/migrations/1_init.up.sql": "CREATE TABLE billing.invoices (id BIGINT, total NUMERIC);\n",
+            "billing-api/server.go": """
+                package main
+
+                import (
+                \t"cloud.google.com/go/pubsub/v2"
+                \tbillingv1 "example.com/billing/gen/acme/billing/v1"
+                \t"google.golang.org/grpc"
+                )
+
+                func main() {
+                \tserver := grpc.NewServer()
+                \tbillingv1.RegisterInvoicesServer(server, &invoices{})
+                }
+
+                func PublishPaid(client *pubsub.Client) {
+                \tclient.Publisher("invoice-events")
+                }
+
+                func Load(db *sql.DB) {
+                \tdb.Query("SELECT id FROM invoices WHERE id = $1", 1)
+                }
+                """,
+        ])
+        let notifier = try makeFixtureRepo([
+            "go.mod": "module example.com/notifier\n",
+            "notifier/Dockerfile": "FROM golang:1.23\n",
+            "notifier/main.go": """
+                package main
+
+                import (
+                \t"cloud.google.com/go/pubsub/v2"
+                \tbillingv1 "example.com/billing/gen/acme/billing/v1"
+                )
+
+                func Listen(client *pubsub.Client) {
+                \tclient.Subscriber("invoice-events-sub")
+                }
+
+                func Fetch(conn *grpc.ClientConn) {
+                \tbillingv1.NewInvoicesClient(conn)
+                }
+
+                func Report(db *sql.DB) {
+                \tdb.Query("SELECT count(*) FROM invoices")
+                }
+                """,
+        ])
+        defer { for url in [billing, notifier] { try? FileManager.default.removeItem(at: url) } }
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "kx-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        for root in [billing, notifier] { _ = try await KnowledgeExtension.index(root.path, store: store, history: false) }
+        let (billingName, notifierName) = (billing.lastPathComponent, notifier.lastPathComponent)
+        let search = try #require(knowledge.tools.first { $0.name == "knowledge_search" })
+        let tables = try await search.run(["query": "invoices", "kind": "table"])
+        #expect(tables.array?.first?["id"]?.string == "table:billing.invoices")
+        let tool = try #require(knowledge.tools.first { $0.name == "knowledge_service_map" })
+        func entry(_ list: JSONValue?, _ key: String, _ value: String) -> JSONValue? { list?.array?.first { $0[key]?.string == value } }
+
+        let server = try await tool.run(["name": .string(billing.path)])
+        #expect(server["implements"] == [["rpc_service": "acme.billing.v1.Invoices", "confidence": 0.9, "from": ["main at billing-api/server.go:9"], "methods": "GetInvoice, Watch"]])
+        let fetched: JSONValue = [.string("Fetch at \(notifierName)/notifier/main.go:12")]
+        #expect(entry(server["called_by"], "rpc_service", "acme.billing.v1.Invoices")?["from"] == fetched)
+        let consumed: JSONValue = [.string("Listen at \(notifierName)/notifier/main.go:8")]
+        #expect(server["publishes"] == [["topic": "pubsub:invoice-events", "from": ["PublishPaid at billing-api/server.go:14"], "consumed_by": consumed]])
+        #expect(server["tables"] == [["table": "billing.invoices", "reads": ["Load at billing-api/server.go:18"], "migrated_by": ["db/migrations/1_init.up.sql"], "confidence": 0.9]])
+
+        let client = try await tool.run(["name": .string(notifier.path)])
+        #expect(entry(client["calls"], "rpc_service", "acme.billing.v1.Invoices")?["answered_by"] == [.string(billingName)])
+        let published: JSONValue = [.string("PublishPaid at \(billingName)/billing-api/server.go:14")]
+        #expect(client["consumes"] == [["topic": "pubsub:invoice-events-sub", "from": ["Listen at notifier/main.go:8"], "published_by": published]])
+        #expect(client["tables"] == [["table": "billing.invoices", "reads": ["Report at notifier/main.go:16"], "confidence": 0.6]])
+        #expect(client["implements"] == nil && client["publishes"] == nil)
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",

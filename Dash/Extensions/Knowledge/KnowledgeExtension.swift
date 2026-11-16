@@ -620,9 +620,9 @@ final class KnowledgeExtension: DashExtension {
             serviceMapTool,
             DashiiTool(
                 name: "knowledge_search",
-                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, services (what a repository deploys: Dockerfiles, charts, manifests), HTTP endpoints (\"GET /users/{}\", with the function handling them), hosts the code calls (a base URL's environment variable or a host name), concepts, docs (Confluence pages about the repositories), tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
+                description: "Search the knowledge graph of the user's code and work: repositories, directories, files, symbols (functions, types), modules, flows, decisions, configuration, services (what a repository deploys: Dockerfiles, charts, manifests), HTTP endpoints (\"GET /users/{}\", with the function handling them), hosts the code calls (a base URL's environment variable or a host name), gRPC services, rpcs and proto messages, GraphQL types and root fields, message topics and queues (Kafka, Pub/Sub, SQS, SNS, NATS, RabbitMQ), database tables (with their columns), concepts, docs (Confluence pages about the repositories), tickets, PRs, agent sessions, meetings, notes, people. Matches names, signatures and Dashii's notes, and by meaning (\"where do we retry payments\"). Start here to locate anything.",
                 properties: ["query": JSONSchema.string("Words or a name, e.g. \"renew subscription\" or \"UserService\"."),
-                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "cluster", "flow", "decision", "env", "service", "endpoint", "host", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person"]),
+                             "kind": JSONSchema.string("Optional kind filter.", enum: ["repo", "directory", "file", "symbol", "package", "cluster", "flow", "decision", "env", "service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person"]),
                              "limit": JSONSchema.integer("Max results (default 20).")],
                 required: ["query"]
             ) { [weak self] input in
@@ -897,7 +897,7 @@ final class KnowledgeExtension: DashExtension {
         // Studied things first (concepts, directories with notes), then code.
         var seen = Set<String>()
         var picked: [KnowledgeNode] = []
-        for kinds in [["concept"], ["directory", "repo"], ["doc"], ["service", "endpoint", "host"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
+        for kinds in [["concept"], ["directory", "repo"], ["doc"], ["service", "endpoint", "host", "rpc_service", "graphql_field", "topic", "table"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
             for node in try await store.search(question, kinds: kinds, limit: limit) where seen.insert(node.id).inserted {
                 picked.append(node)
             }
