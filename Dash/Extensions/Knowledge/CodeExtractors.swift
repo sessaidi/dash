@@ -4,6 +4,17 @@ import Foundation
 // re-indexes; the ones without a repository in them are shared, so one route served by a
 // repository and called from another is a single node.
 //
+//   service:<repo id>:<name>     something the repository deploys or runs: a Dockerfile, Helm
+//                                chart, Kubernetes workload, compose service, package.json start
+//                                script or Go command. Signature "Defined in <files>".
+//   endpoint:<METHOD> <path>     an HTTP route, from code or an OpenAPI document. Parameters are
+//                                written {}, the method ANY when it isn't known. Shared. Its
+//                                name keeps the path as written; its language is the framework.
+//                                Signature "GET /users/{} → handlers.GetUser".
+//
+//   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
+//   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
+//
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
 // handler's name resolved to a symbol, the folder a service runs) are kept as refs and made by
