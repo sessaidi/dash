@@ -788,6 +788,10 @@ struct KnowledgeExtractionTests {
         let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "kx-\(UUID())")!, url: nil)
         let store = try #require(knowledge.store)
         for root in [server, clients] { _ = try await KnowledgeExtension.index(root.path, store: store, history: false) }
+        let search = try #require(knowledge.tools.first { $0.name == "knowledge_search" })
+        let hosts = try await search.run(["query": "BILLING_API_URL", "kind": "host"])
+        #expect(hosts.array?.map { $0["id"]?.string } == ["host:BILLING_API_URL"])
+        #expect(KnowledgeView.kinds.contains("host"))
         let tool = try #require(knowledge.tools.first { $0.name == "knowledge_service_map" })
         func entry(_ list: JSONValue?, _ key: String, _ value: String) -> JSONValue? { list?.array?.first { $0[key]?.string == value } }
 
