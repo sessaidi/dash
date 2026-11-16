@@ -12,7 +12,7 @@ struct KnowledgeView: View {
     @State private var selected: KnowledgeNode?
     @State private var history: [KnowledgeNode] = []
 
-    static let kinds = ["", "repo", "directory", "file", "symbol", "service", "endpoint", "host", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
+    static let kinds = ["", "repo", "directory", "file", "symbol", "service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -134,7 +134,7 @@ struct KnowledgeRow: View {
     private var subtitle: String {
         if !node.path.isEmpty { return node.line > 0 ? "\(node.path):\(node.line)" : node.path }
         if !node.summary.isEmpty { return node.summary }
-        if ["service", "endpoint", "host"].contains(node.kind), !node.signature.isEmpty { return node.signature }
+        if ["service", "endpoint", "host", "rpc_service", "rpc", "message", "graphql_type", "graphql_field", "topic", "table"].contains(node.kind), !node.signature.isEmpty { return node.signature }
         return node.kind
     }
 
@@ -148,6 +148,13 @@ struct KnowledgeRow: View {
         case "service": "server.rack"
         case "endpoint": "network"
         case "host": "globe"
+        case "rpc_service": "point.3.connected.trianglepath.dotted"
+        case "rpc": "arrow.left.arrow.right"
+        case "message": "envelope"
+        case "graphql_type": "square.stack.3d.up"
+        case "graphql_field": "curlybraces"
+        case "topic": "megaphone"
+        case "table": "tablecells"
         case "concept": "lightbulb"
         case "ticket": "checklist"
         case "pr": "arrow.triangle.pull"

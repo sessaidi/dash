@@ -109,8 +109,10 @@ extension KnowledgeExtension {
                     nodes(id, kind, name, qualified, repo, path, line, end_line, language, signature, summary, url, source), \
                     edges(src, dst, kind, weight, source) with kinds contains, defines, imports, calls (weight = confidence 0.3–0.95), \
                     inherits, tests, authored, changes_with, touches, mentions, reads_env, sets_env, about, member_of, step, \
-                    deploys, runs, exposes, defined_in, handled_by, calls_endpoint, calls_host; \
-                    symbol_calls(src, name, repo). Node kinds: repo, directory, file, symbol, package, cluster, flow, env, service, endpoint, host, decision, ticket, pr, person…
+                    deploys, runs, exposes, defined_in, handled_by, calls_endpoint, calls_host, implements, calls_rpc, \
+                    publishes, consumes, migrates, reads_table, writes_table; \
+                    symbol_calls(src, name, repo). Node kinds: repo, directory, file, symbol, package, cluster, flow, env, service, endpoint, host, \
+                    rpc_service, rpc, message, graphql_type, graphql_field, topic, table, decision, ticket, pr, person…
                     Recursive CTEs work (WITH RECURSIVE).
                     """,
                 properties: ["sql": JSONSchema.string("A SELECT or WITH query."), "limit": JSONSchema.integer("Rows (default 100, max 200).")],
