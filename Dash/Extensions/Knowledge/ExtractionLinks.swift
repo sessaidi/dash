@@ -9,14 +9,14 @@ enum ExtractionLinks {
     /// Refs whose names are folders of the repository ("" is its root); the others name functions.
     static let pathKinds: Set<String> = ["runs"]
     /// Refs a family's own pass resolves (workload facts, …), not names of functions.
-    static let familyKinds: Set<String> = [RuntimeExtractor.factKind]
+    static let familyKinds: Set<String> = [RuntimeExtractor.factKind, ContainerExtractor.refKind]
 
     static func link(repo: String, store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         let root = String(repo.dropFirst(5))
         var edges: [KnowledgeEdge] = []
-        let deployed = try await services(repo: repo, root: root, store: store)
-        edges += deployed
         let refs = try await store.refs(repo: repo)
+        let deployed = try await services(repo: repo, root: root, containers: refs.filter { $0.ref.kind == ContainerExtractor.refKind }.map(\.ref), store: store)
+        edges += deployed
         edges += try await WorkloadLinks.link(repo: repo, root: root, refs: refs, store: store)
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
@@ -46,10 +46,11 @@ enum ExtractionLinks {
     }
 
     /// Services no file defines any more go; the others are deployed by the repository and say
-    /// where they're defined.
-    private static func services(repo: String, root: String, store: KnowledgeStore) async throws -> [KnowledgeEdge] {
+    /// where they're defined, and what their Dockerfile exposes and runs.
+    private static func services(repo: String, root: String, containers: [KnowledgeRef], store: KnowledgeStore) async throws -> [KnowledgeEdge] {
         var edges: [KnowledgeEdge] = []
         var changed: [KnowledgeNode] = []
+        let facts = Dictionary(grouping: containers, by: \.src).mapValues { WorkloadLinks.Facts($0.flatMap(\.names)) }
         for service in try await store.nodes(kind: "service", repo: repo, limit: 10_000) {
             let definitions = try await store.neighbors(service.id, kinds: ["defined_in"], limit: 50).filter { !$0.incoming }.map(\.node.path).sorted()
             if definitions.isEmpty {
@@ -59,6 +60,11 @@ enum ExtractionLinks {
             edges.append(KnowledgeEdge(src: repo, dst: service.id, kind: "deploys", source: source))
             var node = service
             node.signature = "Defined in " + definitions.prefix(4).joined(separator: ", ") + (definitions.count > 4 ? " and \(definitions.count - 4) more" : "")
+            if let container = facts[service.id] {
+                if !container["port"].isEmpty { node.signature += (container["port"].count == 1 ? " · port " : " · ports ") + container["port"].joined(separator: ", ") }
+                let command = (container["entrypoint"] + container["cmd"]).joined(separator: " ")
+                if !command.isEmpty { node.signature += " · runs " + command }
+            }
             if node.signature != service.signature { changed.append(node) }
         }
         try await store.upsert(changed)
