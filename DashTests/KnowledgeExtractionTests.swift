@@ -1261,6 +1261,272 @@ struct KnowledgeExtractionTests {
                 == ["topic:pubsub:invoices-sub topic:pubsub:invoices 0.6"])
     }
 
+    // MARK: Databases
+
+    @Test func readsTheTablesOfSQLStatements() {
+        func tables(_ sql: String) -> [String] {
+            let found = SQLQuery.tables(sql)
+            return found.reads.map { "r " + $0 } + found.writes.map { "w " + $0 }
+        }
+        #expect(tables("SELECT a.id FROM accounts a, billing.invoices i JOIN \"Plans\" p ON p.id = i.plan_id WHERE a.id = $1") == ["r accounts", "r billing.invoices", "r Plans"])
+        #expect(tables("WITH recent AS (SELECT * FROM invoices) SELECT extract(day FROM created_at) FROM recent, generate_series(1, 3)") == ["r invoices"])
+        #expect(tables("INSERT INTO invoices (id) VALUES ($1) ON CONFLICT (id) DO UPDATE SET total = excluded.total") == ["w invoices"])
+        #expect(tables("DELETE FROM invoices USING customers WHERE customers.id = invoices.customer_id AND a IS DISTINCT FROM b") == ["r customers", "w invoices"])
+        #expect(tables("UPDATE invoices i SET total = 0 FROM (SELECT id FROM refunds) r WHERE r.id = i.id; TRUNCATE audit") == ["r refunds", "w invoices", "w audit"])
+        #expect(tables("select name from users -- FROM ignored\n where id = 'FROM x'") == ["r users"])
+        #expect(tables("SELECT id FROM profiles WHERE deleted_at < @from LIMIT @limit") == ["r profiles"])
+        #expect(SQLInCode.looksLikeSQL("select * from users where id = $1") && !SQLInCode.looksLikeSQL("Select a file from the list"))
+        #expect(DatabaseExtractor.isDownMigration("db/1_init.down.sql") && DatabaseExtractor.isDownMigration("sql/U2__undo.sql") && !DatabaseExtractor.isDownMigration("sql/V2__add.sql"))
+        #expect(TableModels.snake("UserID") == "user_id" && TableModels.snake("HTTPCode") == "http_code" && TableModels.snake("LineItem") == "line_item")
+    }
+
+    /// Migrations (in numeric order, a down migration among them), ORM models of each framework
+    /// and SQL in Go, TypeScript and Python.
+    private func makeDatabaseRepo() throws -> URL {
+        try makeFixtureRepo([
+            "go.mod": "module example.com/billing\n",
+            "db/migrations/1_init.up.sql": """
+                -- billing schema
+                SET search_path TO "$user", billing, public;
+
+                CREATE TABLE IF NOT EXISTS invoices (
+                    id BIGSERIAL PRIMARY KEY,
+                    customer_id BIGINT NOT NULL,
+                    total NUMERIC(10, 2) DEFAULT 0,
+                    note TEXT,
+                    CONSTRAINT invoices_total_check CHECK (total >= 0)
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS invoices_customer_idx ON invoices (customer_id, lower(note));
+
+                CREATE TABLE legacy_payments (id INT);
+
+                CREATE FUNCTION touch() RETURNS trigger AS $$
+                BEGIN
+                  UPDATE invoices SET total = 0;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+
+                CREATE USER MAPPING FOR app SERVER remote OPTIONS (user 'app', password 'hunter2');
+                """,
+            "db/migrations/1_init.down.sql": "DROP TABLE billing.invoices;\n",
+            "db/migrations/2_currency.up.sql": """
+                ALTER TABLE billing.invoices ADD COLUMN currency TEXT NOT NULL DEFAULT 'EUR', DROP COLUMN note;
+                ALTER TABLE billing.invoices RENAME COLUMN total TO amount;
+                DROP TABLE IF EXISTS billing.legacy_payments;
+                INSERT INTO billing.currencies (code) VALUES ('EUR');
+                """,
+            "db/migrations/10_status.up.sql": """
+                ALTER TABLE billing.invoices ADD status TEXT;
+                CREATE VIEW billing.open_invoices AS
+                  SELECT i.id, i.amount AS due, c.name FROM billing.invoices i JOIN billing.customers c ON c.id = i.customer_id WHERE status = 'open';
+                """,
+            "prisma/schema.prisma": """
+                enum Status {
+                  OPEN
+                  PAID
+                }
+
+                model Customer {
+                  id        Int       @id @default(autoincrement())
+                  email     String    @unique @map("email_address")
+                  status    Status
+                  invoices  Invoice[]
+                  createdAt DateTime  @default(now())
+
+                  @@map("customers")
+                  @@schema("billing")
+                }
+                """,
+            "shop/models.py": """
+                from django.db import models
+
+
+                class Order(models.Model):
+                    customer = models.ForeignKey("Customer", on_delete=models.CASCADE)
+                    total = models.DecimalField(max_digits=10, decimal_places=2)
+                    tags = models.ManyToManyField("Tag")
+
+                    class Meta:
+                        ordering = ["-id"]
+
+
+                class Base(models.Model):
+                    class Meta:
+                        abstract = True
+                """,
+            "reports/tables.py": """
+                from sqlalchemy import Column, Integer, String, Table, MetaData
+                from sqlalchemy.orm import Mapped, mapped_column
+
+
+                class Report(Base):
+                    __tablename__ = "reports"
+                    __table_args__ = {"schema": "analytics"}
+
+                    id: Mapped[int] = mapped_column(primary_key=True)
+                    title = Column("report_title", String)
+
+
+                audit = Table("audit_log", metadata, Column("id", Integer), Column("action", String), schema="analytics")
+                """,
+            "web/src/entities/refund.ts": """
+                import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 'typeorm'
+
+                @Entity({ name: 'refunds', schema: 'billing' })
+                export class Refund {
+                  @PrimaryGeneratedColumn()
+                  id: number
+
+                  @Column({ name: 'amount_cents' })
+                  amountCents: number
+
+                  @Column()
+                  reason?: string
+
+                  @ManyToOne(() => Invoice)
+                  @JoinColumn({ name: 'invoice_id' })
+                  invoice: Invoice
+                }
+
+                @Entity()
+                export class LineItem {
+                  @PrimaryGeneratedColumn('uuid')
+                  id: string
+                }
+                """,
+            "internal/store/payment.go": """
+                package store
+
+                import "gorm.io/gorm"
+
+                type Payment struct {
+                \tgorm.Model
+                \tInvoiceID   uint
+                \tAmountCents int64 `gorm:"column:amount"`
+                \tNotes       []Note
+                \tSecret      string `gorm:"-"`
+                }
+
+                func (Payment) TableName() string { return "billing.payments" }
+                """,
+            "internal/store/queries.go": """
+                package store
+
+                const listInvoices = `
+                \tSELECT i.id, c.email_address
+                \tFROM invoices i
+                \tJOIN billing.customers c ON c.id = i.customer_id
+                \tWHERE i.status = $1`
+
+                func ListInvoices(db *sql.DB) error {
+                \t_, err := db.Query(listInvoices, "open")
+                \treturn err
+                }
+
+                func MarkPaid(db *sql.DB, id int64) error {
+                \t_, err := db.Exec("UPDATE invoices SET status = 'paid' WHERE id = $1", id)
+                \treturn err
+                }
+
+                func Totals(db *sql.DB) error {
+                \t_, err := db.Query(`WITH recent AS (SELECT * FROM invoices) SELECT count(*) FROM recent, billing.payments p`)
+                \treturn err
+                }
+                """,
+            "web/src/db.ts": """
+                export async function refundsFor(pool, invoiceId) {
+                  return pool.query('select * from billing.refunds where invoice_id = $1', [invoiceId])
+                }
+
+                export function label() {
+                  return "Select a file from the list"
+                }
+                """,
+            "jobs/report.py": #"""
+                def archive(cursor):
+                    cursor.execute("""
+                        INSERT INTO analytics.audit_log (id, action)
+                        SELECT id, 'archive' FROM reports
+                    """)
+                """#,
+        ])
+    }
+
+    @Test func replaysMigrationsAndReadsModels() async throws {
+        let root = try makeDatabaseRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        var indexer = CodeIndexer(root: root, store: store)
+        indexer.readHistory = false
+        _ = try await indexer.index()
+
+        // 10_status runs after 2_currency; the down migration and the function body don't count.
+        let invoices = try #require(try await store.node("table:billing.invoices"))
+        #expect(invoices.signature == "table billing.invoices (id, customer_id, amount, currency, status)")
+        #expect(invoices.summary == "Created in db/migrations/1_init.up.sql, changed by 2 more migrations. Indexes: invoices_customer_idx (customer_id, lower(note), unique).")
+        #expect(invoices.path == "db/migrations/1_init.up.sql" && invoices.line == 4 && invoices.repo.isEmpty)
+        let migrations = try await store.neighbors(invoices.id, kinds: ["migrates"]).filter(\.incoming).map(\.node.path).sorted()
+        #expect(migrations == ["db/migrations/10_status.up.sql", "db/migrations/1_init.up.sql", "db/migrations/2_currency.up.sql"])
+        #expect(try await store.node("table:billing.legacy_payments")?.signature == "table billing.legacy_payments, dropped in db/migrations/2_currency.up.sql")
+        #expect(try await store.node("table:billing.open_invoices")?.signature == "view billing.open_invoices (id, due, name)")
+
+        // Models: Prisma, Django, SQLAlchemy (declarative and Core), TypeORM, GORM.
+        let models: [String: String] = [
+            "table:billing.customers": "table billing.customers (id, email_address, status, createdAt)",
+            "table:public.shop_order": "table public.shop_order (id, customer_id, total)",
+            "table:analytics.reports": "table analytics.reports (id, report_title)",
+            "table:analytics.audit_log": "table analytics.audit_log (id, action)",
+            "table:billing.refunds": "table billing.refunds (id, amount_cents, reason, invoice_id)",
+            "table:public.line_item": "table public.line_item (id)",
+            "table:billing.payments": "table billing.payments (id, created_at, updated_at, deleted_at, invoice_id, amount)",
+        ]
+        for (id, signature) in models { #expect(try await store.node(id)?.signature == signature) }
+        #expect(try await store.node("table:public.base") == nil)
+        let customers = try #require(try await store.node("table:billing.customers"))
+        #expect(customers.language == "prisma" && customers.summary == "prisma model Customer in prisma/schema.prisma." && customers.path == "prisma/schema.prisma")
+
+        // Only identifiers are kept: no SQL text, no credentials.
+        let everything = try await store.nodes("SELECT * FROM nodes", []).flatMap { [$0.signature, $0.summary] }
+            + (try await store.refs(repo: indexer.repoID)).flatMap(\.ref.names)
+        #expect(!everything.contains { $0.contains("hunter2") || $0.contains("WHERE") || $0.contains("$1") })
+    }
+
+    @Test func linksSQLInCodeToItsTables() async throws {
+        let root = try makeDatabaseRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        var indexer = CodeIndexer(root: root, store: store)
+        indexer.readHistory = false
+        _ = try await indexer.index()
+
+        func accesses(_ table: String) async throws -> Set<String> {
+            Set(try await store.neighbors(table, kinds: ["reads_table", "writes_table"]).filter(\.incoming).map { neighbor in
+                let who = switch neighbor.node.kind {
+                case "symbol": String(neighbor.node.id.split(separator: "#").last ?? "")
+                case "table": neighbor.node.name
+                default: neighbor.node.path
+                }
+                return "\(who) \(neighbor.edge.kind) \(neighbor.edge.weight)"
+            })
+        }
+        // A bare name is the one table of that name the repository migrates or models.
+        #expect(try await accesses("table:billing.invoices") == [
+            "ListInvoices reads_table 0.9", "MarkPaid writes_table 0.9", "Totals reads_table 0.9", "open_invoices reads_table 1.0",
+        ])
+        #expect(try await accesses("table:billing.customers") == ["ListInvoices reads_table 1.0", "open_invoices reads_table 1.0"])
+        #expect(try await accesses("table:billing.payments") == ["Totals reads_table 1.0"])
+        #expect(try await accesses("table:billing.refunds") == ["refundsFor reads_table 1.0"])
+        #expect(try await accesses("table:analytics.audit_log") == ["archive writes_table 1.0"])
+        #expect(try await accesses("table:analytics.reports") == ["archive reads_table 0.9"])
+        // Written by a migration, defined nowhere: a placeholder.
+        #expect(try await accesses("table:billing.currencies") == ["db/migrations/2_currency.up.sql writes_table 1.0"])
+        #expect(try await store.node("table:billing.currencies")?.signature == "table billing.currencies")
+        let label = try await store.nodes("SELECT * FROM nodes WHERE id LIKE 'table:%the%'", [])
+        #expect(label.isEmpty)
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",

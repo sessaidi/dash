@@ -3,9 +3,10 @@ import SQLite3
 
 /// The pass across repositories, after any of them is indexed: which service a host stands for
 /// (`host —about→ service`), which defined route a call no repository defines is likely to
-/// reach (`calls_endpoint`, weighted below 1), and which gRPC service code implements or calls
-/// (refs by service name). Reads the graph only; its edges, under the source "service-links",
-/// are replaced wholesale each time.
+/// reach (`calls_endpoint`, weighted below 1), which gRPC service code implements or calls
+/// (refs by service name), which topic a Pub/Sub subscription named after it consumes, and which
+/// table code reads or writes (refs by table name). Reads the graph only; its edges, under the
+/// source "service-links", are replaced wholesale each time.
 enum ServiceLinks {
     static let source = "service-links"
     /// Refs only this pass resolves: they name something any repository may define.
@@ -52,6 +53,13 @@ enum ServiceLinks {
         if topics.contains(where: { $0.signature.hasPrefix("Pub/Sub subscription") }) {
             let declared = Set(try await store.pairs(kind: "consumes", dstPrefix: "topic:pubsub:").map(\.src).filter { $0.hasPrefix("topic:") })
             edges += subscriptionTopics(topics, declared: declared)
+        }
+
+        let accesses = try await store.tableAccesses()
+        if !accesses.isEmpty {
+            let tables = TableHistory.resolve(accesses, defined: try await store.definedTables(), source: source)
+            try await store.insertMissing(tables.placeholders)
+            edges += tables.edges
         }
         try await store.upsert(edges)
     }

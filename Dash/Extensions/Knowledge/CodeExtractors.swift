@@ -23,6 +23,9 @@ import Foundation
 //   topic:<system>:<name>        a Kafka topic, Pub/Sub topic or subscription, SQS queue, SNS topic,
 //                                NATS subject or RabbitMQ exchange/queue (system kafka, pubsub, sqs,
 //                                sns, nats, amqp); "$VARIABLE" when only that names it. Shared.
+//   table:<schema>.<name>        a database table or view (schema "public" when nothing says).
+//                                Signature "table account.users (id, email, …)" from its
+//                                migrations replayed in order (or its ORM model). Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -34,14 +37,17 @@ import Foundation
 //   graphql_field —handled_by→ symbol (its resolver)
 //   symbol   —publishes→ topic    symbol —consumes→ topic    topic —defined_in→ file (Terraform, manifests)
 //   topic (a Pub/Sub subscription) —consumes→ topic
+//   file     —migrates→ table      table —defined_in→ file (an ORM model)
+//   symbol (or file, view) —reads_table→ table, —writes_table→ table    (resolved by ServiceLinks)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
 // handler's name resolved to a symbol, the folder a service runs) are kept as refs and made by
 // `ExtractionLinks` once the repository is indexed, under the source "code-links". Shared nodes
 // nothing points at any more are dropped there too. Then `ServiceLinks` looks across repositories
-// (source "service-links"): host —about→ service, and calls_endpoint from a call no repository
-// defines to the routes it likely reaches (weight below 1).
+// (source "service-links"): host —about→ service, calls_endpoint from a call no repository
+// defines to the routes it likely reaches (weight below 1), gRPC implements/calls_rpc, Pub/Sub
+// subscriptions to their topics, and table reads and writes.
 
 /// Finds one family of things in a file (services, endpoints, …): deterministic and local, no
 /// model and no network, cheap enough to run on every changed file.
@@ -75,7 +81,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v3"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(), MessagingExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(), MessagingExtractor(), DatabaseExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
