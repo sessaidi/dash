@@ -1,3 +1,4 @@
+import AppKit
 import DashKit
 import DashKitUI
 import SwiftUI
@@ -182,9 +183,10 @@ struct ChatEntryView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(.tint.opacity(0.15), in: .rect(cornerRadius: 12))
+                    .contextMenu { CopyMenu(text: text) }
             }
         case .text(let text):
-            MarkdownText(text)
+            ChatMessageText(text: text)
         case .thinking(let text):
             DisclosureGroup {
                 Text(text).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
@@ -202,6 +204,80 @@ struct ChatEntryView: View {
         case .layouts(let proposal):
             LayoutProposalView(proposal: proposal)
         }
+    }
+}
+
+/// Dashii's message drawn like a Dash note (tables, headings, task lists, code, callouts,
+/// diagrams), with a Copy button on hover and a right-click menu.
+struct ChatMessageText: View {
+    let text: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    var body: some View {
+        NoteRenderer(source: Self.prepared(text))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topTrailing) {
+                if hovering {
+                    Button { copy() } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.caption)
+                            .padding(5)
+                            .background(.regularMaterial, in: .rect(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy the message (Markdown)")
+                    .accessibilityLabel("Copy message")
+                    .offset(y: -4)
+                }
+            }
+            .onHover { hovering = $0; if !$0 { copied = false } }
+            .contextMenu { CopyMenu(text: text) }
+    }
+
+    private func copy() {
+        CopyMenu.copy(text)
+        copied = true
+    }
+
+    /// A blank line before a table that follows a line of text (Dashii often writes a bold title
+    /// right above a table, which Markdown would otherwise read as one paragraph).
+    nonisolated static func prepared(_ text: String) -> String {
+        var lines: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            let starts = line.trimmingCharacters(in: .whitespaces).hasPrefix("|")
+            if starts, let previous = lines.last, !previous.trimmingCharacters(in: .whitespaces).isEmpty,
+               !previous.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
+                lines.append("")
+            }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+/// Copy a message as Markdown or as plain text.
+struct CopyMenu: View {
+    let text: String
+
+    var body: some View {
+        Button("Copy Message", systemImage: "doc.on.doc") { Self.copy(text) }
+        Button("Copy as Plain Text", systemImage: "text.alignleft") { Self.copy(Self.plain(text)) }
+    }
+
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Markdown without its marks: what you'd paste into a plain field.
+    nonisolated static func plain(_ markdown: String) -> String {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return markdown.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            var line = String(line)
+            if let heading = line.firstMatch(of: /^#{1,6}\s+/) { line.removeSubrange(heading.range) }
+            return (try? AttributedString(markdown: line, options: options)).map { String($0.characters) } ?? line
+        }.joined(separator: "\n")
     }
 }
 
