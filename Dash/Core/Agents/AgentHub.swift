@@ -227,12 +227,16 @@ final class AgentHub {
             prompt += "\n\nDashii (the user's assistant) asks you, on the user's behalf:\n\(question)\n\n"
                 + "Answer it in the report's summary, plainly and with the evidence; findings are the problems you found while answering."
         }
+        let runStarted = Date.now
         for try await message in query(prompt, options: options) {
             // Without Dash's tools the agent has nothing to check: stop rather than report on nothing.
             if case .system(let system) = message, system.subtype == "init", let status = system.mcpServers["dash"], status != "connected" {
+                DashiiHealth.shared.record(source: "agent.\(entry.id)", toolsConnected: false, ok: false, error: "Dash's tools didn't connect.", started: runStarted)
                 throw ToolsNotConnected()
             }
             guard case .result(let result) = message else { continue }
+            DashiiHealth.shared.record(source: "agent.\(entry.id)", toolsConnected: true, ok: !result.isError,
+                                       error: result.isError ? (result.result ?? result.subtype) : nil, started: runStarted)
             ClaudeUsage.shared.record(source: "agent.\(entry.id)", model: options.model ?? host.settings.model, effort: options.effort, result: result)
             if result.isError { throw ToolError("Dashii: \(result.result ?? result.subtype)") }
             let text = result.structuredOutput?.line ?? result.result ?? ""
