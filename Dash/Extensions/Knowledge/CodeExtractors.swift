@@ -15,11 +15,16 @@ import Foundation
 //   host:<name>                  where a call goes when no route says: the environment variable
 //                                holding the base URL (BILLING_API_URL) or a literal host name
 //                                (billing-api.default.svc.cluster.local). Shared.
+//   grpc:<pkg>.<Service>         a gRPC service in a .proto (rpc_service), "grpc:<pkg>.<Service>/<Method>"
+//                                its rpcs (rpc), proto:<pkg>.<Message> its messages (message); no
+//                                package, no "<pkg>.". Shared; path and line say where.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
 //   symbol   —calls_endpoint→ endpoint (or file, outside any function)
 //   symbol   —calls_host→ host
+//   rpc_service —defined_in→ file   rpc_service —contains→ rpc      rpc, message —defined_in→ file
+//   symbol   —implements→ rpc_service     symbol —calls_rpc→ rpc_service   (resolved by ServiceLinks)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -61,7 +66,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v3"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.

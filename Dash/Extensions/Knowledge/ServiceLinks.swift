@@ -2,11 +2,14 @@ import Foundation
 import SQLite3
 
 /// The pass across repositories, after any of them is indexed: which service a host stands for
-/// (`host —about→ service`), and which defined route a call no repository defines is likely to
-/// reach (`calls_endpoint`, weighted below 1). Reads the graph only; its edges, under the source
-/// "service-links", are replaced wholesale each time.
+/// (`host —about→ service`), which defined route a call no repository defines is likely to
+/// reach (`calls_endpoint`, weighted below 1), and which gRPC service code implements or calls
+/// (refs by service name). Reads the graph only; its edges, under the source "service-links",
+/// are replaced wholesale each time.
 enum ServiceLinks {
     static let source = "service-links"
+    /// Refs only this pass resolves: they name something any repository may define.
+    static let refKinds: Set<String> = ["implements", "calls_rpc"]
 
     static func link(store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         // Its own edges go first: they mustn't keep a host or a route nothing else reaches alive.
@@ -38,7 +41,35 @@ enum ServiceLinks {
                 }
             }
         }
+
+        let rpcServices = try await store.nodes(kind: "rpc_service", limit: 100_000)
+        if !rpcServices.isEmpty {
+            let byName = Dictionary(grouping: rpcServices, by: \.name)
+            for ref in try await store.refs(kinds: refKinds) { edges += rpcTargets(ref, services: byName) }
+        }
         try await store.upsert(edges)
+    }
+
+    // MARK: gRPC
+
+    /// The gRPC service a ref names: its first candidate name some `.proto` declares; between
+    /// services of that name, the ones whose package the Go import path spells out. One at 0.9,
+    /// two or three at 0.3 each, more none.
+    static func rpcTargets(_ ref: KnowledgeRef, services byName: [String: [KnowledgeNode]]) -> [KnowledgeEdge] {
+        let importPath = ref.names.first { $0.hasPrefix("import:") }.map { String($0.dropFirst("import:".count)) }
+        for name in ref.names where !name.hasPrefix("import:") {
+            guard var candidates = byName[name], !candidates.isEmpty else { continue }
+            if candidates.count > 1, let importPath {
+                let segments = Set(importPath.lowercased().split { "/.;-_".contains($0) }.map(String.init))
+                let scored = candidates.map { node in (node, node.qualified.lowercased().split(separator: ".").dropLast().filter { segments.contains(String($0)) }.count) }
+                let best = scored.map(\.1).max() ?? 0
+                if best > 0 { candidates = scored.filter { $0.1 == best }.map(\.0) }
+            }
+            let weight = candidates.count == 1 ? 0.9 : candidates.count <= 3 ? 0.3 : 0
+            guard weight > 0 else { return [] }
+            return candidates.map { KnowledgeEdge(src: ref.src, dst: $0.id, kind: ref.kind, weight: weight, source: source) }
+        }
+        return []
     }
 
     // MARK: Hosts
@@ -138,6 +169,19 @@ enum ServiceLinks {
 }
 
 extension KnowledgeStore {
+    /// Refs of some kinds in every repository.
+    func refs(kinds: Set<String>) throws -> [KnowledgeRef] {
+        let list = kinds.sorted().map { "'\($0.replacingOccurrences(of: "'", with: ""))'" }.joined(separator: ",")
+        let statement = try prepare("SELECT src, kind, names, line FROM refs WHERE kind IN (\(list))")
+        defer { sqlite3_finalize(statement) }
+        var result: [KnowledgeRef] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            result.append(KnowledgeRef(src: text(statement, 0), kind: text(statement, 1), names: text(statement, 2).components(separatedBy: "\n"),
+                                       line: Int(sqlite3_column_int64(statement, 3))))
+        }
+        return result
+    }
+
     /// Endpoints some file defines (a route or an OpenAPI operation).
     func definedEndpoints() throws -> [String] {
         try strings("SELECT DISTINCT src FROM edges WHERE src >= 'endpoint:' AND src < 'endpoint;' AND kind = 'defined_in'", [])
