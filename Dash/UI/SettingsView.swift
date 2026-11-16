@@ -96,6 +96,7 @@ private struct ClaudeSettings: View {
                 }
             }
             AlwaysAllowedSection()
+            Section("Health") { HealthPanel() }
             ClaudeStatusSection(executable: settings.claudeExecutable)
         }
         .formStyle(.grouped)
