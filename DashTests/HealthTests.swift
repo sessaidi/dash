@@ -33,18 +33,40 @@ struct HealthTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let header = #"{"app_name":"Dash","app_version":"0.2.6","timestamp":"2026-11-15 23:45:27.00 +0100"}"#
-        let body = #"{"captureTime":"2026-11-15 23:45:27.3311 +0100","exception":{"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},"asi":{"libswiftCore.dylib":["Fatal error: Index out of range"]},"usedImages":[{"name":"Dash"},{"name":"libswiftCore.dylib"}],"threads":[{"triggered":true,"frames":[{"imageIndex":1,"symbol":"_assertionFailure"},{"imageIndex":0,"symbol":"NoteDocument.init(_:)","sourceFile":"NoteDocument.swift","sourceLine":17}]}]}"#
+        let body = #"{"procPath":"/Applications/Dash.app/Contents/MacOS/Dash","captureTime":"2026-11-15 23:45:27.3311 +0100","exception":{"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},"asi":{"libswiftCore.dylib":["Fatal error: Index out of range"]},"usedImages":[{"name":"Dash"},{"name":"libswiftCore.dylib"}],"threads":[{"triggered":true,"frames":[{"imageIndex":1,"symbol":"_assertionFailure"},{"imageIndex":0,"symbol":"NoteDocument.init(_:)","sourceFile":"NoteDocument.swift","sourceLine":17}]}]}"#
         try (header + "\n" + body).write(to: folder.appending(path: "Dash-2026-11-15-234527.ips"), atomically: true, encoding: .utf8)
         try "not a report".write(to: folder.appending(path: "Other-1.ips"), atomically: true, encoding: .utf8)
 
-        let crash = try #require(CrashReports.all(in: folder).first)
+        #expect(CrashReports.anonymized("/Users/me/code/build/Debug/Dash.app/Contents/MacOS/Dash", home: "/Users/me") == "/Users/USER/*/Dash.app/Contents/MacOS/Dash")
+        #expect(CrashReports.anonymized("/Applications/Dash.app/Contents/MacOS/Dash", home: "/Users/me") == "/Applications/Dash.app/Contents/MacOS/Dash")
+        // Only the running app's crashes count: a test run or development build crashes elsewhere.
+        #expect(CrashReports.all(in: folder, executable: "/Users/me/build/Debug/Dash.app/Contents/MacOS/Dash").isEmpty)
+        let crash = try #require(CrashReports.all(in: folder, executable: "/Applications/Dash.app/Contents/MacOS/Dash").first)
         #expect(crash.version == "0.2.6" && crash.exception == "EXC_BREAKPOINT (SIGTRAP)" && crash.reason == "Fatal error: Index out of range")
         // Dash's own frames first.
         #expect(crash.frames.first == "Dash: NoteDocument.init(_:) (NoteDocument.swift:17)")
         let defaults = UserDefaults(suiteName: "crashes-\(UUID())")!
         defaults.set(Date(timeIntervalSince1970: 0), forKey: "health.crashesSeen")
-        #expect(CrashReports.unseen(in: folder, defaults: defaults).count == 1)
+        let app = "/Applications/Dash.app/Contents/MacOS/Dash"
+        #expect(CrashReports.unseen(in: folder, defaults: defaults, executable: app).count == 1)
         CrashReports.markSeen([crash], defaults: defaults)
-        #expect(CrashReports.unseen(in: folder, defaults: defaults).isEmpty)
+        #expect(CrashReports.unseen(in: folder, defaults: defaults, executable: app).isEmpty)
+    }
+}
+
+/// Crash reports read like a person would explain them.
+struct CrashReadabilityTests {
+    @Test func framesAndExplanationsAreReadable() {
+        let frame = CrashReport.Frame(image: "Dash.debug.dylib", symbol: "partial apply for closure #1 in static CopyMenu.plain(_:)", file: "/x/ChatPanel.swift", line: 276, own: true)
+        #expect(frame.name == "CopyMenu.plain(_:)" && frame.place == "ChatPanel.swift:276")
+        #expect(CrashReport.Frame(image: "Dash", symbol: "x", file: "/<compiler-generated>", line: nil, own: true).place == nil)
+        #expect(CrashReport.isOwn(image: "Dash.debug.dylib", symbol: "CopyMenu.plain(_:)"))
+        #expect(!CrashReport.isOwn(image: "DashTests", symbol: "ChatMessageTests.plainTextDropsTheMarks()"))
+        #expect(!CrashReport.isOwn(image: "Dash", symbol: "$s9DashTests011ChatMessage"))
+        let crash = CrashReport(id: "a", file: URL(filePath: "/tmp/a.ips"), date: .now, version: "0.3.1", exception: "EXC_BREAKPOINT (SIGTRAP)",
+                                reason: "Fatal error: Index out of range", frames: [])
+        #expect(crash.explanation.contains("Index out of range"))
+        let trap = CrashReport(id: "b", file: URL(filePath: "/tmp/b.ips"), date: .now, version: "0.3.1", exception: "EXC_BREAKPOINT (SIGTRAP)", reason: "", frames: [])
+        #expect(trap.explanation.contains("safety check"))
     }
 }
