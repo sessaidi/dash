@@ -40,6 +40,9 @@ import Foundation
 //                                wrapper); language the system. Shared.
 //   config:<dotted.key>          a configuration key, lowercased (name as written). Shared.
 //   owner:<@team, @user or email>  a code owner from CODEOWNERS. Shared.
+//   doc:repo:<root>/<path>       a Markdown, AsciiDoc or reST document of the repository: title,
+//                                text (≤ 20,000 characters, secrets masked) as its signature,
+//                                section headings as its summary.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -60,6 +63,7 @@ import Foundation
 //   symbol (or file) —checks_flag→ flag     flag —defined_in→ file (flagd)
 //   file     —sets_config→ config  symbol (or file) —reads_config→ config (struct tags: link pass, below 1)
 //   owner    —owns→ repo, dir or file (the fewest that say it; link pass)   owner —about→ person
+//   doc      —defined_in→ file     doc —documents→ dir (or repo)   doc —about→ file, dir, symbol, endpoint
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -103,7 +107,7 @@ enum CodeExtractors {
     static let version = "extract-v4"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
-                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor()]
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor(), RepoDocExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
@@ -129,14 +133,28 @@ final class ExtractionContext: @unchecked Sendable {
     private let goFiles: [String: [String]]
     private var goConstants: [String: [String: String]] = [:]
 
+    private let files: [String]
+    private var pathSets: (files: Set<String>, directories: Set<String>)?
+
     init(root: URL, files: [String], goModule: String?) {
         self.root = root
         self.goModule = goModule
+        self.files = files
         var byDirectory: [String: [String]] = [:]
         for path in files where path.hasSuffix(".go") && !path.hasSuffix("_test.go") {
             byDirectory[(path as NSString).deletingLastPathComponent, default: []].append(path)
         }
         goFiles = byDirectory
+    }
+
+    /// The repository's files and folders ("" not included), for paths a document or job mentions.
+    func paths() -> (files: Set<String>, directories: Set<String>) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let known = pathSets { return known }
+        let sets = (Set(files), Set(files.flatMap(CodeIndexer.ancestors)))
+        pathSets = sets
+        return sets
     }
 
     /// The string constants (and package-level string variables) of the Go package in a directory:

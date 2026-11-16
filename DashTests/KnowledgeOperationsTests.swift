@@ -591,4 +591,67 @@ struct KnowledgeOperationsTests {
         #expect(try await targets(OwnershipExtractor.id("@acme/platform"), "owns", store: store) == [indexer.repoID])
         #expect(try await store.node(OwnershipExtractor.id("@acme/billing")) == nil)
     }
+
+    // MARK: Docs
+
+    @Test func indexesRepositoryDocsAndWhatTheyMention() async throws {
+        let root = try makeFixtureRepo([
+            "README.md": """
+                # Billing API
+
+                Charges customers. Start with [the routes](api/routes.go) and `api/`.
+                `GET /invoices/:id` returns one invoice; `InvoiceStore.Find()` reads it. See `Handle`.
+
+                ## Configuration
+                Set `STRIPE_API_KEY=sk_live_abcdefghijklmnop1234` in production.
+
+                ```go
+                func Example() {}
+                ```
+                """,
+            "api/README.adoc": "= API package\n\n== Routes\nThe `Handle` here serves `api/routes.go`.\n",
+            "docs/runbook.rst": "Runbook\n=======\n\nRestarts\n--------\nCall POST /invoices to retry.\n",
+            "CHANGELOG.md": "# Changelog\n\n## 1.0.0\nFirst release.\n",
+            "api/routes.go": """
+                package api
+
+                import "github.com/go-chi/chi/v5"
+
+                func Routes(r chi.Router) {
+                \tr.Get("/invoices/{id}", Handle)
+                }
+
+                func Handle() {}
+                """,
+            "store/invoices.go": "package store\n\ntype InvoiceStore struct{}\n\nfunc (s InvoiceStore) Find() {}\n",
+            "worker/handle.go": "package worker\n\nfunc Handle() {}\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        let readmeID = RepoDocExtractor.id(root: root.path, path: "README.md")
+        let readme = try #require(try await store.node(readmeID))
+        #expect(readme.kind == "doc" && readme.name == "Billing API" && readme.summary == "Sections: Configuration")
+        #expect(readme.signature.contains("Charges customers") && !readme.signature.contains("sk_live_abcdefghijklmnop1234"))
+        #expect(try await targets(readmeID, "documents", store: store) == [indexer.repoID])
+        let dir = "dir:" + root.path + "/api"
+        let about = try await targets(readmeID, "about", store: store)
+        let invoices = try await store.definitions(repo: indexer.repoID, idPrefix: "endpoint:").map(\.id).filter { $0.hasPrefix("endpoint:GET /invoices") }
+        #expect(invoices.count == 1)
+        // `Handle` names two functions: no edge from the root; inside api/ it is the only one.
+        #expect(about == Set([indexer.fileID("api/routes.go"), dir, "sym:" + root.path + "/store/invoices.go#InvoiceStore.Find"] + invoices))
+
+        let package = RepoDocExtractor.id(root: root.path, path: "api/README.adoc")
+        #expect(try await store.node(package)?.name == "API package")
+        #expect(try await targets(package, "documents", store: store) == [dir])
+        #expect(try await targets(package, "about", store: store) == [indexer.fileID("api/routes.go"), "sym:" + root.path + "/api/routes.go#Handle"])
+
+        let runbook = try #require(try await store.node(RepoDocExtractor.id(root: root.path, path: "docs/runbook.rst")))
+        #expect(runbook.name == "Runbook" && runbook.summary == "Sections: Restarts")
+        #expect(try await store.node(RepoDocExtractor.id(root: root.path, path: "CHANGELOG.md")) == nil)
+
+        try FileManager.default.removeItem(at: root.appending(path: "docs/runbook.rst"))
+        _ = try await indexer.index()
+        #expect(try await store.node(RepoDocExtractor.id(root: root.path, path: "docs/runbook.rst")) == nil)
+    }
 }

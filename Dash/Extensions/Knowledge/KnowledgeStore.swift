@@ -176,7 +176,7 @@ actor KnowledgeStore {
     /// files point at them.
     func replaceFile(repo: String, path: String, nodes: [KnowledgeNode], edges: [KnowledgeEdge], refs: [KnowledgeRef] = []) throws {
         let file = "file:" + String(repo.dropFirst(5)) + "/" + path
-        let old = try strings("SELECT id FROM nodes WHERE repo = ?1 AND path = ?2 AND kind IN ('file', 'symbol', 'decision', 'ci_job')", [repo, path])
+        let old = try strings("SELECT id FROM nodes WHERE repo = ?1 AND path = ?2 AND kind IN ('file', 'symbol', 'decision', 'ci_job', 'doc')", [repo, path])
         let kept = Set(nodes.map(\.id))
         try run("DELETE FROM edges WHERE source = ?1", [file])
         try run("DELETE FROM refs WHERE file = ?1", [file])
