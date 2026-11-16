@@ -50,6 +50,7 @@ struct ChatPanel: View {
                 Text(host.persona.name).font(.headline)
             }
             Text(DashiiModel(rawValue: settings.model)?.displayName ?? settings.model).font(.caption).foregroundStyle(.secondary)
+            HealthBadge()
             Spacer()
             Button("History", systemImage: "clock.arrow.circlepath") { showingHistory.toggle() }
                 .labelStyle(.iconOnly)

@@ -16,7 +16,7 @@ struct DebugWindow: View {
     @State private var refreshes = 0
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Dashii", extensions = "Extensions", database = "Database"
+        case overview = "Overview", logs = "Logs", activity = "Activity", network = "Network", claude = "Dashii", health = "Health", extensions = "Extensions", database = "Database"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -27,6 +27,7 @@ struct DebugWindow: View {
             case .claude: "sparkles"
             case .extensions: "puzzlepiece.extension"
             case .database: "cylinder.split.1x2"
+            case .health: "stethoscope"
             }
         }
     }
@@ -45,6 +46,7 @@ struct DebugWindow: View {
                 case .claude: ClaudePane()
                 case .extensions: ExtensionsPane()
                 case .database: DatabasePane(refresh: refreshes)
+                case .health: HealthPane()
                 }
             }
             .navigationTitle(section.rawValue)
