@@ -119,7 +119,9 @@ struct HealthPane: View {
     @State private var selected: CrashReport.ID?
 
     var body: some View {
-        HSplitView {
+        // Two plain columns: a split view inside the Debug window's split view can loop on its
+        // children's minimum sizes (AppKit then stops the app).
+        HStack(alignment: .top, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HealthPanel(showsRuns: 0)
@@ -129,7 +131,8 @@ struct HealthPane: View {
                 }
                 .padding()
             }
-            .frame(minWidth: 380)
+            .frame(minWidth: 320, maxWidth: .infinity)
+            Divider()
             VStack(alignment: .leading, spacing: 8) {
                 Text("Crashes (last week)").font(.headline)
                 if health.crashes.isEmpty {
@@ -149,7 +152,7 @@ struct HealthPane: View {
                 }
             }
             .padding()
-            .frame(minWidth: 380, maxHeight: .infinity, alignment: .top)
+            .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .task { health.refreshCrashes() }
     }
