@@ -33,6 +33,7 @@ enum CodeParser {
         let name = (path as NSString).lastPathComponent
         if skippedFiles.contains(name) || name.hasSuffix(".min.js") { return nil }
         if ["Makefile", "makefile", "GNUmakefile"].contains(name) { return "makefile" }
+        if name == "CODEOWNERS" { return "codeowners" }
         if name == "Dockerfile" || name.hasPrefix("Dockerfile.") || name.hasSuffix(".dockerfile") || name == "Containerfile" { return "dockerfile" }
         switch (path as NSString).pathExtension.lowercased() {
         case "vue": return "vue"
@@ -66,7 +67,7 @@ enum CodeParser {
                                             "composer.lock", "Package.resolved", "Gemfile.lock", "poetry.lock", ".terraform.lock.hcl"]
 
     /// Languages whose files are configuration or documents rather than code.
-    static let structured: Set<String> = ["terraform", "yaml", "toml", "json", "makefile", "markdown", "dockerfile", "protobuf", "graphql", "sql", "prisma"]
+    static let structured: Set<String> = ["terraform", "yaml", "toml", "json", "makefile", "markdown", "dockerfile", "protobuf", "graphql", "sql", "prisma", "codeowners"]
 
     static func parse(_ text: String, language: String) -> ParsedFile {
         if structured.contains(language) { return StructuredParser.parse(text, language: language) }
