@@ -98,6 +98,9 @@ final class ChatSession {
     /// The rules the running session was started with; a change starts a fresh session.
     @ObservationIgnored private var codeRules: String?
     @ObservationIgnored private var codeStarted = Date()
+    /// Whether Dash's tools connected, from the session's first message (it comes once per session).
+    @ObservationIgnored private var sessionToolsConnected: Bool?
+    @ObservationIgnored private var turnToolsConnected: Bool?
     @ObservationIgnored private var codeLiveID = UUID().uuidString
 
     init(host: ExtensionHost) {
@@ -225,6 +228,7 @@ final class ChatSession {
         code?.terminate()
         code = nil
         codeSessionID = nil
+        sessionToolsConnected = nil
         sessionCost = 0
         conversationID = nil
     }
@@ -341,6 +345,7 @@ final class ChatSession {
         do {
             let session = try claudeCodeSession()
             codeStarted = Date()
+            turnToolsConnected = sessionToolsConnected
             codeLiveID = UUID().uuidString
             try session.send(prompt)
             let result: ResultMessage = try await withTaskCancellationHandler {
@@ -355,6 +360,9 @@ final class ChatSession {
                 let exchange = Array(transcript[max(0, turnStart - 1)...])
                 Task { if await memory.learn(from: exchange) > 0 { self.host.ext(KnowledgeExtension.self)?.bump() } }
             }
+            DashiiHealth.shared.record(source: "chat", toolsConnected: turnToolsConnected,
+                                       ok: !result.isError || result.subtype == "error_during_execution",
+                                       error: result.isError ? (result.result ?? result.subtype) : nil, started: codeStarted)
             if result.isError, result.subtype != "error_during_execution" {
                 notice("Dashii: \(result.result ?? result.subtype)", isError: true)
             } else if result.subtype == "error_during_execution" {
@@ -364,6 +372,8 @@ final class ChatSession {
             lastActivityID = previousActivityID
             transcript += live
             DashLog.error("Claude Code turn failed: \(error.localizedDescription)", category: "claude")
+            DashiiHealth.shared.record(source: "chat", toolsConnected: turnToolsConnected, ok: false,
+                                       error: error.localizedDescription, started: codeStarted)
             notice(error.localizedDescription, isError: true)
         }
     }
@@ -412,6 +422,11 @@ final class ChatSession {
 
     private func handle(_ message: ClaudeCodeKit.Message) {
         if let id = message.sessionID { codeSessionID = id }
+        // The session's first message says whether Dash's tools connected (once per session).
+        if case .system(let system) = message, system.subtype == "init", let status = system.mcpServers["dash"] {
+            turnToolsConnected = status == "connected"
+            sessionToolsConnected = turnToolsConnected
+        }
         switch message {
         case .streamEvent(let event):
             // Live text while Claude writes; replaced by the full message when it arrives.
