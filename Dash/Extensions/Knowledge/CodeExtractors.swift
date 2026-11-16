@@ -10,10 +10,16 @@ import Foundation
 //   endpoint:<METHOD> <path>     an HTTP route, from code or an OpenAPI document. Parameters are
 //                                written {}, the method ANY when it isn't known. Shared. Its
 //                                name keeps the path as written; its language is the framework.
-//                                Signature "GET /users/{} → handlers.GetUser".
+//                                Signature "GET /users/{} → handlers.GetUser". A route only
+//                                called, never defined, is just "GET /users/{}".
+//   host:<name>                  where a call goes when no route says: the environment variable
+//                                holding the base URL (BILLING_API_URL) or a literal host name
+//                                (billing-api.default.svc.cluster.local). Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
+//   symbol   —calls_endpoint→ endpoint (or file, outside any function)
+//   symbol   —calls_host→ host
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -53,7 +59,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v2"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
@@ -102,6 +108,28 @@ final class ExtractionContext: @unchecked Sendable {
         }
         goConstants[directory] = constants
         return constants
+    }
+
+    private var environmentFields: [String: String]?
+
+    /// Go struct fields set from an environment variable anywhere in the repository
+    /// (`BaseURL string `env:"BASE_URL"``): field name → variable. A name tagged with two
+    /// different variables is left out. Read once, on demand.
+    func goEnvironmentFields() -> [String: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        if let known = environmentFields { return known }
+        var found: [String: Set<String>] = [:]
+        for path in goFiles.values.joined() {
+            guard let text = try? String(contentsOf: root.appending(path: path), encoding: .utf8),
+                  text.contains("env:\"") || text.contains("envconfig:\"") else { continue }
+            for match in SourceScan.matches(#"(?m)^\s*([A-Z]\w*)\s+[\w.*\[\]]+\s+`[^`\n]*\b(?:env|envconfig):"([A-Z][A-Z0-9_]*)[",]"#, in: text) {
+                found[match[1], default: []].insert(match[2])
+            }
+        }
+        let fields = found.compactMapValues { $0.count == 1 ? $0.first : nil }
+        environmentFields = fields
+        return fields
     }
 }
 
@@ -155,6 +183,11 @@ final class ExtractionInput {
             if lineStarts[middle] <= offset { low = middle + 1 } else { high = middle }
         }
         return max(low, 1)
+    }
+
+    /// The UTF-16 offset where a 1-based line starts.
+    func offset(ofLine line: Int) -> Int {
+        lineStarts[min(max(line, 1), lineStarts.count) - 1]
     }
 
     func text(_ range: NSRange) -> String {

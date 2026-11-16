@@ -34,6 +34,7 @@ enum ExtractionLinks {
         edges += try await exposes(repo: repo, root: root, services: deployed.map(\.dst), runs: edges.filter { $0.kind == "runs" }, store: store)
         try await store.replaceLinks(repo: repo, edges)
         try await store.pruneShared(kinds: sharedKinds)
+        try await store.settleCalledEndpoints()
     }
 
     /// Services no file defines any more go; the others are deployed by the repository and say
@@ -125,6 +126,22 @@ extension KnowledgeStore {
         bind(statement, [repo])
         while sqlite3_step(statement) == SQLITE_ROW { result[text(statement, 0), default: []].append(text(statement, 1)) }
         return result
+    }
+
+    /// Endpoints that are called but that no indexed file defines get a node of their own
+    /// ("GET /users/{}"); one whose definitions all went loses its framework and handler.
+    func settleCalledEndpoints() throws {
+        try run("""
+            INSERT OR IGNORE INTO nodes(id, kind, name, qualified, repo, path, line, end_line, language, signature, summary, url, hash, source, updated)
+            SELECT DISTINCT e.dst, 'endpoint', substr(e.dst, 10), substr(e.dst, 10), '', '', 0, 0, '', substr(e.dst, 10), '', '', '', 'code', ?1
+            FROM edges e WHERE e.dst >= 'endpoint:' AND e.dst < 'endpoint;' AND e.kind = 'calls_endpoint'
+            AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = e.dst)
+            """, [Date.now.timeIntervalSince1970])
+        try run("""
+            UPDATE nodes SET name = qualified, signature = qualified, language = ''
+            WHERE kind = 'endpoint' AND (signature != qualified OR language != '')
+            AND NOT EXISTS (SELECT 1 FROM edges WHERE src = nodes.id AND kind = 'defined_in')
+            """, [])
     }
 
     /// Shared nodes whose id starts with `idPrefix` defined in a repository's files, with the file's path.
