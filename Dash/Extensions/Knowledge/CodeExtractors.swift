@@ -43,6 +43,8 @@ import Foundation
 //   doc:repo:<root>/<path>       a Markdown, AsciiDoc or reST document of the repository: title,
 //                                text (≤ 20,000 characters, secrets masked) as its signature,
 //                                section headings as its summary.
+//   pkg:<language>:<name>        a package (as import edges name it); its signature, from the
+//                                manifests, says which version each repository uses. Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -64,6 +66,7 @@ import Foundation
 //   file     —sets_config→ config  symbol (or file) —reads_config→ config (struct tags: link pass, below 1)
 //   owner    —owns→ repo, dir or file (the fewest that say it; link pass)   owner —about→ person
 //   doc      —defined_in→ file     doc —documents→ dir (or repo)   doc —about→ file, dir, symbol, endpoint
+//   dir/repo —depends_on→ pkg (its manifest)   pkg —defined_in→ manifest   repo —depends_on→ repo (service links)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -107,7 +110,7 @@ enum CodeExtractors {
     static let version = "extract-v4"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
-                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor(), RepoDocExtractor()]
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor(), RepoDocExtractor(), DependencyExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
