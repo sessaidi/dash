@@ -1,4 +1,5 @@
 import CryptoKit
+import DashKit
 import Foundation
 
 /// Indexes one local repository into the knowledge graph, incrementally: only files whose
@@ -10,12 +11,16 @@ struct CodeIndexer: Sendable {
     let store: KnowledgeStore
     var readHistory = true
     var historyDays = 180
+    var extractors: [any CodeExtractor] = CodeExtractors.all
 
     struct Report: Sendable, Equatable {
         var files = 0
         var parsed = 0
         var removed = 0
         var symbols = 0
+        /// Time spent in the extractors (services, endpoints, …) and in the link pass after them.
+        var extractTime: Duration = .zero
+        var linkTime: Duration = .zero
     }
 
     var repoID: String { "repo:" + root.path }
@@ -34,12 +39,16 @@ struct CodeIndexer: Sendable {
                                      url: mirror?.webURL ?? remote.map { "https://github.com/\($0)" } ?? "", source: "code")
         let files = listFiles()
         report.files = files.count
-        // Call names are kept per symbol since v2 of the index: parse everything once to fill them.
+        // Call names are kept per symbol since v2 of the index, and extractors find more with each
+        // version: parse everything once when either is missing.
         let callsStored = try await store.meta("calls-v2:" + repoID) != nil
-        let known = callsStored ? try await store.fileHashes(repo: repoID) : [:]
+        let extractStored = try await store.meta(CodeExtractors.version + ":" + repoID) != nil
+        let known = callsStored && extractStored ? try await store.fileHashes(repo: repoID) : [:]
         // Names defined in files that change or go: their callers elsewhere are resolved again.
         var touchedNames = Set<String>()
         let goModule = Self.goModule(root)
+        let context = ExtractionContext(root: root, files: files, goModule: goModule)
+        var timings: [String: Duration] = [:]
 
         // Phase 1: nodes, containment, definitions and imports of changed files.
         var changed: [(path: String, parsed: ParsedFile, symbolIDs: [String])] = []
@@ -59,7 +68,12 @@ struct CodeIndexer: Sendable {
             let extra = configAndDecisions(text, path: path, language: language, files: files)
             nodes += extra.nodes
             edges += extra.edges
-            batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges))
+            let input = ExtractionInput(root: root.path, path: path, language: language, text: text, parsed: parsed,
+                                        symbolIDs: symbolIDs, files: files, context: context)
+            let extracted = CodeExtractors.run(input, extractors: extractors, timings: &timings)
+            nodes += extracted.nodes
+            edges += extracted.edges
+            batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges, refs: extracted.refs))
             if batch.count >= 200 {
                 try await store.replaceFiles(repo: repoID, batch)
                 batch.removeAll()
@@ -134,11 +148,24 @@ struct CodeIndexer: Sendable {
         try await store.upsert(inheritEdges)
         try await store.setMeta("calls-v2:" + repoID, "1")
 
+        // What extractors found that needs the whole repository: handlers, run folders, …
+        report.extractTime = timings.values.reduce(.zero, +)
+        if report.parsed > 0 || report.removed > 0 || !extractStored {
+            report.linkTime = try await ContinuousClock().measure { try await ExtractionLinks.link(repo: repoID, store: store, sharedKinds: extractors.flatMap(\.sharedKinds)) }
+            let each = timings.sorted { $0.key < $1.key }.map { "\($0.key) \(Self.milliseconds($0.value))" }.joined(separator: ", ")
+            DashLog.info("Indexed \(root.lastPathComponent): \(report.parsed) of \(report.files) files parsed; extractors \(Self.milliseconds(report.extractTime))"
+                         + (each.isEmpty ? "" : " (\(each))") + ", links \(Self.milliseconds(report.linkTime))", category: "knowledge")
+        }
+        try await store.setMeta(CodeExtractors.version + ":" + repoID, "1")
 
         try await indexTests(files)
         if readHistory { try await indexHistory() }
         try await store.setMeta("indexed:" + repoID, ISO8601DateFormatter().string(from: .now))
         return report
+    }
+
+    static func milliseconds(_ duration: Duration) -> String {
+        "\(Int((Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18) * 1000)) ms"
     }
 
     /// The path of a symbol id "sym:<root>/<path>#<qualified>".
