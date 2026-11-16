@@ -10,6 +10,8 @@ struct RootView: View {
     @Environment(\.openSettings) private var openSettings
     @Query(sort: \DashboardPage.order) private var pages: [DashboardPage]
     @State private var editing: PageEditor.Target?
+    /// Crashes since the user last saw one, shown once at launch.
+    @State private var unseenCrashes: [CrashReport] = []
     /// Collapsed = an icon rail instead of a hidden sidebar.
     @AppStorage("sidebar.compact", store: DashDefaults.shared) private var compact = false
     @AppStorage("chat.folded", store: DashDefaults.shared) private var chatFolded = false
@@ -17,6 +19,11 @@ struct RootView: View {
 
     /// Home's width with both panels open, but never narrower than a comfortable reading
     /// width when the panels leave room for it.
+    private func dismissCrashes() {
+        CrashReports.markSeen(unseenCrashes, defaults: DashDefaults.shared)
+        unseenCrashes = []
+    }
+
     private func homeWidth(window: Double, free: Double) -> Double {
         let withPanelsOpen = window - 221 - (chat.isPanelVisible ? chatWidth : 0)
         return max(min(free, max(withPanelsOpen, 720)), 320)
@@ -84,6 +91,14 @@ struct RootView: View {
             if let page = pages.first(where: { $0.id == host.selectedPageID }) { editing = .edit(page) }
         }
         .sheet(isPresented: $host.widgetGalleryVisible) { WidgetGallery() }
+        // Once after a crash: what macOS recorded (newest first).
+        .sheet(isPresented: Binding(get: { !unseenCrashes.isEmpty }, set: { if !$0 { dismissCrashes() } })) {
+            CrashNoticeSheet(crashes: unseenCrashes, ask: { host.askDashii($0) }, done: dismissCrashes)
+        }
+        .task {
+            unseenCrashes = CrashReports.unseen(defaults: DashDefaults.shared)
+            DashiiHealth.shared.refreshCrashes()
+        }
         .permissionModal(host.permissionCenter)
         .onAppear {
             host.openManagerWindow = { openSettings() }
