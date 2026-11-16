@@ -18,7 +18,7 @@ enum ExtractionLinks {
         if !refs.isEmpty {
             let callables = try await store.callableIndex(repo: repo)
             let directories = Set(try await store.nodes(kind: "directory", repo: repo, limit: 100_000).map(\.path))
-            for (file, ref) in refs {
+            for (file, ref) in refs where !ServiceLinks.refKinds.contains(ref.kind) {
                 if pathKinds.contains(ref.kind) {
                     guard let path = ref.names.first else { continue }
                     if path.isEmpty {

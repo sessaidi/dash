@@ -817,6 +817,167 @@ struct KnowledgeExtractionTests {
         await #expect(throws: (any Error).self) { try await tool.run(["name": "no-such-service"]) }
     }
 
+    // MARK: gRPC
+
+    private static let billingProto = """
+        syntax = "proto3";
+        // service Commented { rpc Nope(A) returns (B); }
+        package acme.billing.v1;
+
+        import "google/api/annotations.proto";
+        option go_package = "example.com/acme/gen/billing/v1;billingv1";
+
+        /* Invoices of a customer. */
+        service Invoices {
+          option (acme.owner) = "billing";
+          rpc GetInvoice(GetInvoiceRequest) returns (Invoice);
+          rpc Watch(stream WatchRequest) returns (stream .acme.billing.v1.Event) {
+            option (google.api.http) = { get: "/v1/invoices:watch" };
+          }
+        }
+
+        message Invoice {
+          string id = 1;
+          repeated LineItem items = 2 [json_name = "lines"];
+          map<string, string> labels = 3;
+          oneof payer {
+            string user_id = 4;
+            string org_id = 5;
+          }
+          message LineItem { string sku = 1; int64 cents = 2; }
+          enum Status { DRAFT = 0; PAID = 1; }
+          Status status = 6;
+          reserved 9;
+        }
+
+        message GetInvoiceRequest { string id = 1; }
+        """
+
+    @Test func readsProtoFilesAndTheCodeUsingThem() throws {
+        let root = try makeFixtureRepo([
+            "proto/acme/billing/v1/billing.proto": Self.billingProto,
+            "gen/billing/v1/billing_grpc.pb.go": "package billingv1\n\nfunc NewInvoicesClient(cc grpc.ClientConnInterface) InvoicesClient { return nil }\n",
+            "server/invoices.go": """
+                package server
+
+                import (
+                \tbillingv1 "example.com/acme/gen/billing/v1"
+                \t"google.golang.org/grpc"
+                )
+
+                type InvoiceServer struct {
+                \tbillingv1.UnimplementedInvoicesServer
+                }
+
+                func Register(s *grpc.Server) {
+                \tbillingv1.RegisterInvoicesServer(s, &InvoiceServer{})
+                }
+                """,
+            "clients/billing.go": """
+                package clients
+
+                import (
+                \tbillingv1 "example.com/acme/gen/billing/v1"
+                \t"github.com/redis/go-redis/v9"
+                )
+
+                func Dial(conn *grpc.ClientConn) billingv1.InvoicesClient {
+                \t_ = redis.NewClient(nil)
+                \treturn billingv1.NewInvoicesClient(conn)
+                }
+                """,
+            "jobs/invoices.py": """
+                import grpc
+                from gen import billing_pb2_grpc
+
+
+                class Invoices(billing_pb2_grpc.InvoicesServicer):
+                    def GetInvoice(self, request, context):
+                        return None
+
+
+                def fetch(channel):
+                    stub = billing_pb2_grpc.InvoicesStub(channel)
+                    return stub
+                """,
+            "web/src/billing.ts": """
+                import { InvoicesClient } from './gen/billing_grpc_pb'
+
+                export function client(address: string) {
+                  return new InvoicesClient(address, credentials)
+                }
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proto = ProtoFile.parse(Self.billingProto)
+        #expect(proto.package == "acme.billing.v1" && proto.services.map(\.name) == ["Invoices"])
+        #expect(proto.services.first?.rpcs.map(\.signature) == [
+            "rpc GetInvoice(GetInvoiceRequest) returns (Invoice)", "rpc Watch(stream WatchRequest) returns (stream acme.billing.v1.Event)",
+        ])
+        #expect(proto.messages.map(\.name) == ["Invoice", "Invoice.LineItem", "GetInvoiceRequest"])
+        #expect(proto.messages.first?.fields == ["id", "items", "labels", "user_id", "org_id", "status"])
+        #expect(proto.messages.first?.line == 17 && proto.services.first?.rpcs.first?.line == 11)
+
+        let extraction = ProtobufExtractor().extract(try extractionInput(root, "proto/acme/billing/v1/billing.proto"))
+        #expect(Set(extraction.nodes.map(\.id)) == [
+            "grpc:acme.billing.v1.Invoices", "grpc:acme.billing.v1.Invoices/GetInvoice", "grpc:acme.billing.v1.Invoices/Watch",
+            "proto:acme.billing.v1.Invoice", "proto:acme.billing.v1.Invoice.LineItem", "proto:acme.billing.v1.GetInvoiceRequest",
+        ])
+        let service = try #require(extraction.nodes.first { $0.kind == "rpc_service" })
+        #expect(service.signature == "service acme.billing.v1.Invoices: GetInvoice, Watch" && service.path == "proto/acme/billing/v1/billing.proto")
+        #expect(extraction.edges.contains(KnowledgeEdge(src: service.id, dst: "grpc:acme.billing.v1.Invoices/Watch", kind: "contains")))
+        #expect(extraction.nodes.first { $0.id == "proto:acme.billing.v1.Invoice.LineItem" }?.signature == "message Invoice.LineItem { sku, cents }")
+
+        func refs(_ path: String) throws -> Set<String> {
+            Set(ProtobufExtractor().extract(try extractionInput(root, path)).refs.map {
+                "\($0.src.split(separator: "#").last ?? "") \($0.kind) \($0.names.joined(separator: " "))"
+            })
+        }
+        let importPath = "import:example.com/acme/gen/billing/v1"
+        #expect(try refs("server/invoices.go") == ["InvoiceServer implements Invoices \(importPath)", "Register implements Invoices \(importPath)"])
+        #expect(try refs("clients/billing.go") == ["Dial calls_rpc Invoices \(importPath)"])
+        let python = try refs("jobs/invoices.py")
+        #expect(python == ["Invoices implements Invoices", "fetch calls_rpc Invoices"])
+        #expect(try refs("web/src/billing.ts") == ["client calls_rpc Invoices"])
+        #expect(!ProtobufExtractor().accepts(path: "gen/billing/v1/billing_grpc.pb.go", language: "go"))
+    }
+
+    @Test func linksGRPCAcrossRepositories() async throws {
+        let protos = try makeFixtureRepo([
+            "acme/billing/v1/billing.proto": Self.billingProto,
+            "acme/legacy/v1/legacy.proto": "syntax = \"proto3\";\npackage acme.legacy.v1;\nservice Invoices { rpc Get(Req) returns (Res); }\n",
+        ])
+        let app = try makeFixtureRepo([
+            "server/invoices.go": "package server\n\nimport billingv1 \"example.com/acme/gen/billing/v1\"\n\ntype InvoiceServer struct {\n\tbillingv1.UnimplementedInvoicesServer\n}\n",
+            "web/src/billing.ts": "import { InvoicesClient } from './gen/billing_grpc_pb'\n\nexport function client(address: string) {\n  return new InvoicesClient(address)\n}\n",
+        ])
+        defer { for url in [protos, app] { try? FileManager.default.removeItem(at: url) } }
+        let store = try KnowledgeStore(url: nil)
+        for root in [protos, app] {
+            var indexer = CodeIndexer(root: root, store: store)
+            indexer.readHistory = false
+            _ = try await indexer.index()
+        }
+        func links(_ kind: String, _ service: String) async throws -> [String: Double] {
+            var result: [String: Double] = [:]
+            for neighbor in try await store.neighbors(service, kinds: [kind]) where neighbor.incoming {
+                result[String(neighbor.node.id.split(separator: "#").last ?? "")] = neighbor.edge.weight
+            }
+            return result
+        }
+        // The Go import path names the billing package; the TypeScript client can't tell the two apart.
+        #expect(try await links("implements", "grpc:acme.billing.v1.Invoices") == ["InvoiceServer": 0.9])
+        #expect(try await links("implements", "grpc:acme.legacy.v1.Invoices").isEmpty)
+        #expect(try await links("calls_rpc", "grpc:acme.billing.v1.Invoices") == ["client": 0.3])
+        #expect(try await links("calls_rpc", "grpc:acme.legacy.v1.Invoices") == ["client": 0.3])
+        #expect(try await store.node("grpc:acme.billing.v1.Invoices/GetInvoice")?.signature == "rpc GetInvoice(GetInvoiceRequest) returns (Invoice)")
+
+        try await store.removeRepo("repo:" + protos.path)
+        try await ServiceLinks.link(store: store)
+        #expect(try await store.node("grpc:acme.billing.v1.Invoices") == nil)
+        #expect(try await store.node("proto:acme.billing.v1.Invoice") == nil)
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",
