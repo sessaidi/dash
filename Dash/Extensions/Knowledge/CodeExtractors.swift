@@ -67,6 +67,7 @@ import Foundation
 //   owner    —owns→ repo, dir or file (the fewest that say it; link pass)   owner —about→ person
 //   doc      —defined_in→ file     doc —documents→ dir (or repo)   doc —about→ file, dir, symbol, endpoint
 //   dir/repo —depends_on→ pkg (its manifest)   pkg —defined_in→ manifest   repo —depends_on→ repo (service links)
+//   test     —tests→ endpoint (the route a test request calls; link pass)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -110,7 +111,7 @@ enum CodeExtractors {
     static let version = "extract-v4"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(),
-                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor(), RepoDocExtractor(), DependencyExtractor()]
+                                           MessagingExtractor(), DatabaseExtractor(), RuntimeExtractor(), ContainerExtractor(), CIExtractor(), FeatureFlagExtractor(), ConfigKeyExtractor(), OwnershipExtractor(), RepoDocExtractor(), DependencyExtractor(), TestRequestExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.

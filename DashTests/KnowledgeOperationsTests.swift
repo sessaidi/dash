@@ -711,4 +711,61 @@ struct KnowledgeOperationsTests {
         #expect(try await targets(indexer.repoID, "depends_on", store: store).isEmpty)
         #expect(try await store.node("pkg:go:github.com/spf13/viper")?.signature == "Go module · v1.8.0 in " + users.lastPathComponent)
     }
+
+    // MARK: Tests
+
+    @Test func linksTestRequestsToTheRoutesTheyCall() async throws {
+        let root = try makeFixtureRepo([
+            "api/routes.go": """
+                package api
+
+                import "github.com/go-chi/chi/v5"
+
+                func Routes(r chi.Router) {
+                \tr.Get("/invoices/{id}", GetInvoice)
+                \tr.Post("/invoices", CreateInvoice)
+                \tr.Get("/health", Health)
+                }
+                """,
+            "api/routes_test.go": """
+                package api
+
+                import (
+                \t"net/http"
+                \t"net/http/httptest"
+                \t"testing"
+                )
+
+                func TestGetInvoice(t *testing.T) {
+                \treq := httptest.NewRequest(http.MethodGet, "/invoices/"+id, nil)
+                }
+
+                func TestCreateInvoice(t *testing.T) {
+                \treq, _ := http.NewRequestWithContext(ctx, "POST", server.URL+"/invoices?dry=1", nil)
+                }
+
+                func TestHealth(t *testing.T) {
+                \treq := httptest.NewRequest("GET", "/health", nil)
+                \tother := httptest.NewRequest("GET", "/unknown/thing", nil)
+                }
+                """,
+            "web/app.ts": "import express from 'express';\nconst app = express();\napp.get('/users/:id', (req, res) => res.json({}));\nexport default app;\n",
+            "web/app.test.ts": "import request from 'supertest';\nimport app from './app';\n\nit('gets a user', async () => {\n  await request(app).get('/users/42').expect(200);\n});\n",
+            "service/main.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/items/{item_id}\")\ndef read_item(item_id: int):\n    return {}\n",
+            "tests/test_items.py": "def test_read_item(client):\n    response = client.get(\"/items/7\")\n    assert response.status_code == 200\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        _ = try await index(root, store: store)
+        func tested(_ path: String, _ name: String? = nil) async throws -> [String: Double] {
+            let id = name.map { "sym:" + root.path + "/" + path + "#" + $0 } ?? "file:" + root.path + "/" + path
+            let edges = try await store.neighbors(id, kinds: ["tests"]).filter { !$0.incoming && $0.node.kind == "endpoint" }
+            return Dictionary(uniqueKeysWithValues: edges.map { ($0.node.id, $0.edge.weight) })
+        }
+        #expect(try await tested("api/routes_test.go", "TestGetInvoice") == ["endpoint:GET /invoices/{}": 0.9])
+        #expect(try await tested("api/routes_test.go", "TestCreateInvoice") == ["endpoint:POST /invoices": 0.9])
+        #expect(try await tested("api/routes_test.go", "TestHealth") == ["endpoint:GET /health": 0.9])
+        #expect(try await tested("web/app.test.ts") == ["endpoint:GET /users/{}": 0.9])
+        #expect(try await tested("tests/test_items.py", "test_read_item") == ["endpoint:GET /items/{}": 0.9])
+    }
 }
