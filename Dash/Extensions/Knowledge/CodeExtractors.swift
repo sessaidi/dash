@@ -59,7 +59,7 @@ struct Extraction: Sendable {
 
 enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
-    static let version = "extract-v2"
+    static let version = "extract-v3"
 
     static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor()]
 
