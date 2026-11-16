@@ -20,6 +20,9 @@ import Foundation
 //                                package, no "<pkg>.". Shared; path and line say where.
 //   graphql:<Type>               a GraphQL type (graphql_type); graphql:<Type>.<field> a field of a
 //                                root type, Query, Mutation or Subscription (graphql_field). Shared.
+//   topic:<system>:<name>        a Kafka topic, Pub/Sub topic or subscription, SQS queue, SNS topic,
+//                                NATS subject or RabbitMQ exchange/queue (system kafka, pubsub, sqs,
+//                                sns, nats, amqp); "$VARIABLE" when only that names it. Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -29,6 +32,8 @@ import Foundation
 //   symbol   —implements→ rpc_service     symbol —calls_rpc→ rpc_service   (resolved by ServiceLinks)
 //   graphql_type, graphql_field —defined_in→ file   graphql_type —contains→ graphql_field
 //   graphql_field —handled_by→ symbol (its resolver)
+//   symbol   —publishes→ topic    symbol —consumes→ topic    topic —defined_in→ file (Terraform, manifests)
+//   topic (a Pub/Sub subscription) —consumes→ topic
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -70,7 +75,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v3"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor(), MessagingExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
@@ -122,6 +127,7 @@ final class ExtractionContext: @unchecked Sendable {
     }
 
     private var environmentFields: [String: String]?
+    private var environmentDefaults: [String: String] = [:]
 
     /// Go struct fields set from an environment variable anywhere in the repository
     /// (`BaseURL string `env:"BASE_URL"``): field name → variable. A name tagged with two
@@ -131,16 +137,29 @@ final class ExtractionContext: @unchecked Sendable {
         defer { lock.unlock() }
         if let known = environmentFields { return known }
         var found: [String: Set<String>] = [:]
+        var defaults: [String: Set<String>] = [:]
         for path in goFiles.values.joined() {
             guard let text = try? String(contentsOf: root.appending(path: path), encoding: .utf8),
                   text.contains("env:\"") || text.contains("envconfig:\"") else { continue }
-            for match in SourceScan.matches(#"(?m)^\s*([A-Z]\w*)\s+[\w.*\[\]]+\s+`[^`\n]*\b(?:env|envconfig):"([A-Z][A-Z0-9_]*)[",]"#, in: text) {
-                found[match[1], default: []].insert(match[2])
+            for match in SourceScan.matches(#"(?m)^\s*([A-Z]\w*)\s+[\w.*\[\]]+\s+`([^`\n]*\b(?:env|envconfig):"([A-Z][A-Z0-9_]*)[",][^`\n]*)`"#, in: text) {
+                found[match[1], default: []].insert(match[3])
+                if let value = SourceScan.matches(#"\b(?:envDefault|default):"([^"]*)""#, in: match[2]).first?[1], !value.isEmpty {
+                    defaults[match[1], default: []].insert(value)
+                }
             }
         }
         let fields = found.compactMapValues { $0.count == 1 ? $0.first : nil }
         environmentFields = fields
+        environmentDefaults = defaults.filter { fields[$0.key] != nil }.compactMapValues { $0.count == 1 ? $0.first : nil }
         return fields
+    }
+
+    /// The default (`envDefault:"…"`, envconfig's `default:"…"`) of such a field.
+    func goEnvironmentDefault(_ field: String) -> String? {
+        _ = goEnvironmentFields()
+        lock.lock()
+        defer { lock.unlock() }
+        return environmentDefaults[field]
     }
 }
 
