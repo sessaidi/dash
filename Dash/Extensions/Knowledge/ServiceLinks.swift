@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 
 /// The pass across repositories, after any of them is indexed: which service a host stands for
-/// (`host —about→ service`), which defined route a call no repository defines is likely to
+/// (`host —about→ service` by name, besides the ones Ingresses and HTTPRoutes say), which defined route a call no repository defines is likely to
 /// reach (`calls_endpoint`, weighted below 1), which gRPC service code implements or calls
 /// (refs by service name), which topic a Pub/Sub subscription named after it consumes, and which
 /// table code reads or writes (refs by table name). Reads the graph only; its edges, under the
@@ -26,6 +26,10 @@ enum ServiceLinks {
             let matches = serviceMatches(host: host.name, services: services)
             hostServices[host.id] = matches.ids
             edges += matches.ids.map { KnowledgeEdge(src: host.id, dst: $0, kind: "about", weight: matches.weight, source: source) }
+        }
+        // Hosts an Ingress or HTTPRoute routes to a service (the link pass's edges) are known exactly.
+        for (host, service) in try await store.pairs(kind: "about", dstPrefix: "service:") where host.hasPrefix("host:") {
+            if !(hostServices[host] ?? []).contains(service) { hostServices[host, default: []].append(service) }
         }
 
         let defined = try await store.definedEndpoints()
