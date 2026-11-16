@@ -42,6 +42,10 @@ enum CodeParser {
         case "json": return "json"
         case "mk": return "makefile"
         case "md", "mdx", "markdown": return "markdown"
+        case "proto": return "protobuf"
+        case "graphql", "graphqls", "gql": return "graphql"
+        case "sql": return "sql"
+        case "prisma": return "prisma"
         default: break
         }
         return switch (path as NSString).pathExtension.lowercased() {
@@ -62,7 +66,7 @@ enum CodeParser {
                                             "composer.lock", "Package.resolved", "Gemfile.lock", "poetry.lock", ".terraform.lock.hcl"]
 
     /// Languages whose files are configuration or documents rather than code.
-    static let structured: Set<String> = ["terraform", "yaml", "toml", "json", "makefile", "markdown", "dockerfile"]
+    static let structured: Set<String> = ["terraform", "yaml", "toml", "json", "makefile", "markdown", "dockerfile", "protobuf", "graphql", "sql", "prisma"]
 
     static func parse(_ text: String, language: String) -> ParsedFile {
         if structured.contains(language) { return StructuredParser.parse(text, language: language) }

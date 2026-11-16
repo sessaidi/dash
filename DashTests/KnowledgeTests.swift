@@ -150,6 +150,9 @@ struct KnowledgeTests {
         let package = CodeParser.parse(#"{"name":"web","scripts":{"build":"vite build"},"dependencies":{"vue":"^3"}}"#, language: "json")
         #expect(package.symbols.map(\.name) == ["build"] && package.imports == ["vue"])
         #expect(CodeParser.language(of: "web/package-lock.json") == nil && CodeParser.language(of: "Makefile") == "makefile")
+        #expect(["api/billing.proto", "schema.graphqls", "db/migrations/1_init.up.sql", "prisma/schema.prisma"].compactMap(CodeParser.language(of:))
+                == ["protobuf", "graphql", "sql", "prisma"])
+        #expect(CodeParser.parse("CREATE TABLE invoices (id bigint);", language: "sql").symbols.isEmpty)
 
         let vue = CodeParser.parse("<template><div/></template>\n<script setup lang=\"ts\">\nfunction save() { post() }\n</script>\n", language: "vue")
         #expect(vue.language == "vue" && vue.symbols.map(\.name) == ["save"] && vue.symbols[0].line == 3)
