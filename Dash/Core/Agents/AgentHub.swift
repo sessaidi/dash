@@ -291,7 +291,7 @@ final class AgentHub {
         do {
             let result = Sanitizer.clean(try await tool.run(arguments))
             HookEngine.shared.afterTool(name, input: arguments, result: result.jsonString())
-            return MCPToolResult(host.settings.encodeResult(result))
+            return MCPToolResult(ResultBudget.fit(host.settings.encodeResult(result)))
         } catch {
             return MCPToolResult(Sanitizer.clean(error.localizedDescription), isError: true)
         }

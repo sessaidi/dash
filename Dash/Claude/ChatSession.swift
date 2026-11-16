@@ -490,7 +490,7 @@ final class ChatSession {
         } else {
             earlyResults[name, default: []].append((content, isError))
         }
-        return MCPToolResult(content, isError: isError)
+        return MCPToolResult(ResultBudget.fit(content), isError: isError)
     }
 
     private func pendingToolUseID(for name: String) -> String? {
