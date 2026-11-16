@@ -399,4 +399,76 @@ struct KnowledgeOperationsTests {
         #expect(try await store.node(CIExtractor.id(repo: repo, workflow: "gitlab-ci", job: "release")) != nil)
         #expect(try await store.neighbors(gitlab.id).isEmpty)
     }
+
+    // MARK: Feature flags
+
+    @Test func findsFeatureFlagsAndTheCodeCheckingThem() async throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/shop\n",
+            "flags/flags.go": """
+                package flags
+
+                const (
+                \tFlagNewCheckout = "new-checkout"
+                \tProjectWeb      = "web"
+                )
+
+                func IsEnabledForUser(ctx context.Context, project, flag string) bool {
+                \tv, _ := client.BoolVariation(flag, user(ctx), false)
+                \treturn v
+                }
+                """,
+            "api/checkout.go": """
+                package api
+
+                import (
+                \tld "github.com/launchdarkly/go-server-sdk/v7"
+                \t"example.com/shop/flags"
+                )
+
+                const portFlag = "port"
+
+                func Checkout(ctx context.Context) {
+                \tif flags.IsEnabledForUser(ctx, flags.ProjectWeb, flags.FlagNewCheckout) {
+                \t\treturn
+                \t}
+                }
+
+                func Legacy(client *ld.LDClient) {
+                \tv, _ := client.BoolVariation("legacy-cart", user, false)
+                \t// client.BoolVariation("commented-out", user, false)
+                \tport, _ := cmd.Flags().GetString(portFlag)
+                }
+                """,
+            "api/checkout_test.go": "package api\n\nfunc TestX() { client.BoolVariation(\"test-only\", u, false) }\n",
+            "web/src/Banner.tsx": """
+                import { OpenFeature } from '@openfeature/web-sdk';
+
+                export function Banner() {
+                  const dark = client.getBooleanValue('dark-mode', false);
+                  if (isFeatureEnabled("beta-banner")) { setFeatureFlag("written", true); }
+                  return unleash.isEnabled('promo');
+                }
+                """,
+            "app/views.py": "def show(client):\n    if client.get_boolean_value(\"py-flag\", False):\n        return 1\n",
+            "flags.flagd.json": #"{"flags": {"dark-mode": {"state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "on"}}}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        func checks(_ path: String, _ symbol: String) async throws -> Set<String> {
+            try await targets("sym:\(root.path)/\(path)#\(symbol)", "checks_flag", store: store)
+        }
+        #expect(try await checks("api/checkout.go", "Checkout") == ["flag:new-checkout"])
+        #expect(try await checks("api/checkout.go", "Legacy") == ["flag:legacy-cart"])
+        #expect(try await checks("flags/flags.go", "IsEnabledForUser").isEmpty)
+        #expect(try await checks("web/src/Banner.tsx", "Banner") == ["flag:dark-mode", "flag:beta-banner", "flag:promo"])
+        #expect(try await checks("app/views.py", "show") == ["flag:py-flag"])
+        let flags = try await store.nodes(kind: "flag").map(\.name).sorted()
+        #expect(flags == ["beta-banner", "dark-mode", "legacy-cart", "new-checkout", "promo", "py-flag"])
+        #expect(try await store.node("flag:legacy-cart")?.signature == "Feature flag legacy-cart (LaunchDarkly)")
+        let dark = try #require(try await store.node("flag:dark-mode"))
+        #expect(dark.signature == "Feature flag dark-mode (OpenFeature)" && dark.summary == "Defined in flags.flagd.json, enabled, variants off, on.")
+        #expect(try await targets(dark.id, "defined_in", store: store) == [indexer.fileID("flags.flagd.json")])
+    }
 }
