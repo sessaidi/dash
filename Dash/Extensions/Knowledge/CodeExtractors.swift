@@ -42,7 +42,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v2"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.

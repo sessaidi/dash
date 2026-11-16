@@ -491,6 +491,72 @@ struct KnowledgeExtractionTests {
         ])
     }
 
+    @Test func readsOpenAPIDocuments() throws {
+        let root = try makeFixtureRepo([
+            "api/openapi.yaml": """
+                openapi: 3.0.3
+                info:
+                  title: Billing API
+                  description: "Invoices: create and read"
+                servers:
+                  - url: https://{env}.acme.test/billing/
+                    variables:
+                      env:
+                        default: api
+                paths:
+                  /invoices:
+                    parameters:
+                      - $ref: '#/components/parameters/Tenant'
+                    get:
+                      summary: List invoices
+                      operationId: listInvoices
+                    post:
+                      operationId: CreateInvoice # generated
+                  "/invoices/{invoiceId}":
+                    get:
+                      responses:
+                        "200":
+                          description: ok
+                    x-internal: true
+                  /invoices/{invoiceId}:void:
+                    post:
+                      operationId: voidInvoice
+                components:
+                  schemas:
+                    Invoice:
+                      type: object
+                """,
+            "api/swagger.json": #"""
+                {"swagger": "2.0", "basePath": "/v1", "paths": {
+                  "/plans/{id}": {"get": {"operationId": "getPlan"}, "delete": {}},
+                  "/plans": {"post": {"operationId": "createPlan"}}
+                }}
+                """#,
+            "deploy/deployment.yaml": "kind: Deployment\nmetadata:\n  name: billing-api\nspec:\n  template:\n    spec:\n      containers: []\n",
+            "web/package.json": #"{"name": "web", "paths": {"/x": {}}}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        func operations(_ path: String) throws -> [String: String] {
+            let extraction = OpenAPIExtractor().extract(try extractionInput(root, path))
+            var result: [String: String] = [:]
+            for node in extraction.nodes {
+                result[String(node.id.dropFirst("endpoint:".count))] = extraction.refs.first { $0.src == node.id }?.names.joined(separator: " ") ?? ""
+            }
+            return result
+        }
+        #expect(try operations("api/openapi.yaml") == [
+            "GET /billing/invoices": "listInvoices ListInvoices", "POST /billing/invoices": "CreateInvoice",
+            "GET /billing/invoices/{}": "", "POST /billing/invoices/{}:void": "voidInvoice VoidInvoice",
+        ])
+        #expect(try operations("api/swagger.json") == ["GET /v1/plans/{}": "getPlan GetPlan", "DELETE /v1/plans/{}": "", "POST /v1/plans": "createPlan CreatePlan"])
+        #expect(try operations("deploy/deployment.yaml").isEmpty && operations("web/package.json").isEmpty)
+
+        let list = try #require(OpenAPIExtractor().extract(try extractionInput(root, "api/openapi.yaml")).nodes.first { $0.id == "endpoint:GET /billing/invoices" })
+        #expect(list.language == "openapi" && list.signature == "GET /billing/invoices → listInvoices")
+        #expect(OpenAPIExtractor.yaml("openapi: 3.0.0\npaths:\n  /a:\n    get:\n      operationId: a\n")?.first?.line == 4)
+        #expect(OpenAPIExtractor.serverPath("/") == "" && OpenAPIExtractor.serverPath("http://localhost:8080") == "")
+    }
+
     @Test func linksEndpointsToHandlersAndServices() async throws {
         let root = try makeFixtureRepo([
             "go.mod": "module example.com/acme\n",
@@ -507,6 +573,17 @@ struct KnowledgeExtractionTests {
                 }
                 """,
             "apps/billing-api/handlers/invoices.go": "package handlers\n\nfunc ShowInvoice(w http.ResponseWriter, r *http.Request) {}\n\nfunc CreateInvoice(w http.ResponseWriter, r *http.Request) {}\n",
+            "apps/billing-api/helm/Chart.yaml": "apiVersion: v2\nname: billing-api\nversion: 0.1.0\n",
+            "apps/billing-api/api/openapi.yaml": """
+                openapi: 3.1.0
+                paths:
+                  /invoices:
+                    post:
+                      operationId: createInvoice
+                  /invoices/{id}/pdf:
+                    get:
+                      operationId: downloadInvoicePdf
+                """,
             "web/package.json": #"{"name": "web", "scripts": {"start": "next start"}}"#,
             "web/pages/api/ping.ts": "export default function handler(req, res) {\n  res.json({})\n}\n",
             "scripts/serve.py": "from flask import Flask\n\napp = Flask(__name__)\n\n@app.get(\"/metrics\")\ndef metrics():\n    return \"\"\n",
@@ -524,19 +601,26 @@ struct KnowledgeExtractionTests {
         func exposed(_ service: String) async throws -> Set<String> {
             Set(try await store.neighbors(ServiceExtractor.id(repo: repo, name: service), kinds: ["exposes"]).filter { !$0.incoming }.map(\.node.id))
         }
-        #expect(try await exposed("billing-api") == ["endpoint:GET /invoices/{}", "endpoint:POST /invoices"])
+        #expect(try await exposed("billing-api") == ["endpoint:GET /invoices/{}", "endpoint:POST /invoices", "endpoint:GET /invoices/{}/pdf"])
+        #expect(try await store.neighbors(repo, kinds: ["deploys"]).map(\.node.name).sorted() == ["billing-api", "web"])
+        // Declared in code and in the spec: one node, defined in both, one handler.
+        let create = try await store.neighbors("endpoint:POST /invoices")
+        #expect(Set(create.filter { $0.edge.kind == "defined_in" }.map(\.node.id))
+            == [indexer.fileID("apps/billing-api/main.go"), indexer.fileID("apps/billing-api/api/openapi.yaml")])
+        #expect(create.filter { $0.edge.kind == "handled_by" }.map(\.node.id) == ["sym:\(root.path)/apps/billing-api/handlers/invoices.go#CreateInvoice"])
+        #expect(try await store.neighbors("endpoint:GET /invoices/{}/pdf", kinds: ["handled_by"]).isEmpty)
         // Endpoints outside any service folder are nobody's when there are several services.
         #expect(try await exposed("web") == ["endpoint:ANY /api/ping"])
         let ping = try await store.neighbors("endpoint:ANY /api/ping", kinds: ["handled_by"])
         #expect(ping.first?.node.id == "sym:\(root.path)/web/pages/api/ping.ts#handler" && ping.first?.edge.weight == 1)
         #expect(try await store.node("endpoint:GET /metrics") != nil)
-        #expect(try await store.search("invoices", kinds: ["endpoint"]).count == 2)
+        #expect(try await store.search("invoices", kinds: ["endpoint"]).count == 3)
 
         // A route that goes takes its endpoint, handler edge and exposure with it.
         try "package main\n\nimport \"github.com/go-chi/chi/v5\"\n\nfunc main() {\n\tr := chi.NewRouter()\n\tr.Post(\"/invoices\", handlers.CreateInvoice)\n}\n"
             .write(to: root.appending(path: "apps/billing-api/main.go"), atomically: true, encoding: .utf8)
         _ = try await indexer.index()
         #expect(try await store.node("endpoint:GET /invoices/{}") == nil)
-        #expect(try await exposed("billing-api") == ["endpoint:POST /invoices"])
+        #expect(try await exposed("billing-api") == ["endpoint:POST /invoices", "endpoint:GET /invoices/{}/pdf"])
     }
 }
