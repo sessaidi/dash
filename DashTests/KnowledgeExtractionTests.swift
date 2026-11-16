@@ -191,6 +191,16 @@ struct KnowledgeExtractionTests {
         _ = try await indexer.index()
         #expect(try await store.node(ServiceExtractor.id(repo: repo, name: "billing-api-worker")) == nil)
 
+        // A long metadata block without a literal name is read in linear time.
+        let annotations = (1...40).map { "        acme.test/note-\($0): \"value \($0)\"" }.joined(separator: "\n")
+        let manifest = try makeFixtureRepo(["deploy/api.yaml": "kind: Deployment\nmetadata:\n  annotations:\n\(annotations)\n  name: {{ .Values.name }}\nspec:\n  replicas: 2\n"])
+        defer { try? FileManager.default.removeItem(at: manifest) }
+        let clock = ContinuousClock()
+        let input = try extractionInput(manifest, "deploy/api.yaml")
+        var found = Extraction()
+        #expect(clock.measure { found = ServiceExtractor().extract(input) } < .seconds(1))
+        #expect(found.nodes.isEmpty)
+
         #expect(ServiceExtractor.codeFolder(of: "apps/billing-api/helm", name: "billing-api") == "apps/billing-api")
         #expect(ServiceExtractor.codeFolder(of: "deploy/charts/billing-api", name: "billing-api") == "")
         #expect(ServiceExtractor.commandName("cmd/invoicer/main.go") == "invoicer" && ServiceExtractor.commandName("internal/cmd.go") == nil)

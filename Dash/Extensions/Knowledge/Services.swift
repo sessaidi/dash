@@ -106,7 +106,7 @@ struct ServiceExtractor: CodeExtractor {
             guard index > start else { continue }
             let document = lines[start..<index].joined(separator: "\n")
             guard let kind = SourceScan.matches(#"(?m)^kind:\s*["']?(\w+)"#, in: document).first?[1], Self.workloadKinds.contains(kind),
-                  let workload = SourceScan.matches(#"(?m)^metadata:\s*\n(?:[ \t]+.*\n)*?[ \t]+name:\s*["']?([\w.-]+)["']?\s*$"#, in: document + "\n").first?[1]
+                  let workload = SourceScan.matches(#"(?m)^metadata:[ \t]*\n(?:[ \t][^\n]*\n)*?[ \t]+name:[ \t]*["']?([\w.-]+)["']?[ \t]*$"#, in: document + "\n").first?[1]
             else { continue }
             let line = start + (lines[start..<index].firstIndex { $0.hasPrefix("kind:") }.map { $0 - start } ?? 0) + 1
             result.append((workload, Self.codeFolder(of: file.directory, name: workload), line, kind))
