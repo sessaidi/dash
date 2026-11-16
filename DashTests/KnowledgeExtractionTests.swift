@@ -978,6 +978,120 @@ struct KnowledgeExtractionTests {
         #expect(try await store.node("proto:acme.billing.v1.Invoice") == nil)
     }
 
+    // MARK: GraphQL
+
+    @Test func readsGraphQLSchemasAndResolvers() throws {
+        let root = try makeFixtureRepo([
+            "graph/schema.graphqls": #"""
+                """The root."""
+                schema { query: RootQuery mutation: Mutation }
+
+                directive @auth(role: String) repeatable on FIELD_DEFINITION | OBJECT
+
+                # Invoices
+                type RootQuery {
+                  "One invoice"
+                  invoice(id: ID!): Invoice @auth(role: "user")
+                  invoices(first: Int = 20, filter: InvoiceFilter = { status: [PAID] }): [Invoice!]!
+                }
+
+                type Mutation {
+                  payInvoice(input: PayInput!): Invoice
+                }
+
+                type Invoice implements Node & Timestamped @key(fields: "id") {
+                  id: ID!
+                  total: Int
+                  status: Status
+                }
+
+                input PayInput { id: ID!, cents: Int = 0 }
+                enum Status { DRAFT PAID @deprecated(reason: "no") VOID }
+                union SearchResult = | Invoice | Customer
+                scalar Time
+                extend type RootQuery { me: User }
+
+                query Ignored($id: ID!) { invoice(id: $id) { id } }
+                """#,
+            "server/schema.ts": """
+                import { gql } from 'graphql-tag'
+                import * as plans from './plans'
+
+                export const typeDefs = gql`
+                  type Query {
+                    plans: [Plan!]!
+                    plan(id: ID!): Plan
+                  }
+                  type Plan { id: ID! name: String }
+                `
+
+                export const resolvers = {
+                  Query: {
+                    plans: async () => listPlans(),
+                    plan: plans.getPlan,
+                  },
+                }
+                """,
+            "graph/schema.resolvers.go": """
+                package graph
+
+                func (r *queryResolver) InvoiceByID(ctx context.Context, id string) (*model.Invoice, error) {
+                \treturn nil, nil
+                }
+
+                func (r *mutationResolver) PayInvoice(ctx context.Context, input model.PayInput) (*model.Invoice, error) {
+                \treturn nil, nil
+                }
+
+                func (r *invoiceResolver) Total(ctx context.Context, obj *model.Invoice) (int, error) { return 0, nil }
+                """,
+            "src/invoices.resolver.ts": """
+                import { Resolver, Query, Mutation, Args } from '@nestjs/graphql'
+
+                @Resolver(() => Invoice)
+                export class InvoicesResolver {
+                  @Query(() => [Invoice], { name: 'allInvoices' })
+                  findAll() {
+                    return []
+                  }
+
+                  @Mutation(() => Invoice)
+                  async voidInvoice(@Args('id') id: string) {
+                    return null
+                  }
+                }
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        func nodes(_ path: String) throws -> [String: String] {
+            Dictionary(GraphQLExtractor().extract(try extractionInput(root, path)).nodes.map { ($0.id, $0.signature) }, uniquingKeysWith: { a, _ in a })
+        }
+        #expect(try nodes("graph/schema.graphqls") == [
+            "graphql:RootQuery": "type RootQuery { invoice, invoices }",
+            "graphql:RootQuery.invoice": "RootQuery.invoice(id: ID!): Invoice",
+            "graphql:RootQuery.invoices": "RootQuery.invoices(first: Int, filter: InvoiceFilter): [Invoice!]!",
+            "graphql:RootQuery.me": "RootQuery.me: User",
+            "graphql:Mutation": "type Mutation { payInvoice }",
+            "graphql:Mutation.payInvoice": "Mutation.payInvoice(input: PayInput!): Invoice",
+            "graphql:Invoice": "type Invoice implements Node & Timestamped { id, total, status }",
+            "graphql:PayInput": "input PayInput { id, cents }",
+            "graphql:Status": "enum Status { DRAFT, PAID, VOID }",
+            "graphql:SearchResult": "union SearchResult = Invoice | Customer",
+            "graphql:Time": "scalar Time",
+        ])
+        let script = GraphQLExtractor().extract(try extractionInput(root, "server/schema.ts"))
+        #expect(Set(script.nodes.map(\.id)) == ["graphql:Query", "graphql:Query.plans", "graphql:Query.plan", "graphql:Plan"])
+        #expect(script.nodes.first { $0.id == "graphql:Query.plans" }?.line == 6)
+        #expect(script.refs.map { "\($0.src) \($0.names)" } == [#"graphql:Query.plan ["plans.getPlan", "getPlan"]"#])
+
+        let go = GraphQLExtractor().extract(try extractionInput(root, "graph/schema.resolvers.go")).edges.map { "\($0.src) → \($0.dst.split(separator: "#").last ?? "")" }
+        #expect(go == ["graphql:Query.invoiceByID → queryResolver.InvoiceByID", "graphql:Mutation.payInvoice → mutationResolver.PayInvoice"])
+
+        let nest = GraphQLExtractor().extract(try extractionInput(root, "src/invoices.resolver.ts"))
+        #expect(nest.nodes.map(\.signature) == ["Query.allInvoices: [Invoice] → InvoicesResolver.findAll", "Mutation.voidInvoice: Invoice → InvoicesResolver.voidInvoice"])
+        #expect(nest.edges.filter { $0.kind == "handled_by" }.map { $0.dst.split(separator: "#").last ?? "" } == ["InvoicesResolver.findAll", "InvoicesResolver.voidInvoice"])
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",
