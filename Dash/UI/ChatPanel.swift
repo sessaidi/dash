@@ -15,6 +15,10 @@ struct ChatPanel: View {
     @Environment(ExtensionHost.self) private var host
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
+    /// Files dropped on the panel or picked with the paperclip, sent with the next message.
+    @State private var attachments: [ChatAttachment] = []
+    @State private var attachError: String?
+    @State private var dropTargeted = false
 
     private let suggestions = [
         "What's on my plate today?",
@@ -44,6 +48,61 @@ struct ChatPanel: View {
             composer
         }
         .onAppear { composerFocused = true }
+        .dropDestination(for: URL.self) { urls, _ in
+            attach(urls)
+            return true
+        } isTargeted: { dropTargeted = $0 }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 12))
+                    .overlay { Label("Drop to attach", systemImage: "paperclip").font(.headline).foregroundStyle(.tint) }
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    /// Adds files for the next message (images, PDFs, text files); says why one can't be.
+    private func attach(_ urls: [URL]) {
+        var problems: [String] = []
+        for url in urls where url.isFileURL && !attachments.contains(where: { $0.url == url }) {
+            do { attachments.append(try ChatAttachment.load(url)) } catch { problems.append(error.localizedDescription) }
+        }
+        attachError = problems.isEmpty ? nil : problems.joined(separator: " ")
+        composerFocused = true
+    }
+
+    private func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "Attach images, PDFs or text files for \(host.persona.name)"
+        if panel.runModal() == .OK { attach(panel.urls) }
+    }
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(attachments) { file in
+                    HStack(spacing: 4) {
+                        Image(systemName: file.icon).foregroundStyle(.secondary)
+                        Text(file.name).lineLimit(1).truncationMode(.middle).frame(maxWidth: 160)
+                        Button { attachments.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("Remove")
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: .capsule)
+                    .help(file.url.path)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
     }
 
     private var header: some View {
@@ -139,30 +198,43 @@ struct ChatPanel: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(host.persona.name)", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...8)
-                .focused($composerFocused)
-                .onSubmit(submit)
-                // A request started elsewhere (Filter with Dashii…): put it here to finish.
-                .onChange(of: chat.pendingDraft, initial: true) { _, text in
-                    guard let text else { return }
-                    draft = text
-                    chat.pendingDraft = nil
-                    composerFocused = true
+        VStack(alignment: .leading, spacing: 6) {
+            if !attachments.isEmpty { attachmentStrip }
+            if let attachError {
+                Label(attachError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).lineLimit(3)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                Button("Attach Files", systemImage: "paperclip", action: pickFiles)
+                    .labelStyle(.iconOnly)
+                    .font(.title3)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Attach images, PDFs or text files (or drop them on the panel)")
+                TextField("Message \(host.persona.name)", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...8)
+                    .focused($composerFocused)
+                    .onSubmit(submit)
+                    // A request started elsewhere (Filter with Dashii…): put it here to finish.
+                    .onChange(of: chat.pendingDraft, initial: true) { _, text in
+                        guard let text else { return }
+                        draft = text
+                        chat.pendingDraft = nil
+                        composerFocused = true
+                    }
+                if chat.isRunning {
+                    Button("Stop", systemImage: "stop.circle.fill") { chat.stop() }
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                        .buttonStyle(.borderless)
+                } else {
+                    Button("Send", systemImage: "arrow.up.circle.fill", action: submit)
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                        .buttonStyle(.borderless)
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
                 }
-            if chat.isRunning {
-                Button("Stop", systemImage: "stop.circle.fill") { chat.stop() }
-                    .labelStyle(.iconOnly)
-                    .font(.title2)
-                    .buttonStyle(.borderless)
-            } else {
-                Button("Send", systemImage: "arrow.up.circle.fill", action: submit)
-                    .labelStyle(.iconOnly)
-                    .font(.title2)
-                    .buttonStyle(.borderless)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(.horizontal, 10)
@@ -174,8 +246,10 @@ struct ChatPanel: View {
 
     private func submit() {
         guard !chat.isRunning else { return }
-        chat.send(draft)
+        chat.send(draft, attachments: attachments)
         draft = ""
+        attachments = []
+        attachError = nil
     }
 }
 
