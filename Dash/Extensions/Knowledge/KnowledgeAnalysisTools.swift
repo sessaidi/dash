@@ -108,8 +108,9 @@ extension KnowledgeExtension {
                     Read-only SQL over the graph, for questions the other tools don't answer (at most 200 rows). Tables: \
                     nodes(id, kind, name, qualified, repo, path, line, end_line, language, signature, summary, url, source), \
                     edges(src, dst, kind, weight, source) with kinds contains, defines, imports, calls (weight = confidence 0.3–0.95), \
-                    inherits, tests, authored, changes_with, touches, mentions, reads_env, sets_env, about, member_of, step; \
-                    symbol_calls(src, name, repo). Node kinds: repo, directory, file, symbol, package, cluster, flow, env, decision, ticket, pr, person…
+                    inherits, tests, authored, changes_with, touches, mentions, reads_env, sets_env, about, member_of, step, \
+                    deploys, runs, exposes, defined_in, handled_by, calls_endpoint, calls_host; \
+                    symbol_calls(src, name, repo). Node kinds: repo, directory, file, symbol, package, cluster, flow, env, service, endpoint, host, decision, ticket, pr, person…
                     Recursive CTEs work (WITH RECURSIVE).
                     """,
                 properties: ["sql": JSONSchema.string("A SELECT or WITH query."), "limit": JSONSchema.integer("Rows (default 100, max 200).")],

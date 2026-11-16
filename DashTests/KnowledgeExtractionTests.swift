@@ -782,6 +782,37 @@ struct KnowledgeExtractionTests {
         #expect(ServiceLinks.serviceMatches(host: "api.acme.test", services: named("api")).ids == ["service:r0:api"])
     }
 
+    @Test func dashiiMapsAServiceBothWays() async throws {
+        let (server, clients) = try makeServiceAndClients()
+        defer { for url in [server, clients] { try? FileManager.default.removeItem(at: url) } }
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "kx-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        for root in [server, clients] { _ = try await KnowledgeExtension.index(root.path, store: store, history: false) }
+        let tool = try #require(knowledge.tools.first { $0.name == "knowledge_service_map" })
+        func entry(_ list: JSONValue?, _ key: String, _ value: String) -> JSONValue? { list?.array?.first { $0[key]?.string == value } }
+
+        let service = try await tool.run(["name": "billing-api"])
+        #expect(service["service"] == "billing-api" && service["runs_from"] == ["billing-api"])
+        #expect(service["defined_in"]?.array?.contains("billing-api/Dockerfile") == true)
+        #expect(service["exposes"]?.array?.compactMap { $0["endpoint"]?.string } == ["GET /v1/invoices/{}", "POST /v1/invoices/{}/refunds", "GET /v1/plans"])
+        #expect(service["exposes"]?.array?.first == ["endpoint": "GET /v1/invoices/{}", "handler": "getInvoice", "at": "billing-api/main.go:7"])
+        let clientsName = clients.lastPathComponent
+        let invoice = entry(service["called_by"], "endpoint", "GET /v1/invoices/{}")
+        #expect(invoice?["from"] == [.string("loadInvoice at \(clientsName)/web/src/api.ts:3"), .string("sync_invoice at \(clientsName)/jobs/sync.py:7")])
+        #expect(entry(service["called_by"], "endpoint", "GET /v1/plans")?["confidence"] == 0.8)
+        #expect(entry(service["called_by"], "host", "BILLING_API_URL")?["from"]?.array?.count == 3)
+        #expect(service["calls"] == [])
+
+        let repository = try await tool.run(["name": .string(clientsName)])
+        #expect(repository["repository"]?.string == clientsName && repository["exposes"] == [])
+        let answered: JSONValue = [.string("billing-api (\(server.lastPathComponent))")]
+        #expect(entry(repository["calls"], "endpoint", "GET /v1/invoices/{}")?["answered_by"] == answered)
+        #expect(entry(repository["calls"], "host", "BILLING_API_URL")?["answered_by"] == answered)
+        #expect(entry(repository["calls"], "endpoint", "GET /invoices/{}")?["answered_by"] == nil)
+        #expect(repository["env"]?.array?.contains("BILLING_API_URL") == true)
+        await #expect(throws: (any Error).self) { try await tool.run(["name": "no-such-service"]) }
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",
