@@ -491,6 +491,191 @@ struct KnowledgeExtractionTests {
         ])
     }
 
+    // MARK: Outbound calls
+
+    /// "caller → target" for the calls a fixture file makes (the caller's name after "#").
+    private func outbound(_ root: URL, _ path: String) throws -> Set<String> {
+        let extraction = OutboundCallExtractor().extract(try extractionInput(root, path))
+        return Set(extraction.edges.map { String($0.src.split(separator: "#").last ?? "") + " → " + $0.dst })
+    }
+
+    @Test func findsOutboundCalls() throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/acme\n",
+            "internal/config/config.go": """
+                package config
+
+                type Config struct {
+                \tBillingURL string `env:"BILLING_API_URL" envDefault:"http://billing-api:8080"`
+                \tTimeout    int    `env:"TIMEOUT"`
+                }
+                """,
+            "clients/billing.go": """
+                package clients
+
+                import (
+                \t"fmt"
+                \t"net/http"
+                \t"os"
+                )
+
+                const usersBase = "http://users-api.default.svc.cluster.local:8080/v1"
+
+                type Billing struct {
+                \tcfg    config.Config
+                \tclient *http.Client
+                }
+
+                func (b *Billing) Invoice(id string) error {
+                \turl := fmt.Sprintf("%s/invoices/%s", b.cfg.BillingURL, id)
+                \treq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+                \t_ = req
+                \treturn err
+                }
+
+                func (b *Billing) Refund(id string) {
+                \tb.client.Post(b.cfg.BillingURL+"/invoices/"+id+"/refunds", "application/json", nil)
+                }
+
+                func User(id string) {
+                \thttp.Get(usersBase + "/users/" + id)
+                }
+
+                func Plans() {
+                \tbase := os.Getenv("PLANS_URL")
+                \tu, _ := url.Parse(base + "/plans?active=true")
+                \thttp.Get(u.String())
+                }
+
+                func Charge(c *resty.Client) {
+                \tc.R().SetBody(nil).Post("/charges")
+                }
+
+                func Cached(cacheClient *Cache) {
+                \tcacheClient.Get("user:1")
+                }
+                """,
+            "web/src/api.ts": """
+                import axios from 'axios'
+
+                const BILLING = process.env.BILLING_API_URL
+
+                export async function loadInvoice(id: string) {
+                  const response = await fetch(`${BILLING}/invoices/${id}`)
+                  return response.json()
+                }
+
+                export function refund(id: string) {
+                  return fetch(`${process.env.BILLING_API_URL}/invoices/${id}/refunds`, { method: 'POST' })
+                }
+
+                const users = axios.create({ baseURL: 'https://users.acme.test/v1' })
+
+                export function getUser(id: string) {
+                  return users.get(`/users/${id}`)
+                }
+
+                export function plans() {
+                  return axios.get<Plan[]>(import.meta.env.VITE_PLANS_URL + '/plans')
+                }
+                """,
+            "jobs/sync.py": """
+                import os
+                import httpx
+                import requests
+
+                BASE = os.environ["BILLING_API_URL"]
+
+
+                def sync_invoice(invoice_id):
+                    return requests.get(f"{BASE}/invoices/{invoice_id}", timeout=5)
+
+
+                def close(invoice_id):
+                    requests.request("POST", BASE + f"/invoices/{invoice_id}/close")
+
+
+                async def users():
+                    async with httpx.AsyncClient(base_url="https://users.acme.test") as client:
+                        await client.get("/v1/users")
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let go = try outbound(root, "clients/billing.go")
+        #expect(go == [
+            "Billing.Invoice → endpoint:GET /invoices/{}", "Billing.Invoice → host:BILLING_API_URL",
+            "Billing.Refund → endpoint:POST /invoices/{}/refunds", "Billing.Refund → host:BILLING_API_URL",
+            "User → endpoint:GET /v1/users/{}", "User → host:users-api.default.svc.cluster.local",
+            "Plans → endpoint:GET /plans", "Plans → host:PLANS_URL",
+            "Charge → endpoint:POST /charges",
+        ])
+        let script = try outbound(root, "web/src/api.ts")
+        #expect(script == [
+            "loadInvoice → endpoint:GET /invoices/{}", "loadInvoice → host:BILLING_API_URL",
+            "refund → endpoint:POST /invoices/{}/refunds", "refund → host:BILLING_API_URL",
+            "getUser → endpoint:GET /v1/users/{}", "getUser → host:users.acme.test",
+            "plans → endpoint:GET /plans", "plans → host:VITE_PLANS_URL",
+        ])
+        let python = try outbound(root, "jobs/sync.py")
+        #expect(python == [
+            "sync_invoice → endpoint:GET /invoices/{}", "sync_invoice → host:BILLING_API_URL",
+            "close → endpoint:POST /invoices/{}/close", "close → host:BILLING_API_URL",
+            "users → endpoint:GET /v1/users", "users → host:users.acme.test",
+        ])
+        // A client's Post(url, contentType, body) isn't a route.
+        #expect(try routes(root, "clients/billing.go").isEmpty)
+
+        let host = try #require(OutboundCallExtractor().extract(try extractionInput(root, "clients/billing.go")).nodes.first { $0.id == "host:PLANS_URL" })
+        #expect(host.kind == "host" && host.signature == "Base URL from the environment variable PLANS_URL")
+        #expect(URLPart.target([.text("https://user:secret@api.acme.test:8443/v2/plans/"), .unknown("id")]).host?.name == "api.acme.test")
+        #expect(URLPart.target([.text("https://"), .unknown("host"), .text("/x")]).host == nil)
+        let assembled = URLPart.target([.env("MAIL_SCHEME"), .text("://"), .env("MAIL_HOST"), .text(":"), .env("MAIL_PORT"), .text("/email/send")])
+        #expect(assembled.host?.name == "MAIL_HOST" && assembled.path == "/email/send")
+        #expect(URLPart.target([.text("http://mail.acme.test:"), .env("MAIL_PORT"), .text("/email")]).host?.name == "mail.acme.test")
+        #expect(URLPart.target([.text("https://api-"), .unknown("region"), .text(".acme.test/v1/x")]).host == nil)
+        #expect(URLPart.target([.unknown("base"), .text("/{}")]).path == nil)
+    }
+
+    @Test func calledEndpointsComeAndGoWithTheirCalls() async throws {
+        let root = try makeFixtureRepo([
+            "go.mod": "module example.com/acme\n",
+            "api/routes.go": """
+                package api
+
+                import "github.com/go-chi/chi/v5"
+
+                func Routes(r chi.Router) {
+                \tr.Get("/invoices/{id}", GetInvoice)
+                }
+
+                func GetInvoice(w http.ResponseWriter, r *http.Request) {}
+                """,
+            "web/api.ts": """
+                export const invoice = (id: string) => fetch(`${process.env.BILLING_API_URL}/invoices/${id}`)
+                export const plans = () => fetch(process.env.BILLING_API_URL + '/plans')
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        var indexer = CodeIndexer(root: root, store: store)
+        indexer.readHistory = false
+        _ = try await indexer.index()
+
+        let defined = try #require(try await store.node("endpoint:GET /invoices/{}"))
+        #expect(defined.signature == "GET /invoices/{} → GetInvoice")
+        let called = try #require(try await store.node("endpoint:GET /plans"))
+        #expect(called.signature == "GET /plans" && called.repo.isEmpty)
+        let callers = try await store.neighbors(defined.id, kinds: ["calls_endpoint"]).filter(\.incoming).map(\.node.id)
+        #expect(callers.count == 1 && callers.allSatisfy { $0.hasSuffix("web/api.ts#invoice") })
+        #expect(try await store.node("host:BILLING_API_URL")?.kind == "host")
+
+        try FileManager.default.removeItem(at: root.appending(path: "web/api.ts"))
+        _ = try await indexer.index()
+        #expect(try await store.node("endpoint:GET /plans") == nil)
+        #expect(try await store.node("host:BILLING_API_URL") == nil)
+        #expect(try await store.node(defined.id)?.signature == defined.signature)
+    }
+
     @Test func dashiiFindsServicesAndEndpoints() async throws {
         let root = try makeFixtureRepo([
             "billing-api/Dockerfile": "FROM golang:1.23\n",

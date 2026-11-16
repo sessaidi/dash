@@ -314,8 +314,11 @@ enum GoRoutes {
                 path = file.evaluate(texts[1])
                 handler = texts[2]
             default:
-                // chi, fiber, echo, gin, httprouter: r.Get("/x", h). A client call has no handler argument.
-                guard texts.count >= 2, let value = file.evaluate(texts[0]), value.hasPrefix("/") else { continue }
+                // chi, fiber, echo, gin, httprouter: r.Get("/x", h). net/http has no such methods,
+                // and an HTTP client's `Post(url, contentType, body)` isn't a route.
+                let last = receiver.split(separator: ".").last.map { String($0.prefix { $0 != "(" }) } ?? ""
+                guard framework != "net/http", !last.lowercased().hasSuffix("client"),
+                      texts.count >= 2, let value = file.evaluate(texts[0]), value.hasPrefix("/") else { continue }
                 methods = [["Any", "All"].contains(verb) ? "ANY" : verb.uppercased()]
                 path = value
                 handler = texts[texts.count - 1]
