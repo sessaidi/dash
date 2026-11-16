@@ -75,6 +75,12 @@ final class ChatSession {
     private(set) var trace: [ClaudeTraceEntry] = []
     private(set) var live: [ChatEntry] = []
     private(set) var isRunning = false
+    /// Tokens of context the last reply read (the whole conversation so far): past
+    /// `FreshStart.threshold` the chat offers a fresh start with a summary.
+    private(set) var contextTokens = 0
+    private(set) var isSummarizing = false
+    /// The summary the next message carries into a fresh conversation.
+    @ObservationIgnored private var carryOver: String?
     var isPanelVisible = true
     /// Tool results that arrived before Claude Code's message naming the call, by tool name.
     @ObservationIgnored private var earlyResults: [String: [(String, Bool)]] = [:]
@@ -82,6 +88,8 @@ final class ChatSession {
     var pendingDraft: String?
     /// The conversation on screen, saved after every turn.
     private(set) var conversationID: UUID?
+    /// Names the conversation on screen, for what the panel remembers about it.
+    var conversationKey: String { conversationID?.uuidString ?? "new" }
 
     @ObservationIgnored let host: ExtensionHost
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -212,7 +220,7 @@ final class ChatSession {
     /// files inline).
     func send(_ text: String, attachments: [ChatAttachment] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty, !isRunning else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty, !isRunning, !isSummarizing else { return }
         let files = attachments.map { "📎 \($0.name)" }.joined(separator: "\n")
         transcript.append(ChatEntry(id: UUID().uuidString, kind: .user([trimmed, files].filter { !$0.isEmpty }.joined(separator: "\n\n"))))
         // "/standup …" runs the command's prompt; the transcript keeps what was typed.
@@ -233,9 +241,52 @@ final class ChatSession {
         return true
     }
 
+    /// Continues the conversation in a new one that starts from a summary of this one (written
+    /// from its messages; tool results are left to fetch again). This one stays in History.
+    func freshStart() async {
+        guard !isRunning, !isSummarizing, transcript.contains(where: { if case .user = $0.kind { true } else { false } }) else { return }
+        isSummarizing = true
+        defer { isSummarizing = false }
+        let entries = transcript
+        let title = conversations().first { $0.id == conversationID }?.title ?? "the earlier conversation"
+        do {
+            let summary: String
+            if let code, code.isRunning {
+                summary = try await summarizeInSession(code)
+            } else {
+                // No live session (Dash relaunched): resuming would re-read it all uncached; the
+                // messages are enough, and much smaller.
+                summary = try await host.dashii.complete(system: FreshStart.system, prompt: FreshStart.source(entries),
+                                                         model: host.settings.model, source: "chat.fresh-start")
+            }
+            reset()
+            carryOver = FreshStart.carryOver(summary, title: title)
+            transcript = [ChatEntry(id: UUID().uuidString, kind: .notice("Fresh start from “\(title)” (still in History). What carries over:", isError: false)),
+                          ChatEntry(id: UUID().uuidString, kind: .text(summary))]
+        } catch {
+            notice("Couldn't summarise the conversation: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    /// One turn in the running session asking for the handoff; the turn isn't kept on screen.
+    private func summarizeInSession(_ session: ClaudeCodeSession) async throws -> String {
+        let shown = transcript
+        defer { transcript = shown; live = [] }
+        codeStarted = Date()
+        codeLiveID = UUID().uuidString
+        try session.send(FreshStart.inSession)
+        let result: ResultMessage = try await withCheckedThrowingContinuation { codeTurn = $0 }
+        guard !result.isError, let text = result.result?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            throw ToolError(result.result ?? "The summary came back empty.")
+        }
+        return text
+    }
+
     func reset() {
         stop()
         sentContext = [:]
+        carryOver = nil
+        contextTokens = 0
         saveConversation()
         transcript = []
         live = []
@@ -354,6 +405,7 @@ final class ChatSession {
         if let known = await memory?.context(for: text + "\n" + view) { prompt = known + "\n" + prompt }
         if let skills = Skills.catalog(in: host.context), fresh("skills", skills) { prompt = skills + "\n" + prompt }
         if let experts = AgentHub.shared.catalog, fresh("experts", experts) { prompt = experts + "\n" + prompt }
+        if let carryOver { prompt = carryOver + "\n" + prompt }
         if let digest = ActivityLog.digest(host.activity.events(after: lastActivityID)) {
             prompt = "<dashboard-activity>\n\(digest)\n</dashboard-activity>\n" + prompt
         }
@@ -364,6 +416,7 @@ final class ChatSession {
             turnToolsConnected = sessionToolsConnected
             codeLiveID = UUID().uuidString
             try session.send(content: [["type": "text", "text": .string(prompt)]] + attachments.map(\.block))
+            carryOver = nil
             let result: ResultMessage = try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { codeTurn = $0 }
             } onCancel: {
@@ -458,6 +511,10 @@ final class ChatSession {
             }
         case .assistant(let reply):
             live = []
+            if reply.parentToolUseID == nil, let usage = reply.raw["message"]?["usage"]?.dash {
+                let read = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].compactMap { usage[$0]?.int }.reduce(0, +)
+                if read > 0 { contextTokens = read }
+            }
             for block in reply.content {
                 switch block {
                 case .text(let text) where !text.isEmpty:

@@ -19,6 +19,8 @@ struct ChatPanel: View {
     @State private var attachments: [ChatAttachment] = []
     @State private var attachError: String?
     @State private var dropTargeted = false
+    /// The conversation whose fresh-start suggestion was dismissed.
+    @State private var dismissedFreshStart: String?
 
     private let suggestions = [
         "What's on my plate today?",
@@ -43,6 +45,7 @@ struct ChatPanel: View {
                 .onChange(of: chat.transcript.count) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             if !settings.isClaudeConfigured { missingKeyBanner }
+            if chat.contextTokens > FreshStart.threshold || chat.isSummarizing, dismissedFreshStart != chat.conversationKey { freshStartBanner }
             Divider()
             commandSuggestions
             composer
@@ -62,6 +65,27 @@ struct ChatPanel: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    private var freshStartBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Long conversation: about \((chat.contextTokens / 1000).formatted())k tokens, read again with every message.")
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button(chat.isSummarizing ? "Summarising…" : "Fresh Start with a Summary") { Task { await chat.freshStart() } }
+                        .disabled(chat.isSummarizing || chat.isRunning)
+                        .help("Continues in a new conversation that starts from a summary of this one (goal, decisions, ids, next step). Tool results are fetched again when needed; this conversation stays in History.")
+                    if chat.isSummarizing { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button("Not Now") { dismissedFreshStart = chat.conversationKey }.buttonStyle(.borderless)
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.08))
     }
 
     /// Adds files for the next message (images, PDFs, text files); says why one can't be.
@@ -245,7 +269,7 @@ struct ChatPanel: View {
     }
 
     private func submit() {
-        guard !chat.isRunning else { return }
+        guard !chat.isRunning, !chat.isSummarizing else { return }
         chat.send(draft, attachments: attachments)
         draft = ""
         attachments = []
