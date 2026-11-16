@@ -12,7 +12,7 @@ struct KnowledgeView: View {
     @State private var selected: KnowledgeNode?
     @State private var history: [KnowledgeNode] = []
 
-    static let kinds = ["", "repo", "directory", "file", "symbol", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
+    static let kinds = ["", "repo", "directory", "file", "symbol", "service", "endpoint", "concept", "doc", "ticket", "pr", "agent", "meeting", "note", "person", "package"]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -134,6 +134,7 @@ struct KnowledgeRow: View {
     private var subtitle: String {
         if !node.path.isEmpty { return node.line > 0 ? "\(node.path):\(node.line)" : node.path }
         if !node.summary.isEmpty { return node.summary }
+        if ["service", "endpoint"].contains(node.kind), !node.signature.isEmpty { return node.signature }
         return node.kind
     }
 
@@ -144,6 +145,8 @@ struct KnowledgeRow: View {
         case "file": "doc.text"
         case "symbol": "function"
         case "package": "cube"
+        case "service": "server.rack"
+        case "endpoint": "network"
         case "concept": "lightbulb"
         case "ticket": "checklist"
         case "pr": "arrow.triangle.pull"

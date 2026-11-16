@@ -491,6 +491,26 @@ struct KnowledgeExtractionTests {
         ])
     }
 
+    @Test func dashiiFindsServicesAndEndpoints() async throws {
+        let root = try makeFixtureRepo([
+            "billing-api/Dockerfile": "FROM golang:1.23\n",
+            "billing-api/main.go": "package main\n\nimport \"github.com/go-chi/chi/v5\"\n\nfunc main() {\n\tr := chi.NewRouter()\n\tr.Post(\"/refunds\", issueRefund)\n}\n\nfunc issueRefund() {}\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let knowledge = KnowledgeExtension(defaults: UserDefaults(suiteName: "kx-\(UUID())")!, url: nil)
+        let store = try #require(knowledge.store)
+        _ = try await KnowledgeExtension.index(root.path, store: store, history: false)
+        func tool(_ name: String) throws -> DashiiTool { try #require(knowledge.tools.first { $0.name == name }) }
+
+        let endpoints = try await tool("knowledge_search").run(["query": "refunds", "kind": "endpoint"])
+        #expect(endpoints.array?.map { $0["id"]?.string } == ["endpoint:POST /refunds"])
+        let services = try await tool("knowledge_search").run(["query": "billing-api", "kind": "service"])
+        #expect(services.array?.first?["kind"] == "service")
+        let context = try await tool("knowledge_context").run(["question": "refunds"])
+        #expect(context["matches"]?.array?.first?["id"] == "endpoint:POST /refunds")
+        #expect(KnowledgeView.kinds.contains("service") && KnowledgeView.kinds.contains("endpoint"))
+    }
+
     @Test func readsOpenAPIDocuments() throws {
         let root = try makeFixtureRepo([
             "api/openapi.yaml": """
