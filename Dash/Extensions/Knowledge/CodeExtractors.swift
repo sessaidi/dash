@@ -18,6 +18,8 @@ import Foundation
 //   grpc:<pkg>.<Service>         a gRPC service in a .proto (rpc_service), "grpc:<pkg>.<Service>/<Method>"
 //                                its rpcs (rpc), proto:<pkg>.<Message> its messages (message); no
 //                                package, no "<pkg>.". Shared; path and line say where.
+//   graphql:<Type>               a GraphQL type (graphql_type); graphql:<Type>.<field> a field of a
+//                                root type, Query, Mutation or Subscription (graphql_field). Shared.
 //
 //   service  —defined_in→ file      repo     —deploys→ service     service —runs→ dir (or repo)
 //   endpoint —defined_in→ file      endpoint —handled_by→ symbol    service —exposes→ endpoint
@@ -25,6 +27,8 @@ import Foundation
 //   symbol   —calls_host→ host
 //   rpc_service —defined_in→ file   rpc_service —contains→ rpc      rpc, message —defined_in→ file
 //   symbol   —implements→ rpc_service     symbol —calls_rpc→ rpc_service   (resolved by ServiceLinks)
+//   graphql_type, graphql_field —defined_in→ file   graphql_type —contains→ graphql_field
+//   graphql_field —handled_by→ symbol (its resolver)
 //
 // Edges an extractor writes for a file carry the file's id as their `source`: re-indexing the
 // file replaces exactly those, whatever their ends. Edges that need the whole repository (a
@@ -66,7 +70,7 @@ enum CodeExtractors {
     /// Bumped when extractors find more: a repository without this meta key is parsed again once.
     static let version = "extract-v3"
 
-    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor()]
+    static let all: [any CodeExtractor] = [ServiceExtractor(), EndpointExtractor(), OpenAPIExtractor(), OutboundCallExtractor(), ProtobufExtractor(), GraphQLExtractor()]
 
     /// Runs the extractors that accept the file, adding the time each took to `timings`. Every
     /// edge is filed under the file, so it goes when the file is indexed again.
