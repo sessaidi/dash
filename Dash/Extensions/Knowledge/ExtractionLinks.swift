@@ -9,7 +9,7 @@ enum ExtractionLinks {
     /// Refs whose names are folders of the repository ("" is its root); the others name functions.
     static let pathKinds: Set<String> = ["runs"]
     /// Refs a family's own pass resolves (workload facts, …), not names of functions.
-    static let familyKinds: Set<String> = [RuntimeExtractor.factKind, ContainerExtractor.refKind]
+    static let familyKinds: Set<String> = [RuntimeExtractor.factKind, ContainerExtractor.refKind, CIExtractor.refKind]
 
     static func link(repo: String, store: KnowledgeStore, sharedKinds: [String] = CodeExtractors.all.flatMap(\.sharedKinds)) async throws {
         let root = String(repo.dropFirst(5))
@@ -39,7 +39,9 @@ enum ExtractionLinks {
                 }
             }
         }
-        edges += try await exposes(repo: repo, root: root, services: deployed.map(\.dst), runs: edges.filter { $0.kind == "runs" }, store: store)
+        let runs = edges.filter { $0.kind == "runs" }
+        edges += try await exposes(repo: repo, root: root, services: deployed.map(\.dst), runs: runs, store: store)
+        edges += try await CILinks.link(repo: repo, root: root, refs: refs.filter { $0.ref.kind == CIExtractor.refKind }.map(\.ref), runs: runs, store: store)
         try await store.replaceLinks(repo: repo, edges)
         try await store.pruneShared(kinds: sharedKinds)
         try await store.settleCalledEndpoints()

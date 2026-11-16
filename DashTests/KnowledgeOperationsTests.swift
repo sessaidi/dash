@@ -283,4 +283,120 @@ struct KnowledgeOperationsTests {
         let billing = try #require(try await store.node(ServiceExtractor.id(repo: indexer.repoID, name: "billing")))
         #expect(billing.signature == "Defined in apps/billing/Dockerfile, docker-compose.yml · port 3000 · runs node server.js")
     }
+
+    // MARK: CI
+
+    @Test func findsCIJobsAndWhatTheyDeploy() async throws {
+        let root = try makeFixtureRepo([
+            "apps/billing/helm/Chart.yaml": "apiVersion: v2\nname: billing\n",
+            "apps/users/Dockerfile": "FROM golang:1.23\n",
+            "apps/users/k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: users\n",
+            ".github/workflows/deploy.yml": """
+                name: Deploy
+                on:
+                  push:
+                    branches: [main]
+                  workflow_dispatch:
+                jobs:
+                  build:
+                    runs-on: ubuntu-latest
+                    container: golang:1.23
+                    steps:
+                      - uses: actions/checkout@v4
+                      - name: Build
+                        run: go build ./apps/billing/...
+                  deploy:
+                    needs: build
+                    runs-on: ubuntu-latest
+                    environment: production
+                    steps:
+                      - name: Deploy
+                        run: |
+                          helm upgrade --install billing apps/billing/helm --set apiKey=AKIAIOSFODNN7EXAMPLE
+                          echo done
+                """,
+            ".circleci/config.yml": """
+                version: 2.1
+                jobs:
+                  migrate:
+                    docker:
+                      - image: cimg/go:1.23
+                    environment:
+                      KUBE_NAME: users
+                    steps:
+                      - checkout
+                      - run:
+                          name: Migrate
+                          command: ./scripts/migrate.sh
+                workflows:
+                  main:
+                    jobs:
+                      - lint
+                      - acme/build:
+                          name: build-users
+                          root-path: ./apps/users
+                          context: platform
+                          requires:
+                            - lint
+                      - migrate:
+                          requires: [build-users]
+                          filters:
+                            branches:
+                              only: main
+                """,
+            ".gitlab-ci.yml": """
+                stages: [deploy]
+                .base:
+                  image: alpine:3
+                deploy_prod:
+                  stage: deploy
+                  image: alpine:3
+                  environment: production
+                  script:
+                    - kubectl apply -f apps/users/k8s
+                """,
+        ], git: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try KnowledgeStore(url: nil)
+        let indexer = try await index(root, store: store)
+        let repo = indexer.repoID
+        let jobs = try await store.nodes(kind: "ci_job", repo: repo).map(\.qualified).sorted()
+        #expect(jobs == ["deploy/build", "deploy/deploy", "gitlab-ci/deploy_prod", "main/build-users", "main/lint", "main/migrate"])
+        let billing = ServiceExtractor.id(repo: repo, name: "billing"), users = ServiceExtractor.id(repo: repo, name: "users")
+
+        let build = try #require(try await store.node(CIExtractor.id(repo: repo, workflow: "deploy", job: "build")))
+        #expect(build.signature == "GitHub Actions job build in deploy · on push (main), workflow_dispatch · runs on ubuntu-latest")
+        #expect(build.summary == "Steps: (actions/checkout@v4); Build: go build ./apps/billing/....")
+        #expect(build.language == "github-actions" && build.path == ".github/workflows/deploy.yml" && build.line == 7)
+        #expect(try await targets(build.id, "uses_image", store: store) == ["image:golang"])
+        #expect(try await targets(build.id, "about", store: store) == [billing])
+
+        let deploy = try #require(try await store.node(CIExtractor.id(repo: repo, workflow: "deploy", job: "deploy")))
+        #expect(deploy.signature == "GitHub Actions job deploy in deploy · on push (main), workflow_dispatch · runs on ubuntu-latest · environment production · needs build · deploys")
+        #expect(deploy.summary.hasPrefix("Steps: Deploy: helm upgrade --install billing apps/billing/helm") && !deploy.summary.contains("AKIAIOSFODNN7EXAMPLE"))
+        #expect(try await targets(deploy.id, "deploys", store: store) == [billing])
+
+        let buildUsers = try #require(try await store.node(CIExtractor.id(repo: repo, workflow: "main", job: "build-users")))
+        #expect(buildUsers.signature == "CircleCI job build-users in main · acme/build · context platform · needs lint")
+        #expect(buildUsers.summary == "Steps: parameters root-path ./apps/users.")
+        #expect(try await targets(buildUsers.id, "about", store: store) == [users])
+        let migrate = try #require(try await store.node(CIExtractor.id(repo: repo, workflow: "main", job: "migrate")))
+        #expect(migrate.signature == "CircleCI job migrate in main · only main · needs build-users")
+        #expect(migrate.summary == "Steps: checkout; Migrate: ./scripts/migrate.sh.")
+        #expect(try await targets(migrate.id, "uses_image", store: store) == ["image:cimg/go"])
+        #expect(try await targets(migrate.id, "about", store: store) == [users])
+
+        let gitlab = try #require(try await store.node(CIExtractor.id(repo: repo, workflow: "gitlab-ci", job: "deploy_prod")))
+        #expect(gitlab.signature == "GitLab CI job deploy_prod in gitlab-ci · stage deploy · environment production · deploys")
+        #expect(try await targets(gitlab.id, "deploys", store: store) == [users])
+        #expect(try await targets(gitlab.id, "uses_image", store: store) == ["image:alpine"])
+
+        // A job renamed: the old node goes with its edges.
+        let workflow = root.appending(path: ".gitlab-ci.yml")
+        try (try String(contentsOf: workflow, encoding: .utf8)).replacingOccurrences(of: "deploy_prod:", with: "release:").write(to: workflow, atomically: true, encoding: .utf8)
+        _ = try await indexer.index()
+        #expect(try await store.node(gitlab.id) == nil)
+        #expect(try await store.node(CIExtractor.id(repo: repo, workflow: "gitlab-ci", job: "release")) != nil)
+        #expect(try await store.neighbors(gitlab.id).isEmpty)
+    }
 }
