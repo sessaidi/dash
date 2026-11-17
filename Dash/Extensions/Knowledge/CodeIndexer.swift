@@ -25,6 +25,19 @@ struct CodeIndexer: Sendable {
 
     var repoID: String { "repo:" + root.path }
 
+    /// What phase 2 (calls and inheritance) needs from a changed file: much smaller than the
+    /// parsed file, its text and its extracted nodes, which are released after phase 1.
+    struct ChangedFile: Sendable {
+        struct Symbol: Sendable {
+            let id: String
+            let name: String
+            let calls: [String]
+            let inherits: [String]
+        }
+        let path: String
+        let symbols: [Symbol]
+    }
+
     static let skippedDirectories: Set<String> = ["node_modules", "vendor", "Pods", ".build", "build", "dist", "DerivedData",
                                                   "target", ".git", ".worktrees", ".terraform", "__pycache__", ".venv", "venv", "third_party", "Carthage"]
     static let maxFileBytes = 1_000_000
@@ -51,36 +64,50 @@ struct CodeIndexer: Sendable {
         var timings: [String: Duration] = [:]
 
         // Phase 1: nodes, containment, definitions and imports of changed files.
-        var changed: [(path: String, parsed: ParsedFile, symbolIDs: [String])] = []
+        // Only what phase 2 needs is kept per changed file (symbol ids, names, calls, supertypes),
+        // never the parsed file, the text or the extracted nodes: those go to the store in
+        // batches of 200 and are released.
+        var changed: [ChangedFile] = []
         var touchedDirectories = Set<String>()
         // Written in batches, one transaction each.
         var batch: [KnowledgeStore.FileGraph] = []
         for path in files {
             let url = root.appending(path: path)
-            guard let language = CodeParser.language(of: path),
-                  let data = try? Data(contentsOf: url), data.count <= Self.maxFileBytes,
-                  let text = String(data: data, encoding: .utf8) else { continue }
-            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            guard let language = CodeParser.language(of: path) else { continue }
+            // Reading, parsing and extracting one file create many short-lived Foundation
+            // objects: drain them per file rather than at the end of the run.
+            let prepared: (hash: String, text: String)? = autoreleasepool {
+                guard let data = try? Data(contentsOf: url), data.count <= Self.maxFileBytes,
+                      let text = String(data: data, encoding: .utf8) else { return nil }
+                return (SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(), text)
+            }
+            guard let prepared else { continue }
+            let hash = prepared.hash
             if known[path] == hash { continue }
             if known[path] != nil { touchedNames.formUnion(try await store.symbolNames(repo: repoID, path: path)) }
-            let parsed = CodeParser.parse(text, language: language)
-            var (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
-            let extra = configAndDecisions(text, path: path, language: language, files: files)
-            nodes += extra.nodes
-            edges += extra.edges
-            let input = ExtractionInput(root: root.path, path: path, language: language, text: text, parsed: parsed,
-                                        symbolIDs: symbolIDs, files: files, context: context)
-            let extracted = CodeExtractors.run(input, extractors: extractors, timings: &timings)
-            nodes += extracted.nodes
-            edges += extracted.edges
-            batch.append(KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges, refs: extracted.refs))
+            let (fileGraph, kept) = autoreleasepool { () -> (KnowledgeStore.FileGraph, ChangedFile) in
+                let text = prepared.text
+                let parsed = CodeParser.parse(text, language: language)
+                var (nodes, edges, symbolIDs) = graph(for: path, parsed: parsed, hash: hash, goModule: goModule, files: files)
+                let extra = configAndDecisions(text, path: path, language: language, files: files)
+                nodes += extra.nodes
+                edges += extra.edges
+                let input = ExtractionInput(root: root.path, path: path, language: language, text: text, parsed: parsed,
+                                            symbolIDs: symbolIDs, files: files, context: context)
+                let extracted = CodeExtractors.run(input, extractors: extractors, timings: &timings)
+                nodes += extracted.nodes
+                edges += extracted.edges
+                return (KnowledgeStore.FileGraph(path: path, nodes: nodes, edges: edges, refs: extracted.refs),
+                        ChangedFile(path: path, symbols: zip(symbolIDs, parsed.symbols).map { ChangedFile.Symbol(id: $0, name: $1.name, calls: Array($1.calls), inherits: $1.inherits) }))
+            }
+            batch.append(fileGraph)
             if batch.count >= 200 {
                 try await store.replaceFiles(repo: repoID, batch)
-                batch.removeAll()
+                batch.removeAll(keepingCapacity: true)
             }
-            changed.append((path, parsed, symbolIDs))
+            changed.append(kept)
             report.parsed += 1
-            report.symbols += parsed.symbols.count
+            report.symbols += kept.symbols.count
             touchedDirectories.formUnion(Self.ancestors(of: path))
         }
         let current = Set(files)
@@ -117,26 +144,50 @@ struct CodeIndexer: Sendable {
         // and so is every symbol elsewhere that calls a name a changed file defines or dropped, so
         // edges never point at what was renamed or moved.
         for file in changed {
-            try await store.replaceSymbolCalls(repo: repoID, path: root.path + "/" + file.path,
-                                               zip(file.symbolIDs, file.parsed.symbols).map { ($0, Array($1.calls)) })
-            touchedNames.formUnion(file.parsed.symbols.map(\.name))
-        }
-        var callers: [String: [String]] = [:]
-        for file in changed { for (id, symbol) in zip(file.symbolIDs, file.parsed.symbols) { callers[id] = Array(symbol.calls) } }
-        if !touchedNames.isEmpty {
-            for (id, names) in try await store.symbolCalls(repo: repoID, calling: touchedNames) where callers[id] == nil { callers[id] = names }
+            try await store.replaceSymbolCalls(repo: repoID, path: root.path + "/" + file.path, file.symbols.map { ($0.id, $0.calls) })
+            touchedNames.formUnion(file.symbols.map(\.name))
         }
         let index = try await store.symbolIndex(repo: repoID)
         let imports = try await store.importTargets(repo: repoID)
-        var callEdges: [KnowledgeEdge] = []
-        for (id, names) in callers {
-            callEdges += Self.resolveCalls(from: id, names: names, index: index, imports: imports, root: root.path)
+        // Resolved and written in slices, so the call edges of the whole repository are never
+        // held at once.
+        var resolved = Set<String>()
+        func writeCalls(_ callers: [(id: String, names: [String])]) async throws {
+            var edges: [KnowledgeEdge] = []
+            for (id, names) in callers {
+                edges += Self.resolveCalls(from: id, names: names, index: index, imports: imports, root: root.path)
+            }
+            try await store.replaceCallEdges(from: Set(callers.map(\.id)), edges)
         }
-        try await store.replaceCallEdges(from: Set(callers.keys), callEdges)
+        var slice: [(id: String, names: [String])] = []
+        // Backwards, so a symbol id that appears twice (overloads) keeps its last definition's
+        // calls, as before.
+        for file in changed.reversed() {
+            for symbol in file.symbols.reversed() where resolved.insert(symbol.id).inserted {
+                slice.append((symbol.id, symbol.calls))
+                if slice.count >= 2_000 {
+                    try await writeCalls(slice)
+                    slice.removeAll(keepingCapacity: true)
+                }
+            }
+        }
+        if !touchedNames.isEmpty {
+            for (id, names) in try await store.symbolCalls(repo: repoID, calling: touchedNames) where resolved.insert(id).inserted {
+                slice.append((id, names))
+                if slice.count >= 2_000 {
+                    try await writeCalls(slice)
+                    slice.removeAll(keepingCapacity: true)
+                }
+            }
+        }
+        try await writeCalls(slice)
+        slice = []
+        resolved = []
         // Inheritance: a changed type's supertypes and protocols, resolved to types of the repository.
         var inheritEdges: [KnowledgeEdge] = []
         for file in changed {
-            for (id, symbol) in zip(file.symbolIDs, file.parsed.symbols) where !symbol.inherits.isEmpty {
+            for symbol in file.symbols where !symbol.inherits.isEmpty {
+                let id = symbol.id
                 for name in symbol.inherits {
                     let targets = (index[name] ?? []).filter { $0 != id && !$0.contains("#" + name + ".") }
                     let sameFile = targets.filter { Self.path(ofSymbol: $0, root: root.path) == file.path }
@@ -145,6 +196,7 @@ struct CodeIndexer: Sendable {
                 }
             }
         }
+        changed = []
         try await store.upsert(inheritEdges)
         try await store.setMeta("calls-v2:" + repoID, "1")
 

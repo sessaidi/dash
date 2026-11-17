@@ -301,9 +301,38 @@ extension KnowledgeStore {
         return result
     }
 
-    /// Symbols of a repository with no incoming calls (candidate entry points), with signatures.
-    func uncalledSymbols(repo: String) throws -> [KnowledgeNode] {
-        try nodes("SELECT * FROM nodes n WHERE n.repo = ?1 AND n.kind = 'symbol' AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = n.id AND e.kind = 'calls')", [repo])
+    /// The first `limit` symbols of a repository with no incoming calls (candidate entry points)
+    /// that `keep` accepts. Rows are read one at a time, so a large repository's uncalled
+    /// symbols are never all in memory.
+    func uncalledSymbols(repo: String, limit: Int, keep: @Sendable (KnowledgeNode) -> Bool) throws -> [KnowledgeNode] {
+        let statement = try prepare("SELECT * FROM nodes n WHERE n.repo = ?1 AND n.kind = 'symbol' AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = n.id AND e.kind = 'calls')")
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo])
+        var result: [KnowledgeNode] = []
+        while result.count < limit, sqlite3_step(statement) == SQLITE_ROW {
+            let node = readNode(statement, offset: 0)
+            if keep(node) { result.append(node) }
+        }
+        return result
+    }
+
+    /// id → name for these node ids only.
+    func names(of ids: Set<String>) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for chunk in Array(ids).chunked(400) {
+            let marks = chunk.indices.map { "?\($0 + 1)" }.joined(separator: ",")
+            let statement = try prepare("SELECT id, name FROM nodes WHERE id IN (\(marks))")
+            defer { sqlite3_finalize(statement) }
+            bind(statement, chunk)
+            while sqlite3_step(statement) == SQLITE_ROW { result[text(statement, 0)] = text(statement, 1) }
+        }
+        return result
+    }
+
+    /// One page of a repository's nodes of a kind, in path order: callers walk the pages instead
+    /// of loading every node at once.
+    func nodes(kind: String, repo: String, offset: Int, limit: Int) throws -> [KnowledgeNode] {
+        try nodes("SELECT * FROM nodes WHERE kind = ?1 AND repo = ?2 ORDER BY path, id LIMIT ?3 OFFSET ?4", [kind, repo, limit, offset])
     }
 
     /// Replaces the derived nodes of `kinds` (and their edges) for a repository.
@@ -403,14 +432,15 @@ extension KnowledgeAnalysis {
 
         // Flows: what each entry point sets in motion.
         let calls = try await store.callGraph(repo: repo)
-        let entries = try await store.uncalledSymbols(repo: repo)
-            .filter { isEntryPoint(name: $0.name, signature: $0.signature, path: $0.path) && !(calls[$0.id] ?? []).isEmpty }
-            .prefix(80)
-        let names = Dictionary(uniqueKeysWithValues: try await store.nodes(kind: "symbol", repo: repo, limit: 200_000).map { ($0.id, $0.name) })
+        let callers = Set(calls.keys)
+        let entries = try await store.uncalledSymbols(repo: repo, limit: 80) { node in
+            isEntryPoint(name: node.name, signature: node.signature, path: node.path) && callers.contains(node.id)
+        }
+        // Flows first, then the names of only the symbols they show.
+        let walks = entries.map { entry in (entry, flow(from: entry.id) { calls[$0] ?? [] }) }.filter { $0.1.count > 1 }
+        let names = try await store.names(of: Set(walks.flatMap { $0.1.prefix(8) }))
         var flowNodes: [KnowledgeNode] = [], flowEdges: [KnowledgeEdge] = []
-        for entry in entries {
-            let steps = flow(from: entry.id) { calls[$0] ?? [] }
-            guard steps.count > 1 else { continue }
+        for (entry, steps) in walks {
             let id = "flow:" + entry.id
             flowNodes.append(KnowledgeNode(id: id, kind: "flow", name: entry.name, qualified: entry.qualified, repo: repo, path: entry.path,
                                            signature: steps.prefix(8).compactMap { names[$0] }.joined(separator: " → "), source: source))
@@ -427,24 +457,34 @@ extension KnowledgeAnalysis {
     static func embed(repo: String, store: KnowledgeStore) async throws {
         guard NLEmbedding.sentenceEmbedding(for: .english) != nil else { return }
         let known = try await store.vectorHashes(repo: repo)
-        var wanted: [(KnowledgeNode, String)] = []
-        for kind in ["directory", "file", "symbol", "cluster"] {
-            for node in try await store.nodes(kind: kind, repo: repo, limit: 30_000) {
-                if kind == "symbol", !["type", "class", "struct", "protocol", "interface", "enum", "function", "trait"].contains(node.language) { continue }
-                let text = [words(node.qualified.isEmpty ? node.name : node.qualified), words(node.path), node.summary, String(node.signature.prefix(200))]
-                    .filter { !$0.isEmpty }.joined(separator: ". ")
-                wanted.append((node, text))
-            }
-        }
-        let ids = Set(wanted.map(\.0.id))
+        // Pages of 500 nodes per kind (up to 30,000 per kind, as before): each page is embedded and
+        // written before the next is read, so only ids are kept across the run.
+        let page = 500, cap = 30_000
+        var ids = Set<String>()
         var fresh: [(id: String, hash: String, vector: [Float])] = []
-        for (node, text) in wanted {
-            let hash = stableHash(text)
-            guard known[node.id] != hash, let vector = embedText(text) else { continue }
-            fresh.append((node.id, hash, vector))
-            if fresh.count >= 500 {
-                try await store.setVectors(repo: repo, fresh, removing: [])
-                fresh.removeAll()
+        for kind in ["directory", "file", "symbol", "cluster"] {
+            var offset = 0
+            while offset < cap {
+                let nodes = try await store.nodes(kind: kind, repo: repo, offset: offset, limit: min(page, cap - offset))
+                for node in nodes {
+                    if kind == "symbol", !["type", "class", "struct", "protocol", "interface", "enum", "function", "trait"].contains(node.language) { continue }
+                    ids.insert(node.id)
+                    let item: (hash: String, vector: [Float])? = autoreleasepool {
+                        let text = [words(node.qualified.isEmpty ? node.name : node.qualified), words(node.path), node.summary, String(node.signature.prefix(200))]
+                            .filter { !$0.isEmpty }.joined(separator: ". ")
+                        let hash = stableHash(text)
+                        guard known[node.id] != hash, let vector = embedText(text) else { return nil }
+                        return (hash, vector)
+                    }
+                    guard let item else { continue }
+                    fresh.append((node.id, item.hash, item.vector))
+                    if fresh.count >= 500 {
+                        try await store.setVectors(repo: repo, fresh, removing: [])
+                        fresh.removeAll(keepingCapacity: true)
+                    }
+                }
+                if nodes.count < page { break }
+                offset += page
             }
         }
         try await store.setVectors(repo: repo, fresh, removing: known.keys.filter { !ids.contains($0) })
