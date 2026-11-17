@@ -5,7 +5,8 @@ import SQLite3
 /// `knowledge_service_map`: a service or a repository as the rest of the system sees it: the
 /// routes and gRPC services it serves, what it calls and which service answers, who calls it from
 /// any repository, the topics it publishes and consumes and who's on the other side, the tables it
-/// touches, the environment it reads, with file:line evidence. Reads the graph only.
+/// touches, the environment, flags and config it reads, its workloads and CI jobs, owners, docs
+/// and dependencies, with file:line evidence. Reads the graph only.
 extension KnowledgeExtension {
     private struct ServiceMapInput: Decodable { let name: String }
     static let serviceMapLimit = 30
@@ -13,7 +14,7 @@ extension KnowledgeExtension {
     var serviceMapTool: DashiiTool {
         DashiiTool(
             name: "knowledge_service_map",
-            description: "A service or repository as the rest of the system sees it: the HTTP endpoints it exposes (handler, file:line) and the gRPC services it implements, what it calls (endpoints, hosts and gRPC services, from which function, and which service answers), who calls it from any repository, the message topics it publishes and consumes (with the code on the other side), the database tables it reads, writes, migrates or models, the environment variables it reads and where it's defined. Links matched across repositories by path, host or name have a confidence below 1. Give a repository (name, path or owner/name) or a service (id or name from knowledge_search, kind service).",
+            description: "A service or repository as the rest of the system sees it: the HTTP endpoints it exposes (handler, file:line) and the gRPC services it implements, what it calls (endpoints, hosts and gRPC services, from which function, and which service answers), who calls it from any repository, the message topics it publishes and consumes (with the code on the other side), the database tables it reads, writes, migrates or models, the environment variables, feature flags and config keys its code reads, how it runs (workloads: image, replicas, resources; the CI jobs deploying it), its CODEOWNERS owners, the repository's docs about it, the packages and repositories it depends on, and where it's defined. Links matched across repositories by path, host or name have a confidence below 1. Give a repository (name, path or owner/name) or a service (id or name from knowledge_search, kind service).",
             properties: ["name": JSONSchema.string("A repository, or a service id or name.")],
             required: ["name"]
         ) { [weak self] input in
@@ -105,7 +106,8 @@ extension KnowledgeExtension {
         if exposed.count > limit { result["exposes_total"] = .number(Double(exposed.count)) }
 
         // gRPC services, topics and tables its code is linked to, by target.
-        let links = try await store.outgoing(repo: scope.repo, kinds: ["implements", "calls_rpc", "publishes", "consumes", "reads_table", "writes_table", "migrates"])
+        let links = try await store.outgoing(repo: scope.repo, kinds: ["implements", "calls_rpc", "publishes", "consumes", "reads_table", "writes_table", "migrates",
+                                                                       "checks_flag", "reads_config"])
             .filter { scope.contains($0.path) }
         func grouped(_ kind: String) -> [String: (weight: Double, from: [String])] {
             var result: [String: (weight: Double, from: [String])] = [:]
@@ -220,7 +222,91 @@ extension KnowledgeExtension {
         let variables = Set(try await store.environmentReads(repo: scope.repo).filter { scope.contains($0.path) }.map(\.name)).sorted()
         result["env"] = .array(variables.prefix(limit).map { .string($0) })
         if variables.count > limit { result["env_total"] = .number(Double(variables.count)) }
+
+        // Flags its code checks and config keys it reads.
+        for (kind, key) in [("checks_flag", "flags"), ("reads_config", "config")] {
+            let targets = grouped(kind)
+            guard !targets.isEmpty else { continue }
+            result[key] = .array(ranked(targets).prefix(limit).map { .object(Self.target($0.key, weight: $0.value.weight, from: $0.value.from)) })
+            if targets.count > limit { result[key + "_total"] = .number(Double(targets.count)) }
+        }
+
+        try await addOperations(to: &result, scope: scope, store: store)
         return .object(result)
+    }
+
+    /// How the scope runs and who looks after it: workloads, CI jobs, CODEOWNERS owners, the
+    /// repository's docs about it and what it depends on.
+    private func addOperations(to result: inout [String: JSONValue], scope: ServiceScope, store: KnowledgeStore) async throws {
+        let limit = Self.serviceMapLimit
+        var workloads: [KnowledgeNode] = []
+        for service in scope.services {
+            workloads += try await store.neighbors(service.id, kinds: ["deploys"], limit: 50).filter { !$0.incoming && $0.node.kind == "workload" }.map(\.node)
+        }
+        if workloads.isEmpty {
+            workloads = try await store.nodes(kind: "workload", repo: scope.repo, limit: 500).filter { $0.path.isEmpty || scope.contains($0.path) }
+        }
+        if !workloads.isEmpty {
+            let unique = Dictionary(workloads.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }).values.sorted { $0.name < $1.name }
+            result["workloads"] = .array(unique.prefix(limit).map { workload in
+                var entry: [String: JSONValue] = ["workload": .string(workload.signature.isEmpty ? workload.name : workload.signature)]
+                if !workload.path.isEmpty { entry["defined_in"] = .string(workload.path) }
+                return .object(entry)
+            })
+            if unique.count > limit { result["workloads_total"] = .number(Double(unique.count)) }
+        }
+
+        var jobs: [String: (node: KnowledgeNode, deploys: Bool)] = [:]
+        for service in scope.services {
+            for neighbor in try await store.neighbors(service.id, kinds: ["deploys", "about"], limit: 100) where neighbor.incoming && neighbor.node.kind == "ci_job" {
+                jobs[neighbor.node.id] = (neighbor.node, (jobs[neighbor.node.id]?.deploys ?? false) || neighbor.edge.kind == "deploys")
+            }
+        }
+        if !jobs.isEmpty {
+            let sorted = jobs.values.sorted { ($0.deploys ? 0 : 1, $0.node.name) < ($1.deploys ? 0 : 1, $1.node.name) }
+            result["ci"] = .array(sorted.prefix(limit).map { job in
+                ["job": .string(job.node.name), "defined_in": .string(job.node.path), "deploys": .bool(job.deploys)]
+            })
+            if jobs.count > limit { result["ci_total"] = .number(Double(jobs.count)) }
+        }
+
+        var owners: [String: [String]] = [:]
+        for folder in scope.folders {
+            for owner in try await store.codeOwners(repo: scope.repo, path: folder) {
+                owners[owner.owner, default: []].append(owner.target)
+            }
+        }
+        if !owners.isEmpty {
+            result["owners"] = .array(owners.sorted { $0.key < $1.key }.map { owner, targets in
+                ["owner": .string(String(owner.dropFirst("owner:".count))), "owns": .array(Array(Set(targets)).sorted().prefix(5).map { .string($0) })]
+            })
+        }
+
+        let docs = try await store.nodes(kind: "doc", repo: scope.repo, limit: 2000)
+            .filter { scope.contains($0.path) || scope.folders.contains(($0.path as NSString).deletingLastPathComponent) }
+            .sorted { ($0.path.components(separatedBy: "/").count, $0.path) < ($1.path.components(separatedBy: "/").count, $1.path) }
+        if !docs.isEmpty {
+            result["docs"] = .array(docs.prefix(limit).map { ["doc": .string($0.name), "path": .string($0.path)] })
+            if docs.count > limit { result["docs_total"] = .number(Double(docs.count)) }
+        }
+
+        // Manifests inside the scope, and the ones above it (a monorepo's root go.mod).
+        let dependencies = try await store.dependencies(repo: scope.repo).filter { dependency in
+            scope.contains(dependency.folder) || dependency.folder.isEmpty || scope.folders.contains { $0.hasPrefix(dependency.folder + "/") }
+        }
+        if !dependencies.isEmpty {
+            let packages = Dictionary(dependencies.map { ($0.package, $0.version) }, uniquingKeysWith: { a, b in a.isEmpty ? b : a }).sorted { $0.key < $1.key }
+            var entries: [JSONValue] = packages.prefix(limit).map { package, version in
+                var entry: [String: JSONValue] = ["package": .string(String(package.dropFirst("pkg:".count)))]
+                if !version.isEmpty { entry["version"] = .string(version) }
+                return .object(entry)
+            }
+            for repo in try await store.neighbors(scope.repo, kinds: ["depends_on"], limit: 50) where !repo.incoming && repo.node.kind == "repo" {
+                entries.insert(["repository": .string(repo.node.name)], at: 0)
+            }
+            result["depends_on"] = .array(entries)
+            if packages.count > limit { result["depends_on_total"] = .number(Double(packages.count)) }
+        }
     }
 
     /// The code publishing (or consuming) a topic outside the scope, through the Pub/Sub
@@ -258,7 +344,7 @@ extension KnowledgeExtension {
     }
 
     private static func target(_ id: String, weight: Double, from: [String]) -> [String: JSONValue] {
-        let keys = ["host": "host", "grpc": "rpc_service", "topic": "topic", "table": "table"]
+        let keys = ["host": "host", "grpc": "rpc_service", "topic": "topic", "table": "table", "flag": "flag", "config": "config"]
         let key = keys[String(id.prefix { $0 != ":" })] ?? "endpoint"
         var entry: [String: JSONValue] = [key: .string(String(id.drop { $0 != ":" }.dropFirst()))]
         if weight < 1 { entry["confidence"] = .number((weight * 100).rounded() / 100) }
@@ -309,6 +395,46 @@ extension KnowledgeStore {
             SELECT substr(e.dst, 5), f.path FROM nodes f JOIN edges e ON e.src = f.id AND e.kind = 'reads_env'
             WHERE f.repo = ?1 AND f.kind = 'file'
             """, [repo]).map { ($0.src, $0.dst) }
+    }
+
+    /// CODEOWNERS owners of a path ("" is the repository) as GitHub resolves them: the nearest
+    /// `owns` edge from the file or folder up to the repository. A folder whose files have
+    /// different owners has none of its own: then every owner of something inside it.
+    func codeOwners(repo: String, path: String) throws -> [(owner: String, target: String)] {
+        let root = String(repo.dropFirst(5))
+        var candidates: [String] = []
+        if !path.isEmpty { candidates += ["file:" + root + "/" + path, "dir:" + root + "/" + path] }
+        var folder = (path as NSString).deletingLastPathComponent
+        while !folder.isEmpty {
+            candidates.append("dir:" + root + "/" + folder)
+            folder = (folder as NSString).deletingLastPathComponent
+        }
+        candidates.append(repo)
+        for candidate in candidates {
+            let owners = try strings("SELECT src FROM edges WHERE dst = ?1 AND kind = 'owns' ORDER BY src", [candidate])
+            if !owners.isEmpty { return owners.map { ($0, path.isEmpty ? "(repository)" : path) } }
+        }
+        return try pairs("""
+            SELECT DISTINCT e.src, n.path FROM edges e JOIN nodes n ON n.id = e.dst
+            WHERE e.kind = 'owns' AND n.repo = ?1 AND (?2 = '' OR substr(n.path, 1, length(?2) + 1) = ?2 || '/')
+            ORDER BY e.src, n.path
+            """, [repo, path]).map { ($0.src, $0.dst) }
+    }
+
+    /// Packages a repository's manifests depend on: the manifest's folder ("" for the root), the
+    /// package and the version that repository declares.
+    func dependencies(repo: String) throws -> [(folder: String, package: String, version: String)] {
+        let statement = try prepare("""
+            SELECT CASE WHEN s.kind = 'repo' THEN '' ELSE s.path END, e.dst,
+                   COALESCE((SELECT r.names FROM refs r WHERE r.repo = ?1 AND r.src = e.dst AND r.kind = ?2 LIMIT 1), '')
+            FROM edges e JOIN nodes s ON s.id = e.src
+            WHERE e.kind = 'depends_on' AND e.dst >= 'pkg:' AND e.dst < 'pkg;' AND (s.id = ?1 OR s.repo = ?1)
+            """)
+        defer { sqlite3_finalize(statement) }
+        bind(statement, [repo, DependencyExtractor.refKind])
+        var result: [(String, String, String)] = []
+        while sqlite3_step(statement) == SQLITE_ROW { result.append((text(statement, 0), text(statement, 1), text(statement, 2))) }
+        return result
     }
 
     /// Where refs from shared nodes (a route's handler, an operation's id) were written: file path and line.
