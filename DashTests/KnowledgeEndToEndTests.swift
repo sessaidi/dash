@@ -131,4 +131,30 @@ struct KnowledgeEndToEndTests {
         #expect(client["depends_on"] == [["package": "javascript:axios", "version": "^1.7.0"]])
         #expect(client["owners"] == nil && client["workloads"] == nil && client["ci"] == nil)
     }
+
+    @Test func endpointsAndOwnersAnswerFromTheGraph() async throws {
+        let (knowledge, shop, storefront) = try await Self.indexed()
+        defer { for root in [shop, storefront] { try? FileManager.default.removeItem(at: root) } }
+        let endpoints = try tool("knowledge_endpoints", knowledge)
+        let invoice: JSONValue = ["endpoint": "GET /invoices/{}", "handler": "GetInvoice", "at": "billing-api/main.go:19",
+                                  "repository": .string(shop.lastPathComponent), "services": ["billing-api"], "callers": 1,
+                                  "called_from": [.string("loadInvoice at \(storefront.lastPathComponent)/src/billing.ts:3")], "tests": 1]
+        #expect(try await endpoints.run(["path": "/invoices/:id"]) == ["endpoints": [invoice]])
+        #expect(try await endpoints.run(["service": "billing-api", "method": "post"])["endpoints"]?.array?.map { $0["endpoint"] } == ["POST /invoices"])
+        #expect(try await endpoints.run(["repository": .string(shop.lastPathComponent)])["endpoints"]?.array?.count == 2)
+        #expect(try await endpoints.run(["path": "/nothing"])["endpoints"] == [])
+
+        let owners = try tool("knowledge_owners", knowledge)
+        let shopName = shop.lastPathComponent
+        #expect(try await owners.run(["path": .string(shopName + "/billing-api/main.go")]) == ["repository": .string(shopName), "path": "billing-api/main.go",
+                                                                                              "owners": [["owner": "@acme/billing", "owns": ["billing-api"]]]])
+        let folder = try await owners.run(["path": .string(shop.path + "/billing-api")])
+        #expect(folder["owners"] == [["owner": "@acme/billing"]])
+        #expect(try await owners.run(["path": .string(shopName)])["owners"]?.array?.compactMap { $0["owner"]?.string } == ["@acme/billing", "@acme/platform"])
+        #expect(try await owners.run(["owner": "@acme/billing"]) == ["owner": "@acme/billing", "owns": [.string(shopName + "/billing-api")]])
+        await #expect(throws: ToolError.self) { try await owners.run(["owner": "@acme/nobody"]) }
+
+        let context = try await tool("knowledge_context", knowledge).run(["question": "pdf-invoices"])
+        #expect(context["matches"]?.array?.contains { $0["id"] == "flag:billing.pdf-invoices" } == true)
+    }
 }
