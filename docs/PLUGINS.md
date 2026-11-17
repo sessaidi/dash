@@ -167,25 +167,54 @@ struct BoardPreview: View {
 
 **Tools** (`DashiiTool`): a name, description, JSON-schema properties, `requiresApproval` for
 anything that changes things, `writesRemotely` for anything that writes to another service
-(Dash never gives those to Dashii or agents).
+(Dash never gives those to Dashii or agents). Tools Dashii and agents get read Dash's database
+only. A tool that calls a service and that other extensions run by name is declared
+`callsService: true` (DashKit 2.4): Dash keeps it away from Dashii, agents and hooks.
 
-**Fetchers** (`DataFetcher`, DashKit 2.3): Dashii and agents never call a service; they read
-Dash's database (datasets, the knowledge graph). An integration declares what it can fetch into
-the database on request; Dashii asks with `data_fetch`, then reads what was stored:
+**Fetchers** (`DataFetcher`, DashKit 2.3): Dashii and agents never call a service. They read
+Dash's database (reader tools, datasets, the knowledge graph). When data is missing or stale,
+they ask the integration that owns it to fetch it with `data_fetch`, then read it again. A
+fetcher calls the API, stores the result (sanitized) and returns a short receipt, never the raw
+payload:
 
 ```swift
 var fetchers: [DataFetcher] {
-    [DataFetcher(name: "confluence.pages", summary: "Pages mentioning words, stored as docs in the knowledge graph.",
-                 properties: ["query": JSONSchema.string("Words to look for.")], required: ["query"]) { input in
-        let stored = try await self.syncPages(matching: input["query"]?.string ?? "")
-        return ["stored": .number(Double(stored)), "read_with": "knowledge search, kind doc"]
+    [DataFetcher(name: "acme.ticket", summary: "One ticket with its comments. Read it with acme_ticket.",
+                 properties: ["key": JSONSchema.string("KAN-123")], required: ["key"]) { [weak self] input in
+        guard let self, let host else { return nil }
+        let ticket = Sanitizer.clean(try await api.ticket(input["key"]?.string ?? "")).capped()
+        let previous = host.synced.record(kind: "acme.ticket", scope: scope, key: input.queryKey)
+        host.synced.upsert([SyncedRecord(kind: "acme.ticket", scope: scope, key: input.queryKey,
+                                         value: ["input": input, "data": ticket], source: id)])
+        let same = previous?.value["data"] == ticket
+        return ["stored": same ? 0 : 1, "unchanged": same ? 1 : 0, "keys": ["acme.ticket/\(input.queryKey)"],
+                "synced_at": .string(Date.now.formatted(.iso8601)), "read_with": "acme_ticket {\"key\":\"KAN-123\"}"]
     }]
 }
 ```
 
-Store what you fetch (SwiftData models, `knowledge` entities, datasets) and return a short
-receipt: what landed and where to read it. New tools read the database; anything that needs
-fresh data goes through a fetcher.
+Conventions (the GitHub plugin is the reference: `plugins/GitHub/Sources/Fetch`):
+
+- **Names**: `<integration>.<what>` (`github.pull`, `github.checks`, `datadog.logs`). The input
+  mirrors the old live tool's input.
+- **Receipt**: `{stored, unchanged, keys, synced_at, read_with}`. `unchanged` counts records
+  that were fetched again with the same data (their `synced_at` still moves). `read_with` is the
+  reader and input to use.
+- **Readers**: a Dashii tool for each fetcher, usually with the old tool's name and input. It
+  returns the stored data with its `Freshness` (`json` adds `synced_at`, `stale` and
+  `refresh`, the `data_fetch` input that refreshes it). When nothing is stored it returns
+  `notFetched(fetcher, input:)`: `{"rows": [], "fetched": false, "hint", "refresh"}`. For
+  records of one kind, `host.synced.rows(kind:scope:maxAge:refresh:)` pairs each value with its
+  freshness. `maxAge` is the integration's freshness window (a setting).
+- **Keys and size**: normalize the input (trim, drop empty values) and key the record by
+  `input.queryKey`, the hash of its sorted JSON. Include the site, account or cluster in the
+  scope. Cap each record with `capped()` (200 KB by default). An oversized list keeps its first
+  items and comes back as `{"items", "truncated": true, "total"}`.
+- **Expiry**: query-shaped answers (search, logs, metrics, filtered lists) don't stay forever.
+  Drop old ones when the kind is stored again (GitHub keeps them a day).
+- **Limits and logging**: Dash runs each fetcher at most a few times a minute per fetcher
+  (Settings › Dashii, default 6). Every fetch appears in the Debug window's Activity pane as
+  `data.fetched`, `data.fetch_failed` or `data.fetch_limited`; its requests appear in Network.
 
 **Functions** (`DashiiFunction<Input, Output>`): one job Dashii does for you, typed. The
 instructions and output schema live in one place; the input is encoded for you (JSON, or
@@ -269,6 +298,19 @@ struct WeatherTests {
   responses per host.
 - `WidgetSnapshotLoader(provider:)`: run a provider without a view (`load`, `snapshot`, `isStale`).
 - `knowledgeIssues(entities)`: what's wrong with what you hand the knowledge graph.
+- `NetworkSentinel` (DashKit 2.4): proves that your Dashii tools read and don't call. Every
+  request made while it records is blocked and reported. It sees requests through `HTTP.send`
+  and `IntegrationConnection.send` (custom transports included) and through `URLSession.shared`.
+  Give every plugin one test over all its tools, once with an empty store and once with data
+  fetched. Fetchers and `callsService` tools are skipped:
+
+  ```swift
+  #expect(await NetworkSentinel.requests(running: integration.tools, values: ["repo": "acme/billing-api"]) == [])
+  ```
+
+  `requests(running:values:inputs:)` runs each tool with a minimal input built from its schema.
+  `values` fills properties by name, and `inputs` replaces a tool's whole input. It returns
+  `"tool: GET host/path"` for each request. `recording { … }` does the same for any code.
 
 Never call real services, spawn processes or push in tests.
 
@@ -297,6 +339,11 @@ them need `2.1.0`.
 DashKit 2.2 added `host.markdown(_:)`: Markdown drawn like a Dash note (headings, lists, tables,
 code, callouts, Mermaid diagrams), with GitHub's HTML comments left out. Plugins that call it
 need `2.2.0`.
+
+DashKit 2.4 added fetch-then-read: `Freshness`, `SyncedStore.rows(kind:scope:maxAge:refresh:)`,
+`notFetched(_:input:)`, `JSONValue.queryKey` and `capped(toBytes:)`, `DashiiTool.callsService`
+(with its own initializer) and `isForDashii`, and `NetworkSentinel` in DashKitTesting. Plugins
+that use them need `2.4.0`.
 
 A new **major** version may break the API. Dash refuses a plugin built for another major (the
 user is told to update it from the Marketplace) and one needing a newer minor than it has. Set
