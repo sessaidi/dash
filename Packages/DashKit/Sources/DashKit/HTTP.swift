@@ -21,9 +21,17 @@ public struct HTTPError: LocalizedError {
     }
 }
 
+/// Sees every request before it leaves `HTTP.send` or `IntegrationConnection.send` (custom
+/// transports included). Tests set it for a task (`NetworkSentinel`); throwing blocks the request.
+@_spi(Testing)
+public enum NetworkObserver {
+    @TaskLocal public static var observe: (@Sendable (URLRequest) throws -> Void)?
+}
+
 public enum HTTP {
     /// Sends a request and throws `HTTPError` for non-2xx responses (304 is returned as-is).
     public static func send(_ request: URLRequest, service: String, session: URLSession = .shared) async throws -> (Data, HTTPURLResponse) {
+        try NetworkObserver.observe?(request)
         let started = Date()
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HTTPError(service: service, status: 0, message: "No HTTP response") }
