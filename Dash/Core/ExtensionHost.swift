@@ -197,9 +197,9 @@ final class ExtensionHost: ExtensionContext {
     }
 
     /// Tools from enabled extensions whose integrations are all connected, minus the ones that
-    /// write remotely: Claude only ever reads from remote systems.
+    /// write remotely or call a service: Claude reads Dash's database and asks for fetches.
     var availableTools: [DashiiTool] {
-        extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools).filter { !$0.writesRemotely }
+        extensions.filter { isEnabled($0) && unmetRequirements(of: $0).isEmpty }.flatMap(\.tools).filter(\.isForDashii)
     }
 
     /// Plugins arrive turned off: the user turns each one on (Settings › Plugins) before it runs,

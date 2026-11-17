@@ -34,4 +34,15 @@ struct FetcherTests {
         host.disabled = ["wiki"]
         #expect(host.fetchers.isEmpty)
     }
+
+    @Test func toolsThatCallTheServiceAreNotForDashii() async throws {
+        let read = DashiiTool(name: "wiki_page", description: "Reads the stored page.") { _ in "stored" }
+        let live = DashiiTool(name: "wiki_api", description: "Calls the wiki.", properties: ["path": JSONSchema.string("Path.")], required: ["path"],
+                              callsService: true) { _ in "live" }
+        let post = DashiiTool(name: "wiki_post", description: "Posts.", writesRemotely: true) { _ in "posted" }
+        #expect(read.isForDashii && !read.callsService)
+        #expect(!live.isForDashii && live.callsService && !live.requiresApproval && live.inputSchema["required"] == ["path"])
+        #expect(!post.isForDashii && !post.callsService && post.requiresApproval)
+        #expect(try await live.run([:]) == "live")
+    }
 }

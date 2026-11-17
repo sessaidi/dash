@@ -17,7 +17,8 @@ private final class WatchExtension: DashExtension {
     var tools: [DashiiTool] {
         [DashiiTool(name: "watch_status", description: "Status.") { _ in "ok" },
          DashiiTool(name: "watch_restart", description: "Restart.", requiresApproval: true) { _ in "done" },
-         DashiiTool(name: "watch_comment", description: "Comment remotely.", writesRemotely: true) { _ in "posted" }]
+         DashiiTool(name: "watch_comment", description: "Comment remotely.", writesRemotely: true) { _ in "posted" },
+         DashiiTool(name: "watch_api", description: "Calls the service, for other extensions.", callsService: true) { _ in "live" }]
     }
     var agents: [AgentDefinition] {
         [AgentDefinition(id: "sre", name: "Watch SRE", summary: "Watches.", role: "SRE", specialities: ["Kubernetes"],
@@ -59,7 +60,10 @@ struct AgentsTests {
         let acting = AgentDefinition(id: "fix", name: "Fixer", summary: "", instructions: "x", integrations: ["watch"], access: .actWithApproval)
         #expect(AgentHub.tools(for: acting, in: host).map(\.name) == ["dash", "dashql", "dashql_schema", "skills_list", "skill_use", "functions_list", "function_run", "watch_status", "watch_restart"])
         #expect(!host.availableTools.contains { $0.name == "watch_comment" })
-        #expect(watch.tools.last?.requiresApproval == true)
+        // Tools that call the service stay for other extensions, never for Claude.
+        #expect(!host.availableTools.contains { $0.name == "watch_api" })
+        #expect(watch.tools.first { $0.name == "watch_comment" }?.requiresApproval == true)
+        #expect(watch.tools.first { $0.name == "watch_api" }.map { $0.callsService && !$0.requiresApproval && !$0.isForDashii } == true)
 
         let skipped = try await hub.run("watch.sre", reason: "manual")
         #expect(skipped.status == .skipped && skipped.summary == "All healthy.")
