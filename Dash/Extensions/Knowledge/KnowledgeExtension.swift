@@ -927,7 +927,7 @@ final class KnowledgeExtension: DashExtension {
     }
 
     /// The relation read from the other end: "calls" seen from the callee is "called_by".
-    static func inverse(_ kind: String) -> String {
+    nonisolated static func inverse(_ kind: String) -> String {
         switch kind {
         case "contains": "contained_in"
         case "defines": "defined_in"
@@ -938,6 +938,28 @@ final class KnowledgeExtension: DashExtension {
         case "mentions": "mentioned_by"
         case "about": "discussed_in"
         case "changes_with": "changes_with"
+        case "defined_in": "defines"
+        case "documented_in": "documents"
+        case "documents": "documented_by"
+        case "handled_by": "handles"
+        case "exposes": "exposed_by"
+        case "runs": "run_by"
+        case "deploys": "deployed_by"
+        case "calls_endpoint", "calls_host", "calls_rpc": "called_by"
+        case "implements": "implemented_by"
+        case "inherits": "inherited_by"
+        case "publishes": "published_by"
+        case "consumes": "consumed_by"
+        case "reads_table", "reads_config", "reads_env": "read_by"
+        case "writes_table": "written_by"
+        case "sets_config", "sets_env": "set_by"
+        case "migrates": "migrated_by"
+        case "checks_flag": "checked_by"
+        case "uses_image": "used_by"
+        case "depends_on": "depended_on_by"
+        case "owns": "owned_by"
+        case "tests": "tested_by"
+        case "links_to": "linked_from"
         default: kind + "_of"
         }
     }

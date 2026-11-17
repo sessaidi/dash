@@ -182,13 +182,18 @@ private struct KnowledgeDetail: View {
     let onOpen: (KnowledgeNode) -> Void
     let onBack: () -> Void
     @State private var neighbors: [KnowledgeNeighbor] = []
+    @State private var readme: (doc: KnowledgeNode, paragraph: String)?
     @State private var learning = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if !node.summary.isEmpty { SummaryCard(text: node.summary) }
+                if !node.summary.isEmpty {
+                    SummaryCard(text: node.summary)
+                } else if let readme {
+                    ReadmeCard(doc: readme.doc, paragraph: readme.paragraph, onOpen: onOpen)
+                }
                 if !node.signature.isEmpty {
                     Text(node.signature)
                         .font(node.kind == "symbol" ? .callout.monospaced() : .callout)
@@ -198,16 +203,27 @@ private struct KnowledgeDetail: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 10))
                 }
-                ForEach(groups, id: \.relation) { group in
-                    RelationSection(title: group.relation.replacingOccurrences(of: "_", with: " ").capitalized,
-                                    nodes: group.nodes, onOpen: onOpen)
+                ForEach(sections, id: \.title) { section in
+                    if section.groups.count == 1, let group = section.groups.first {
+                        RelationSection(title: group.title, nodes: group.nodes, onOpen: onOpen)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(section.title).font(.title3.weight(.semibold))
+                            ForEach(section.groups, id: \.relation) { group in
+                                RelationSection(title: group.title, nodes: group.nodes, onOpen: onOpen)
+                            }
+                        }
+                    }
                 }
             }
             .padding(20)
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .task(id: knowledge.revision) { neighbors = (try? await knowledge.store?.neighbors(node.id, limit: 120)) ?? [] }
+        .task(id: knowledge.revision) {
+            neighbors = (try? await knowledge.store?.neighbors(node.id, limit: 120)) ?? []
+            if node.summary.isEmpty { readme = await knowledge.readme(of: node) }
+        }
     }
 
     private var header: some View {
@@ -247,10 +263,17 @@ private struct KnowledgeDetail: View {
         }
     }
 
-    private var groups: [(relation: String, nodes: [KnowledgeNode])] {
-        Dictionary(grouping: neighbors) { $0.incoming ? KnowledgeExtension.inverse($0.edge.kind) : $0.edge.kind }
-            .map { ($0.key, $0.value.map(\.node)) }
-            .sorted { $0.relation < $1.relation }
+    /// The relation groups by section; each relation outside the sections is its own.
+    private var sections: [(title: String, groups: [KnowledgeRelations.Group])] {
+        var result: [(title: String, groups: [KnowledgeRelations.Group])] = []
+        for group in KnowledgeRelations.groups(neighbors) {
+            if !group.section.isEmpty, result.last?.title == group.section {
+                result[result.count - 1].groups.append(group)
+            } else {
+                result.append((group.section.isEmpty ? group.relation : group.section, [group]))
+            }
+        }
+        return result
     }
 
     @ViewBuilder private var actions: some View {
@@ -464,6 +487,27 @@ private struct SummaryCard: View {
             if line.hasSuffix(":"), line.count < 60 { return .heading(String(line.dropLast())) }
             return .paragraph(line)
         }
+    }
+}
+
+/// A README's opening paragraph, for a directory or repository Dashii hasn't summarised.
+private struct ReadmeCard: View {
+    let doc: KnowledgeNode
+    let paragraph: String
+    let onOpen: (KnowledgeNode) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("From \(doc.path)", systemImage: "doc.richtext").font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+                Button("Open") { onOpen(doc) }.buttonStyle(.borderless).font(.caption)
+            }
+            Text(LocalizedStringKey(paragraph)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 12))
     }
 }
 
