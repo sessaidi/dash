@@ -143,6 +143,7 @@ public struct IntegrationConnection: Sendable {
 
     /// Authorizes and sends a request; non-2xx responses (except 304) throw `HTTPError`.
     public func send(_ request: URLRequest, service: String) async throws -> (Data, HTTPURLResponse) {
+        try NetworkObserver.observe?(request)
         let authorized = try await authorize(request)
         if let transport {
             let (data, response) = try await transport(authorized)
