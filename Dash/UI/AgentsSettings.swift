@@ -200,7 +200,7 @@ private struct AgentEditor: View {
                                          set: { on in if on { agent.integrations.append(item.id) } else { agent.integrations.removeAll { $0 == item.id } } })) {
                         VStack(alignment: .leading) {
                             Text(item.name)
-                            Text(item.tools.filter { !$0.writesRemotely && (agent.canAct || !$0.requiresApproval) }.map(\.name).joined(separator: ", "))
+                            Text(item.tools.filter { $0.isForDashii && (agent.canAct || !$0.requiresApproval) }.map(\.name).joined(separator: ", "))
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }

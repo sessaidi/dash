@@ -12,6 +12,10 @@ public struct DashiiTool {
     /// Tools that change a remote system (a forge, a tracker, a cluster). Dash never gives them
     /// to Dashii: remotely it may only read. They also ask the user first.
     public var writesRemotely: Bool
+    /// Tools that call a service (an API, a socket, a CLI that reaches one). Other extensions may
+    /// run them; Dash never gives them to Dashii, agents or hooks, which read Dash's database and
+    /// ask integrations to fetch (`DataFetcher`). DashKit 2.4.
+    public var callsService: Bool = false
     public let run: @MainActor (JSONValue) async throws -> JSONValue
 
     public init(
@@ -25,6 +29,20 @@ public struct DashiiTool {
         self.writesRemotely = writesRemotely
         self.run = run
     }
+
+    /// A tool that calls its service: for other extensions only (see `callsService`).
+    public init(
+        name: String, description: String, properties: [String: JSONValue] = [:], required: [String] = [],
+        requiresApproval: Bool = false, writesRemotely: Bool = false, callsService: Bool,
+        run: @escaping @MainActor (JSONValue) async throws -> JSONValue
+    ) {
+        self.init(name: name, description: description, properties: properties, required: required,
+                  requiresApproval: requiresApproval, writesRemotely: writesRemotely, run: run)
+        self.callsService = callsService
+    }
+
+    /// Whether Dash may give it to Dashii and agents: it neither writes remotely nor calls a service.
+    public var isForDashii: Bool { !writesRemotely && !callsService }
 
     /// The Messages API tool definition. Streamed requests use eager input streaming; inputs are validated on decode.
     public var definition: JSONValue {

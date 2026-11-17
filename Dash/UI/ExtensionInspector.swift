@@ -28,6 +28,7 @@ struct ExtensionInspector: View {
                         ForEach(tools, id: \.name) { tool in
                             row(tool.name, detail: tool.description) {
                                 if tool.writesRemotely { Badge("writes remotely", tone: .danger) }
+                                else if tool.callsService { Badge("extensions only", tone: .neutral) }
                                 else if tool.requiresApproval { Badge("asks first", tone: .warning) }
                                 else { Badge("read", tone: .neutral) }
                             }
