@@ -183,6 +183,17 @@ struct KnowledgeEndToEndTests {
         #expect(readme.paragraph == "Issues and serves invoices. Routes live in `main.go`; `GET /invoices/{id}` returns one.")
     }
 
+    @Test func projectCardsCountWhatEachRepositoryHas() async throws {
+        let (knowledge, shop, storefront) = try await Self.indexed()
+        defer { for root in [shop, storefront] { try? FileManager.default.removeItem(at: root) } }
+        let store = try #require(knowledge.store)
+        #expect(KnowledgeRelations.statsLine(try await store.stats(repo: "repo:" + shop.path))
+                == "1 service · 2 endpoints · 1 topic · 1 table · 1 workload · 2 owners")
+        #expect(KnowledgeRelations.statsLine(try await store.stats(repo: "repo:" + storefront.path)) == "")
+        let repo = try #require(try await store.node("repo:" + shop.path))
+        #expect(await knowledge.readme(of: repo)?.paragraph == "The shop's services.")
+    }
+
     @Test func aReadmeOpensWithItsFirstParagraphOfProse() {
         #expect(KnowledgeRelations.firstParagraph("""
             # Billing API

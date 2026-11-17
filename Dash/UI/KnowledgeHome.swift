@@ -12,8 +12,13 @@ struct KnowledgeHome: View {
     struct RepoOverview: Identifiable {
         let node: KnowledgeNode
         let concepts: [KnowledgeNode]
-        /// Confluence pages about it.
+        /// Its own Markdown, AsciiDoc and reST documents.
         let docs: [KnowledgeNode]
+        /// Confluence pages about it.
+        let pages: [KnowledgeNode]
+        /// The README's opening paragraph, shown while Dashii hasn't summarised it.
+        let readme: String?
+        let stats: String
         var id: String { node.id }
         var title: String { node.qualified.isEmpty ? node.name : node.qualified }
     }
@@ -54,7 +59,10 @@ struct KnowledgeHome: View {
             guard let node = try? await store.node("repo:" + path) else { continue }
             let concepts = (try? await store.nodes(kind: "concept", repo: node.id, limit: 8)) ?? []
             let docs = ((try? await store.neighbors(node.id, kinds: ["documents"], limit: 50)) ?? []).filter(\.incoming).map(\.node)
-            result.append(RepoOverview(node: node, concepts: concepts, docs: docs))
+            let readme = node.summary.isEmpty ? await knowledge.readme(of: node)?.paragraph : nil
+            let stats = KnowledgeRelations.statsLine((try? await store.stats(repo: node.id)) ?? [])
+            result.append(RepoOverview(node: node, concepts: concepts, docs: docs.filter { $0.id.hasPrefix("doc:repo:") },
+                                       pages: docs.filter { !$0.id.hasPrefix("doc:repo:") }, readme: readme, stats: stats))
         }
         repos = result
     }
@@ -75,22 +83,22 @@ private struct RepoCard: View {
             }
             .buttonStyle(.plain)
             .help("Open \(repo.title)")
-            if repo.node.summary.isEmpty {
-                Text("Not summarised yet: Study More on the left.").font(.callout).foregroundStyle(.secondary)
-            } else {
+            if !repo.stats.isEmpty {
+                Text(repo.stats).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if !repo.node.summary.isEmpty {
                 Text(Self.firstParagraph(repo.node.summary)).font(.callout).lineLimit(5).foregroundStyle(.primary)
+            } else if let readme = repo.readme {
+                Text(LocalizedStringKey(readme)).font(.callout).lineLimit(5).foregroundStyle(.primary)
+                    .help("From its README; Study More on the left for Dashii's own summary.")
+            } else {
+                Text("Not summarised yet: Study More on the left.").font(.callout).foregroundStyle(.secondary)
             }
             if !repo.concepts.isEmpty {
                 FlowChips(items: repo.concepts, open: open)
             }
-            if !repo.docs.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label("\(repo.docs.count) Confluence page\(repo.docs.count == 1 ? "" : "s")", systemImage: "doc.text").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(repo.docs.prefix(4)) { doc in
-                        Button(doc.name) { open(doc) }.buttonStyle(.link).font(.caption).lineLimit(1)
-                    }
-                }
-            }
+            DocList(title: "\(repo.docs.count) doc\(repo.docs.count == 1 ? "" : "s") in the repository", systemImage: "doc.richtext", docs: repo.docs, open: open)
+            DocList(title: "\(repo.pages.count) Confluence page\(repo.pages.count == 1 ? "" : "s")", systemImage: "doc.text", docs: repo.pages, open: open)
             Spacer(minLength: 0)
             HStack {
                 Button("Explain Its Architecture", systemImage: "sparkles") {
@@ -117,6 +125,25 @@ private struct RepoCard: View {
     static func firstParagraph(_ summary: String) -> String {
         summary.components(separatedBy: "\n\n").first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? summary
+    }
+}
+
+/// A few documents under a count, each opening its node; nothing when there are none.
+private struct DocList: View {
+    let title: String
+    let systemImage: String
+    let docs: [KnowledgeNode]
+    let open: (KnowledgeNode) -> Void
+
+    var body: some View {
+        if !docs.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(title, systemImage: systemImage).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(docs.prefix(4)) { doc in
+                    Button(doc.name) { open(doc) }.buttonStyle(.link).font(.caption).lineLimit(1)
+                }
+            }
+        }
     }
 }
 
