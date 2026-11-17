@@ -66,6 +66,13 @@ struct FetchToolsTests {
         #expect(limiter.wait(for: "a", limit: 2, now: start.addingTimeInterval(61)) == nil)
     }
 
+    @Test func dashiiIsToldToReadFirstAndCiteSyncedAt() {
+        #expect(ChatSession.systemPrompt.contains(ChatSession.dataRule))
+        for phrase in ["Read first", "\"stale\": true", "data_fetch", "\"refresh\"", "synced_at", "never a service"] {
+            #expect(ChatSession.dataRule.contains(phrase), "\(phrase)")
+        }
+    }
+
     @Test func receiptSummaries() {
         #expect(FetchTools.summary(of: ["stored": 2, "unchanged": 1, "keys": []]) == "stored 2, unchanged 1")
         #expect(FetchTools.summary(of: ["stored": 3]) == "stored 3")

@@ -208,6 +208,8 @@ final class AgentHub {
 
             You run unattended as a Dash agent ("\(entry.agent.name)"). Use your tools to check, then answer with the report: \
             a short summary and one finding per real problem (info only for things worth knowing). No findings when all is well.
+
+            \(ChatSession.dataRule)
             """ + (host.settings.compactResults ? "\n\n" + CompactFormat.legend : "") + (rules.map { "\n\n" + $0 } ?? ""))
         options.model = settings.model(entry.agent.task.id).rawValue
         options.effort = settings.effort(entry.agent.task.id)?.rawValue
