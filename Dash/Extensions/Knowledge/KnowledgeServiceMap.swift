@@ -399,20 +399,21 @@ extension KnowledgeStore {
 
     /// CODEOWNERS owners of a path ("" is the repository) as GitHub resolves them: the nearest
     /// `owns` edge from the file or folder up to the repository. A folder whose files have
-    /// different owners has none of its own: then every owner of something inside it.
+    /// different owners has none of its own: then every owner of something inside it. The target
+    /// is where the rule applies (the folder, file or "(repository)").
     func codeOwners(repo: String, path: String) throws -> [(owner: String, target: String)] {
         let root = String(repo.dropFirst(5))
-        var candidates: [String] = []
-        if !path.isEmpty { candidates += ["file:" + root + "/" + path, "dir:" + root + "/" + path] }
+        var candidates: [(id: String, label: String)] = []
+        if !path.isEmpty { candidates += [("file:" + root + "/" + path, path), ("dir:" + root + "/" + path, path)] }
         var folder = (path as NSString).deletingLastPathComponent
         while !folder.isEmpty {
-            candidates.append("dir:" + root + "/" + folder)
+            candidates.append(("dir:" + root + "/" + folder, folder))
             folder = (folder as NSString).deletingLastPathComponent
         }
-        candidates.append(repo)
+        candidates.append((repo, "(repository)"))
         for candidate in candidates {
-            let owners = try strings("SELECT src FROM edges WHERE dst = ?1 AND kind = 'owns' ORDER BY src", [candidate])
-            if !owners.isEmpty { return owners.map { ($0, path.isEmpty ? "(repository)" : path) } }
+            let owners = try strings("SELECT src FROM edges WHERE dst = ?1 AND kind = 'owns' ORDER BY src", [candidate.id])
+            if !owners.isEmpty { return owners.map { ($0, candidate.label) } }
         }
         return try pairs("""
             SELECT DISTINCT e.src, n.path FROM edges e JOIN nodes n ON n.id = e.dst

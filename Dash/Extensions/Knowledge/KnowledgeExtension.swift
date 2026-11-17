@@ -616,7 +616,7 @@ final class KnowledgeExtension: DashExtension {
     private struct RecallInput: Decodable { let query: String? }
 
     var tools: [DashiiTool] {
-        memoryTools + analysisTools + [
+        memoryTools + analysisTools + operationsTools + [
             serviceMapTool,
             DashiiTool(
                 name: "knowledge_search",
@@ -897,7 +897,7 @@ final class KnowledgeExtension: DashExtension {
         // Studied things first (concepts, directories with notes), then code.
         var seen = Set<String>()
         var picked: [KnowledgeNode] = []
-        for kinds in [["concept"], ["directory", "repo"], ["doc"], ["service", "endpoint", "host", "rpc_service", "graphql_field", "topic", "table"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
+        for kinds in [["concept"], ["directory", "repo"], ["doc"], ["service", "endpoint", "host", "rpc_service", "rpc", "graphql_field", "topic", "table", "workload", "flag", "config"], ["file", "symbol"], ["ticket", "pr", "note", "meeting"]] {
             for node in try await store.search(question, kinds: kinds, limit: limit) where seen.insert(node.id).inserted {
                 picked.append(node)
             }
