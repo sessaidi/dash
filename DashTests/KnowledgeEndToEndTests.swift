@@ -167,6 +167,40 @@ struct KnowledgeEndToEndTests {
         #expect(context["matches"]?.array?.contains { $0["id"] == "flag:billing.pdf-invoices" } == true)
     }
 
+    @Test func theDetailViewGroupsRelationsAndShowsTheReadme() async throws {
+        let (knowledge, shop, storefront) = try await Self.indexed()
+        defer { for root in [shop, storefront] { try? FileManager.default.removeItem(at: root) } }
+        let store = try #require(knowledge.store)
+        let groups = KnowledgeRelations.groups(try await store.neighbors("endpoint:GET /invoices/{}", limit: 120))
+        #expect(groups.map { "\($0.section)|\($0.relation)" } == ["Exposes|exposed_by", "Exposes|handled_by", "Called by|called_by",
+                                                                  "Tests|tested_by", "|defined_in", "|discussed_in"])
+        #expect(groups.first { $0.relation == "called_by" }?.nodes.map(\.qualified) == ["loadInvoice"])
+        #expect(groups.first { $0.relation == "tested_by" }?.nodes.map(\.qualified) == ["TestGetInvoice"])
+
+        let folder = try #require(try await store.node("dir:" + shop.path + "/billing-api"))
+        let readme = try #require(await knowledge.readme(of: folder))
+        #expect(readme.doc.path == "billing-api/README.md")
+        #expect(readme.paragraph == "Issues and serves invoices. Routes live in `main.go`; `GET /invoices/{id}` returns one.")
+    }
+
+    @Test func aReadmeOpensWithItsFirstParagraphOfProse() {
+        #expect(KnowledgeRelations.firstParagraph("""
+            # Billing API
+
+            [![CI](https://example.com/badge.svg)](https://example.com)
+            ![diagram](docs/diagram.png)
+
+            Issues invoices
+            and serves them.
+
+            ## Running
+            Second paragraph.
+            """) == "Issues invoices and serves them.")
+        #expect(KnowledgeRelations.firstParagraph("Billing\n=======\n\n.. note:: generated\n\nThe billing service.\n") == "The billing service.")
+        #expect(KnowledgeRelations.firstParagraph("# Tools\n\n```sh\nmake run\n```\n\n- a list\n") == "")
+        #expect(KnowledgeRelations.firstParagraph(String(repeating: "word ", count: 200)).count == 600)
+    }
+
     @Test func dashQLReadsEndpointsTopicsTablesFlagsAndOwners() async throws {
         let (knowledge, shop, storefront) = try await Self.indexed()
         defer { for root in [shop, storefront] { try? FileManager.default.removeItem(at: root) } }
