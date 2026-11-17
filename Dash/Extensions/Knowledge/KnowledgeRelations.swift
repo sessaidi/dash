@@ -3,7 +3,7 @@ import Foundation
 
 /// How the Knowledge page presents a node: its relations grouped into sections (what it exposes,
 /// who calls it, what it calls, the data it reads and writes, how it runs, who owns it, its docs,
-/// its tests, then the rest) and a README's opening paragraph.
+/// its tests, then the rest), a README's opening paragraph, and a repository's counts.
 enum KnowledgeRelations {
     /// Sections in display order, each with its relations (seen from the node) in order.
     static let sections: [(title: String, relations: [String])] = [
@@ -64,6 +64,11 @@ enum KnowledgeRelations {
         let joined = paragraph.joined(separator: " ")
         return joined.count > 600 ? String(joined.prefix(599)) + "…" : joined
     }
+
+    /// "1 service · 2 endpoints · 1 topic".
+    static func statsLine(_ stats: [(kind: String, count: Int)]) -> String {
+        stats.map { "\($0.count) \($0.kind)\($0.count == 1 ? "" : "s")" }.joined(separator: " · ")
+    }
 }
 
 extension KnowledgeExtension {
@@ -74,5 +79,37 @@ extension KnowledgeExtension {
         guard let doc = docs.first(where: { ($0.path as NSString).lastPathComponent.uppercased().hasPrefix("README") }) else { return nil }
         let paragraph = KnowledgeRelations.firstParagraph(doc.signature)
         return paragraph.isEmpty ? nil : (doc, paragraph)
+    }
+}
+
+extension KnowledgeStore {
+    /// How many services, endpoints, topics, tables, workloads and code owners a repository has
+    /// (the kinds with none left out).
+    func stats(repo: String) throws -> [(kind: String, count: Int)] {
+        let queries: [(String, String)] = [
+            ("service", "SELECT count(*) FROM nodes WHERE kind = 'service' AND repo = ?1"),
+            ("endpoint", """
+                SELECT count(DISTINCT e.src) FROM edges e JOIN nodes f ON f.id = e.dst
+                WHERE e.kind = 'defined_in' AND e.src >= 'endpoint:' AND e.src < 'endpoint;' AND f.repo = ?1
+                """),
+            ("topic", """
+                SELECT count(DISTINCT e.dst) FROM edges e JOIN nodes s ON s.id = e.src
+                WHERE e.kind IN ('publishes', 'consumes') AND e.dst >= 'topic:' AND e.dst < 'topic;' AND s.repo = ?1
+                """),
+            ("table", """
+                SELECT count(*) FROM (
+                  SELECT e.dst FROM edges e JOIN nodes s ON s.id = e.src WHERE e.kind IN ('migrates', 'reads_table', 'writes_table') AND s.repo = ?1
+                  UNION SELECT e.src FROM edges e JOIN nodes f ON f.id = e.dst WHERE e.kind = 'defined_in' AND e.src >= 'table:' AND e.src < 'table;' AND f.repo = ?1)
+                """),
+            ("workload", "SELECT count(*) FROM nodes WHERE kind = 'workload' AND repo = ?1"),
+            ("owner", """
+                SELECT count(DISTINCT e.src) FROM edges e JOIN nodes n ON n.id = e.dst
+                WHERE e.kind = 'owns' AND e.src >= 'owner:' AND e.src < 'owner;' AND (n.repo = ?1 OR n.id = ?1)
+                """),
+        ]
+        return try queries.compactMap { kind, sql in
+            let count = Int(try strings("SELECT CAST((\(sql)) AS TEXT)", [repo]).first ?? "") ?? 0
+            return count > 0 ? (kind, count) : nil
+        }
     }
 }
