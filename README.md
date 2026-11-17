@@ -34,3 +34,4 @@ Then fill in Settings: Claude Code must be installed and logged in (`claude /log
 | `Examples/Registry` | Template registry repo (marketplace) with example integrations and features |
 | `Packages/ClaudeCodeKit` | Swift library for the Claude Code CLI, modelled on the Agent SDK: `query()`, `ClaudeCodeSession`, typed messages, `canUseTool`, interrupt |
 | `docs/PLUGINS.md` | The plugin SDK: writing, testing and publishing `.dashplugin` extensions |
+| `docs/KNOWLEDGE.md` | What the knowledge graph extracts from your repositories, and how Dashii and DashQL read it |
