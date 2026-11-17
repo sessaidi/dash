@@ -20,6 +20,8 @@ final class AppSettings {
     var compactTools: Bool { didSet { defaults.set(compactTools, forKey: "compactTools") } }
     /// Tool results go to Dashii in `CompactFormat` instead of JSON: fewer tokens for the same data.
     var compactResults: Bool { didSet { defaults.set(compactResults, forKey: "compactResults") } }
+    /// How many times a minute Dashii and agents may run the same fetcher (`data_fetch`).
+    var fetchesPerMinute: Int { didSet { defaults.set(fetchesPerMinute, forKey: "fetchesPerMinute") } }
     /// Path to the `claude` CLI; empty = search PATH and the usual install locations.
     var claudePath: String { didSet { defaults.set(claudePath, forKey: "claudePath") } }
     /// Verbose logging (every HTTP request) and the Debug menu.
@@ -40,6 +42,7 @@ final class AppSettings {
         confirmWrites = defaults.object(forKey: "confirmWrites") as? Bool ?? true
         compactTools = defaults.object(forKey: "compactTools") as? Bool ?? true
         compactResults = defaults.object(forKey: "compactResults") as? Bool ?? false
+        fetchesPerMinute = defaults.object(forKey: "fetchesPerMinute") as? Int ?? 6
         debugMode = defaults.bool(forKey: "debugMode")
         claudePath = defaults.string(forKey: "claudePath") ?? ""
         DashLog.verbose = debugMode

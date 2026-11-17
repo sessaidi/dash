@@ -94,6 +94,10 @@ private struct ClaudeSettings: View {
                     Text("Compact tool results")
                     Text("Results reach Dashii in a token-lean form instead of JSON (tables with field names once). Turn off to debug.")
                 }
+                Stepper(value: $settings.fetchesPerMinute, in: 1...60) {
+                    Text("Fetches per minute: \(settings.fetchesPerMinute)")
+                    Text("How often Dashii and agents may ask the same integration fetcher for fresh data (data_fetch).")
+                }
             }
             AlwaysAllowedSection()
             Section("Health") { HealthPanel() }
