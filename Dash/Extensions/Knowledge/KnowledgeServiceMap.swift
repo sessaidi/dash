@@ -357,7 +357,7 @@ extension KnowledgeExtension {
         (qualified.isEmpty ? "" : qualified + " at ") + path + (line > 0 ? ":\(line)" : "")
     }
 
-    static func repoName(_ repo: String) -> String { (String(repo.dropFirst(5)) as NSString).lastPathComponent }
+    nonisolated static func repoName(_ repo: String) -> String { (String(repo.dropFirst(5)) as NSString).lastPathComponent }
 
     private static func byPath(_ a: String, _ b: String) -> Bool {
         let (x, y) = (a.drop { $0 != " " }, b.drop { $0 != " " })

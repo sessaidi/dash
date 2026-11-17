@@ -53,6 +53,15 @@ struct KnowledgeEndToEndTests {
             \treq := httptest.NewRequest("GET", "/invoices/42", nil)
             }
             """,
+        "billing-api/events.go": """
+            package main
+
+            import "cloud.google.com/go/pubsub/v2"
+
+            func PublishInvoiceCreated(client *pubsub.Client) {
+            \tclient.Publisher("invoice-created").Publish(ctx, &pubsub.Message{})
+            }
+            """,
         "billing-api/config/production.toml": "[billing]\ncurrency = \"EUR\"\n",
         "billing-api/README.md": "# Billing API\n\nIssues and serves invoices. Routes live in `main.go`; `GET /invoices/{id}` returns one.\n",
         "proto/acme/billing/v1/billing.proto": """
@@ -156,5 +165,33 @@ struct KnowledgeEndToEndTests {
 
         let context = try await tool("knowledge_context", knowledge).run(["question": "pdf-invoices"])
         #expect(context["matches"]?.array?.contains { $0["id"] == "flag:billing.pdf-invoices" } == true)
+    }
+
+    @Test func dashQLReadsEndpointsTopicsTablesFlagsAndOwners() async throws {
+        let (knowledge, shop, storefront) = try await Self.indexed()
+        defer { for root in [shop, storefront] { try? FileManager.default.removeItem(at: root) } }
+        let engine = QueryEngine(datasets: knowledge.datasets)
+        func rows(_ query: String) async throws -> [JSONValue] { try await engine.run(query).rows }
+        let shopName = JSONValue.string(shop.lastPathComponent)
+
+        #expect(try await rows(#"from endpoints | where path ~ "/invoices" | sort path"#) == [
+            ["method": "POST", "path": "/invoices", "repo": shopName, "services": ["billing-api"], "handler": "CreateInvoice",
+             "file": "billing-api/main.go", "line": 25, "callers": 0, "tests": 0],
+            ["method": "GET", "path": "/invoices/{}", "repo": shopName, "services": ["billing-api"], "handler": "GetInvoice",
+             "file": "billing-api/main.go", "line": 19, "callers": 1, "tests": 1],
+        ])
+        #expect(try await rows("from topics") == [["system": "pubsub", "name": "invoice-created", "repos": [shopName],
+                                                   "publishers": ["PublishInvoiceCreated"], "consumers": []]])
+        #expect(try await rows(#"from tables | where name = "invoices""#) == [
+            ["name": "invoices", "schema": "public", "columns": ["id", "total"], "repos": [shopName], "readers": ["GetInvoice"], "writers": [],
+             "migrations": ["db/migrations/1_init.up.sql"]],
+        ])
+        #expect(try await rows("from flags") == [["key": "billing.pdf-invoices", "system": "launchdarkly", "repos": [shopName],
+                                                  "checks": ["GetInvoice"], "defined_in": []]])
+        let billing = try await rows(#"from owners | where owner = "@acme/billing""#)
+        #expect(billing == [
+            ["owner": "@acme/billing", "type": "team", "target": .string(shop.lastPathComponent + "/billing-api"), "kind": "directory", "repo": shopName],
+        ])
+        #expect(try await rows(#"from owners | where owner = "@acme/platform" | count by kind"#).isEmpty == false)
     }
 }
