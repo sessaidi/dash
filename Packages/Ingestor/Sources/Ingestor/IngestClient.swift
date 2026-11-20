@@ -19,6 +19,10 @@ public struct IngestClient {
     public var etagBodyLimit = 512_000
     /// How long to wait after a rate-limit error that doesn't say until when.
     public var rateLimitPause: TimeInterval = 60
+    /// Tries again after server errors, timeouts and dropped connections.
+    public var retry: IngestRetry = .standard
+    /// Waits between tries (tests don't wait).
+    public var sleep: @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
     public var clock: @MainActor () -> Date = { .now }
 
     public static let etagKind = "ingest.etag"
@@ -44,15 +48,8 @@ public struct IngestClient {
         let cached = store?.record(kind: Self.etagKind, scope: scope, key: etagKey)
         if let etag = cached?.value["etag"]?.string { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
 
-        let data: Data, response: HTTPURLResponse
-        do {
-            (data, response) = try await connection.send(request, service: service)
-        } catch let error as HTTPError where IngestRateLimit.isRateLimit(error) {
-            IngestRateLimit.pause(service: service, scope: scope, until: clock().addingTimeInterval(rateLimitPause))
-            throw IngestError.rateLimited(service: service, until: clock().addingTimeInterval(rateLimitPause))
-        }
+        let (data, response) = try await send(request)
         let headers = Self.headers(response)
-        IngestRateLimit.note(headers, service: service, scope: scope, now: clock(), pause: rateLimitPause)
         if response.statusCode == 304, let body = cached?.value["body"] {
             return IngestResponse(json: body, headers: headers, status: 304, fromCache: true)
         }
@@ -71,6 +68,35 @@ public struct IngestClient {
     /// GET and return the JSON.
     public func json(_ pathOrURL: String, headers: [String: String] = [:]) async throws -> JSONValue {
         try await get(pathOrURL, headers: headers).json
+    }
+
+    /// GET and return the body as text (logs, files), with the same retries and rate limits but
+    /// no ETag.
+    public func text(_ pathOrURL: String, headers: [String: String] = [:]) async throws -> String {
+        var request = URLRequest(url: try resolve(pathOrURL))
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return String(decoding: try await send(request).0, as: UTF8.self)
+    }
+
+    /// Sends through the connection: refused while the rate limit is used up, tried again on
+    /// passing failures (`retry`), and a rate-limit answer pauses the account.
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        var attempt = 1
+        while true {
+            try IngestRateLimit.check(service: service, scope: scope, now: clock())
+            do {
+                let (data, response) = try await connection.send(request, service: service)
+                IngestRateLimit.note(Self.headers(response), service: service, scope: scope, now: clock(), pause: rateLimitPause)
+                return (data, response)
+            } catch let error as HTTPError where IngestRateLimit.isRateLimit(error) {
+                IngestRateLimit.pause(service: service, scope: scope, until: clock().addingTimeInterval(rateLimitPause))
+                throw IngestError.rateLimited(service: service, until: clock().addingTimeInterval(rateLimitPause))
+            } catch let error where attempt < retry.attempts && IngestRetry.isTransient(error) && !Task.isCancelled {
+                try await sleep(retry.delay(after: attempt))
+                attempt += 1
+            }
+        }
     }
 
     /// Every item of a paged list, up to `maxPages` pages. `items` picks a page's items (default:

@@ -55,6 +55,45 @@ struct IngestClientTests {
         await #expect(throws: ToolError.self) { try await client.get("https://elsewhere.test/list") }
     }
 
+    @Test func passingFailuresAreTriedAgainWithGrowingWaits() async throws {
+        StubHTTP.serve("flaky.acme.test") { request in
+            let tries = StubHTTP.requests("flaky.acme.test").filter { $0.url?.path() == request.url?.path() }.count
+            switch request.url?.path() ?? "" {
+            case "/flaky": return tries < 3 ? (503, Data(#"{"message":"busy"}"#.utf8), [:]) : (200, Data(#"{"ok":true}"#.utf8), [:])
+            case "/down": return (502, Data(), [:])
+            case "/log": return tries < 2 ? (500, Data(), [:]) : (200, Data("line 1\nerror: boom".utf8), [:])
+            default: return (404, Data(#"{"message":"Not Found"}"#.utf8), [:])
+            }
+        }
+        let waits = Waits()
+        var client = client("flaky.acme.test")
+        client.sleep = { seconds in await waits.add(seconds) }
+
+        #expect(try await client.json("/flaky") == ["ok": true])
+        #expect(StubHTTP.requests("flaky.acme.test").count == 3)
+        let first = await waits.all
+        #expect(first.count == 2 && (0.4...0.6).contains(first[0]) && (0.8...1.2).contains(first[1]))
+
+        await #expect(throws: HTTPError.self) { try await client.json("/down") }
+        #expect(StubHTTP.requests("flaky.acme.test").filter { $0.url?.path() == "/down" }.count == 3)
+        await #expect(throws: HTTPError.self) { try await client.json("/missing") }
+        #expect(StubHTTP.requests("flaky.acme.test").filter { $0.url?.path() == "/missing" }.count == 1)
+        #expect(try await client.text("/log") == "line 1\nerror: boom")
+
+        client.retry = .none
+        await #expect(throws: HTTPError.self) { try await client.json("/down") }
+        #expect(StubHTTP.requests("flaky.acme.test").filter { $0.url?.path() == "/down" }.count == 4)
+    }
+
+    @Test func waitsDoubleUpToTheirCeiling() {
+        let retry = IngestRetry(attempts: 6, base: 1, maxDelay: 5, jitter: 0.5)
+        #expect((1...5).map { retry.delay(after: $0, random: 0) } == [1, 2, 4, 5, 5])
+        #expect(retry.delay(after: 2, random: 1) == 3 && retry.delay(after: 2, random: -1) == 1)
+        #expect(IngestRetry.isTransient(URLError(.networkConnectionLost)) && !IngestRetry.isTransient(URLError(.badURL)))
+        #expect(IngestRetry.isTransient(HTTPError(service: "Acme", status: 504, message: "")) && !IngestRetry.isTransient(HTTPError(service: "Acme", status: 422, message: "")))
+        #expect(IngestRetry(attempts: 0).attempts == 1)
+    }
+
     @Test func aUsedUpRateLimitStopsRequestsUntilItResets() async throws {
         let clock = TestClock()
         let reset = "\(Int(clock.now.timeIntervalSince1970) + 600)"
@@ -75,4 +114,10 @@ struct IngestClientTests {
         #expect(StubHTTP.requests("busy.acme.test").count == 1)
         IngestRateLimit.resume(service: "Acme", scope: "acme:busy.acme.test")
     }
+}
+
+/// The waits a client asked for.
+actor Waits {
+    private(set) var all: [TimeInterval] = []
+    func add(_ seconds: TimeInterval) { all.append(seconds) }
 }
