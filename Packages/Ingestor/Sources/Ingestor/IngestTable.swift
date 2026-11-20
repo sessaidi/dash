@@ -139,6 +139,11 @@ public final class IngestDatabase {
         return IngestDatabase(name: name, readOnly: container)
     }
 
+    /// How many rows the table of `Row` has.
+    public func count<Row: PersistentModel>(_ type: Row.Type) -> Int {
+        (try? context.fetchCount(FetchDescriptor<Row>())) ?? 0
+    }
+
     /// The store and its SQLite side files.
     static func deleteFiles(at url: URL) {
         for suffix in ["", "-wal", "-shm"] {
