@@ -35,6 +35,9 @@ public struct Ingestor {
     public var tables: [IngestTable] = []
     /// Where the tables live; nil: no tables.
     public var database: IngestDatabase?
+    /// Fetches the resources that have routes; nil: not connected (`notConnected` says why).
+    public var client: IngestClient?
+    public var notConnected: String
 
     public init(source: String, scope: String, store: (any SyncedStore)?, maxAge: Duration, notStarted: String? = nil) {
         self.source = source
@@ -42,6 +45,7 @@ public struct Ingestor {
         self.store = store
         self.maxAge = maxAge
         self.notStarted = notStarted ?? "\(source) isn't started."
+        notConnected = "\(source) isn't connected."
     }
 
     // MARK: Fetchers and readers
@@ -76,7 +80,7 @@ public struct Ingestor {
     public func fetch(_ resource: IngestResource, _ raw: JSONValue) async throws -> IngestReceipt {
         guard let store else { throw ToolError(notStarted) }
         let input = try checkedInput(resource, raw)
-        let data = Sanitizer.clean(try await resource.load(input)).capped(toBytes: cap)
+        let data = Sanitizer.clean(try await load(resource, input)).capped(toBytes: cap)
         let key = input.queryKey
         let unchanged = store.record(kind: resource.kind, scope: scope, key: key)?.value["data"] == data
         let syncedAt = clock()
@@ -87,6 +91,19 @@ public struct Ingestor {
         IngestNotification.post(fetcher: resource.fetcher, kind: resource.kind, scope: scope, key: key)
         return IngestReceipt(stored: unchanged ? 0 : 1, unchanged: unchanged ? 1 : 0, keys: [resource.kind + "/" + key], syncedAt: syncedAt,
                              readWith: resource.reader + " " + input.jsonString())
+    }
+
+    /// The answer from the service: the resource's routes through `client`, or its `load`.
+    func load(_ resource: IngestResource, _ input: JSONValue) async throws -> JSONValue {
+        guard !resource.parts.isEmpty else { return try await resource.load(input) }
+        guard let client else { throw ToolError(notConnected) }
+        if resource.parts.count == 1, resource.parts[0].name.isEmpty { return try await client.fetch(resource.parts[0].route, input: input) }
+        var answer: JSONValue = [:]
+        for (name, route) in resource.parts {
+            let value = try await client.fetch(route, input: input)
+            answer = answer.merging(name.isEmpty ? value : .object([name: value]))
+        }
+        return answer
     }
 
     /// The stored answer with its freshness, or `notFetched` (what to fetch).

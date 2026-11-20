@@ -70,6 +70,22 @@ public struct IngestClient {
         try await get(pathOrURL, headers: headers).json
     }
 
+    /// Fetches a route for this input (every page when it pages) and returns the mapped answer.
+    public func fetch(_ route: IngestRoute, input: JSONValue) async throws -> JSONValue {
+        let url = try route.url(for: input)
+        do {
+            if let paging = route.paging {
+                let items = try await pages(url, paging: paging, maxPages: route.maxPages, headers: route.headers) { page in
+                    route.items.map { page.at($0)?.array ?? [] } ?? page.array
+                }
+                return route.shape(.null, pagedItems: items, input: input)
+            }
+            return route.shape(try await json(url, headers: route.headers), pagedItems: nil, input: input)
+        } catch let error where route.optional && !(error is IngestError) {
+            return route.shape([:], pagedItems: nil, input: input)
+        }
+    }
+
     /// GET and return the body as text (logs, files), with the same retries and rate limits but
     /// no ETag.
     public func text(_ pathOrURL: String, headers: [String: String] = [:]) async throws -> String {
