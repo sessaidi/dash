@@ -83,6 +83,8 @@ public final class IngestDatabase {
     public let name: String
     public let container: ModelContainer
     public private(set) var isNew: Bool
+    /// Opened with `reading`: another integration's database, never written.
+    public let isReadOnly: Bool
     /// Why the old file was replaced, when it was.
     public private(set) var replacedBecause: String?
 
@@ -93,6 +95,7 @@ public final class IngestDatabase {
 
     public init(name: String, models: [any PersistentModel.Type], folder: URL? = nil, inMemory: Bool = false) throws {
         self.name = name
+        isReadOnly = false
         let schema = Schema(models)
         if inMemory {
             container = try ModelContainer(for: schema, configurations: ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: true))
@@ -113,6 +116,27 @@ public final class IngestDatabase {
             container = try ModelContainer(for: schema, configurations: configuration)
             isNew = true
         }
+    }
+
+    private init(name: String, readOnly container: ModelContainer) {
+        self.name = name
+        self.container = container
+        isNew = false
+        isReadOnly = true
+    }
+
+    /// Opens an integration's database to read it: a feature reading the integration it depends
+    /// on, with the same row models (compiled from the integration's schema file). The file is
+    /// never changed; nil when it doesn't exist or doesn't match `models` (the integration has
+    /// another schema version), and the feature reads through the integration's readers instead.
+    public static func reading(name: String, models: [any PersistentModel.Type], folder: URL? = nil) -> IngestDatabase? {
+        let url = (folder ?? Self.folder).appending(path: name + ".store")
+        guard FileManager.default.fileExists(atPath: url.path()) else { return nil }
+        let schema = Schema(models)
+        guard let container = try? ModelContainer(for: schema, configurations: ModelConfiguration(name, schema: schema, url: url, allowsSave: false))
+        else { return nil }
+        container.mainContext.autosaveEnabled = false
+        return IngestDatabase(name: name, readOnly: container)
     }
 
     /// The store and its SQLite side files.
