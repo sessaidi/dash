@@ -81,8 +81,32 @@ Widgets read them with `@Query` and `.modelContainer(database.container)`.
 The tables live in the integration's own file, `~/Library/Application Support/Dash/Ingest/<name>.store`,
 not in Dash's database. The cache stays the source of truth, so when a plugin update changes a
 model in a way SwiftData can't migrate, the file is made again and rebuilt from the cache:
-nothing is lost, and Dash's own data is never at risk. Other plugins read an integration's data
-through its readers (or an `IngestFeed`), not its tables.
+nothing is lost, and Dash's own data is never at risk.
+
+### Features reading an integration's tables
+
+A feature built on an integration (Pull Requests on GitHub) can read the integration's tables
+directly:
+
+1. The integration keeps its row models in a schema file of their own, with a version, and
+   publishes its database in `exports`: `"database": {"name", "folder", "schema"}`.
+2. The feature compiles that file too (in XcodeGen, `- path: ../GitHub/Schema` in its sources).
+   Each plugin gets its own copy of the classes, named after its module, and SwiftData matches
+   them to the same tables by name.
+3. When the exported schema version is the one it was built with, the feature opens the file
+   with `IngestDatabase.reading(name:models:folder:)`: read-only (a save fails), never migrated
+   or replaced. On another version, or no file, it gets nil and reads through the readers.
+4. `IngestRows` shows rows of a `FetchDescriptor`, reads them again whenever the integration
+   stores, and asks the integration to fetch when nothing matches or they're stale:
+
+```swift
+let runs = IngestRows(database, FetchDescriptor<GitHubRun>(predicate: #Predicate { $0.branch == branch }),
+                      host: host, fetcher: "github.workflow_runs", input: ["repo": .string(repo), "branch": .string(branch)])
+await runs.load()   // runs.rows, runs.isFetching, runs.error
+```
+
+Only the integration writes its tables. A feature keeps its own state in its own models, and
+anything new comes from the integration's fetchers.
 
 ## Requests
 
