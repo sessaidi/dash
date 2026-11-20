@@ -106,10 +106,10 @@ public final class IngestSchedule {
         status[item.id]?.lastRun ?? (defaults.object(forKey: key(item.id + ".last")) as? Double).map(Date.init(timeIntervalSince1970:))
     }
 
-    /// When it runs next; nil while it's off.
+    /// When it runs next (`distantPast` when it never ran: now); nil while it's off.
     public func nextRun(_ item: IngestSyncItem) -> Date? {
         guard isOn, isOn(item) else { return nil }
-        return lastRun(item).map { $0.addingTimeInterval(Double(minutes(item)) * 60) } ?? clock()
+        return lastRun(item).map { $0.addingTimeInterval(Double(minutes(item)) * 60) } ?? .distantPast
     }
 
     /// The items whose interval has passed.
@@ -158,11 +158,18 @@ public final class IngestSchedule {
             status[item.id] = current
             return
         }
+        let inputs = item.inputs()
+        // Nothing to fetch yet (no repository watched): due again at the next tick, not in an interval.
+        guard !inputs.isEmpty else {
+            current.error = nil
+            status[item.id] = current
+            return
+        }
         current.isRunning = true
         status[item.id] = current
         var fetched = 0
         var failure: String?
-        for input in item.inputs() {
+        for input in inputs {
             // Shared with views asking for the same thing at the same time.
             if let error = await IngestFetches.run(host, item.fetcher, input) {
                 failure = failure ?? error
