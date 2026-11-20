@@ -21,9 +21,14 @@ public struct IngestResource {
     public var queryShaped: Bool
     /// How long an answer stays fresh; nil: the ingestor's `maxAge`.
     public var maxAge: Duration?
-    /// Calls the service with the checked input; returns the compact answer to store.
+    /// Calls the service with the checked input; returns the compact answer to store. Unused
+    /// when the resource has routes.
     public let load: @MainActor (JSONValue) async throws -> JSONValue
+    /// The routes the ingestor fetches with its client: one unnamed route is the answer; named
+    /// ones make an object of their answers (an unnamed one among them is merged into it).
+    public let parts: [(name: String, route: IngestRoute)]
 
+    /// A resource the integration fetches itself (several calls, text, decoding…).
     public init(kind: String, fetcher: String? = nil, reader: String, summary: String, properties: [String: JSONValue] = [:],
                 required: [String] = [], queryShaped: Bool = false, maxAge: Duration? = nil,
                 load: @escaping @MainActor (JSONValue) async throws -> JSONValue) {
@@ -36,6 +41,30 @@ public struct IngestResource {
         self.queryShaped = queryShaped
         self.maxAge = maxAge
         self.load = load
+        parts = []
+    }
+
+    /// A resource the ingestor fetches from one route.
+    public init(kind: String, fetcher: String? = nil, reader: String, summary: String, properties: [String: JSONValue] = [:],
+                required: [String] = [], queryShaped: Bool = false, maxAge: Duration? = nil, route: IngestRoute) {
+        self.init(kind: kind, fetcher: fetcher, reader: reader, summary: summary, properties: properties, required: required,
+                  queryShaped: queryShaped, maxAge: maxAge, parts: ["": route])
+    }
+
+    /// A resource the ingestor fetches from several routes, one after the other.
+    public init(kind: String, fetcher: String? = nil, reader: String, summary: String, properties: [String: JSONValue] = [:],
+                required: [String] = [], queryShaped: Bool = false, maxAge: Duration? = nil, parts: KeyValuePairs<String, IngestRoute>) {
+        self.kind = kind
+        self.fetcher = fetcher ?? kind
+        self.reader = reader
+        self.summary = summary
+        self.properties = properties
+        self.required = required
+        self.queryShaped = queryShaped
+        self.maxAge = maxAge
+        self.parts = parts.map { ($0.key, $0.value) }
+        let fetcher = self.fetcher
+        load = { _ in throw ToolError("\(fetcher) is fetched by its ingestor.") }
     }
 
     /// The data_fetch input that refreshes the answer to `input`.
