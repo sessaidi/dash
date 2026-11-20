@@ -74,6 +74,18 @@ struct IngestScheduleTests {
         #expect(!schedule(host, clock, defaults).isOn)
     }
 
+    @Test func anItemWithNothingToFetchStaysDue() async throws {
+        let (shelf, host, clock, defaults) = try setUp()
+        let schedule = schedule(host, clock, defaults, numbers: [])
+        schedule.start(host: host)
+        schedule.stop()
+        await schedule.runDue()
+        #expect(shelf.loads == 0 && schedule.lastRun(schedule.items[0]) == nil && schedule.due.map(\.id) == ["pulls"])
+        // With the real clock too: never run is due now.
+        schedule.clock = { .now }
+        #expect(schedule.due.map(\.id) == ["pulls"])
+    }
+
     @Test func aBlockedScheduleFetchesNothingAndSaysWhy() async throws {
         let (shelf, host, clock, defaults) = try setUp()
         let schedule = schedule(host, clock, defaults)
