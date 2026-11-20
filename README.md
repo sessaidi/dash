@@ -34,6 +34,6 @@ Then fill in Settings: Claude Code must be installed and logged in (`claude /log
 | `Examples/Registry` | Template registry repo (marketplace) with example integrations and features |
 | `Packages/ClaudeCodeKit` | Swift library for the Claude Code CLI, modelled on the Agent SDK: `query()`, `ClaudeCodeSession`, typed messages, `canUseTool`, interrupt |
 | `Packages/MagnetGrid` | SwiftUI magnetic grid for dashboards: cells snap to slots while dragged or resized, neighbours are pushed aside and gaps close. DashKit's `SnapGrid` is built on it |
-| `Packages/Ingestor` | Fetch into Dash, read from Dash: an integration describes what it fetches and gets `data_fetch` fetchers, Dashii readers, DashQL rows, typed tables and SwiftUI feeds over the stored data, with ETags, rate-limit pauses and a background fetch schedule set in its settings. Plugins link it statically |
+| `Packages/Ingestor` | Fetch into Dash, read from Dash: an integration configures routes, mappers and tables and gets `data_fetch` fetchers, Dashii readers, DashQL rows, typed tables and SwiftUI feeds over the stored data, with retries and backoff, ETags, rate-limit pauses and a background fetch schedule set in its settings. Plugins link it statically |
 | `docs/PLUGINS.md` | The plugin SDK: writing, testing and publishing `.dashplugin` extensions |
 | `docs/KNOWLEDGE.md` | What the knowledge graph extracts from your repositories, and how Dashii and DashQL read it |

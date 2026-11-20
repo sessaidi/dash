@@ -217,8 +217,9 @@ Conventions (the GitHub plugin is the reference: `plugins/GitHub/Sources/Fetch`)
   `data.fetched`, `data.fetch_failed` or `data.fetch_limited`; its requests appear in Network.
 
 The `Ingestor` package (`Packages/Ingestor`) follows these conventions for you: describe each
-resource once (`IngestResource`: kind, reader, input schema, how to load it) and get the
-fetchers, readers and dataset rows. Its `IngestClient` sends ETags and pauses on rate limits,
+resource once (`IngestResource`: kind, reader, input schema, and the route to fetch with the
+mapper that keeps what's worth storing, or code of its own) and get the fetchers, readers and
+dataset rows. Its `IngestClient` retries passing failures with backoff, sends ETags and pauses on rate limits,
 `IngestFeed` lets a widget show the stored data, fetching in the background when it's missing or
 stale, and `IngestTable` keeps typed SwiftData tables of what was fetched, in the integration's
 own database file, rebuilt from the stored answers whenever that file can't be opened. A feature
