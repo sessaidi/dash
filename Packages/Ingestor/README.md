@@ -1,14 +1,16 @@
 # Ingestor
 
-Fetch into Dash, then read from Dash. An integration describes what it can fetch from its
-service; Ingestor turns that into `data_fetch` fetchers that store the answer in Dash's database,
-Dashii tools that read it back with its freshness, DashQL rows, and a SwiftUI feed that widgets
-show. Neither widgets nor Dashii call the service: only fetchers do, when asked.
+A framework for bringing a service's data into Dash. An integration configures it: the client
+(its connection, retries, rate limits), the routes to fetch and the mapper for each, the tables
+the items land in, and what to keep fetched on a schedule. Ingestor does the rest: it fetches,
+retries with backoff, pages, maps, cleans secrets out, stores the answer in Dash's database, fills
+the tables, and gives Dashii readers, DashQL rows and SwiftUI feeds over what's stored. Neither
+widgets nor Dashii call the service: only the ingestor does, when asked or on schedule.
 
 It builds on DashKit (`DataFetcher`, `SyncedStore`, `Freshness`, `Sanitizer`). Plugins link it
 statically; Dash.app provides DashKit, so Ingestor needs no Dash release.
 
-## Fetchers and readers
+## Routes and mappers
 
 ```swift
 import DashKit
@@ -18,17 +20,24 @@ extension AcmeIntegration {
     var ingestor: Ingestor {
         var ingestor = Ingestor(source: id, scope: "acme:" + site, store: host?.synced, maxAge: .seconds(15 * 60))
         ingestor.transform = { field, value in field == "key" ? value.uppercased() : value }
+        if let connection { ingestor.client = IngestClient(connection: connection, service: "Acme", scope: ingestor.scope, store: host?.synced) }
+        ingestor.notConnected = "Connect Acme in Settings."
         return ingestor
     }
 
     var resources: [IngestResource] {
         [
             IngestResource(kind: "acme.issue", reader: "acme_issue", summary: "One issue: summary, status, assignee.",
-                           properties: ["key": JSONSchema.string("Issue key, e.g. KAN-123")], required: ["key"]) { [weak self] input in
-                guard let client = try self?.client else { throw ToolError("Acme isn't started.") }
-                let issue = try await client.json("/rest/api/3/issue/" + (input["key"]?.string ?? ""))
-                return ["key": issue["key"] ?? .null, "summary": issue["fields"]?["summary"] ?? .null]
-            },
+                           properties: ["key": JSONSchema.string("Issue key, e.g. KAN-123")], required: ["key"],
+                           route: IngestRoute("/rest/api/3/issue/{key}", map: IngestMapper([
+                               "key": "key", "summary": "fields.summary", "status": "fields.status.name",
+                               "assignee": "fields.assignee.displayName", "labels": "fields.labels",
+                           ]))),
+            IngestResource(kind: "acme.search", reader: "acme_search", summary: "Issues matching a query.",
+                           properties: ["jql": JSONSchema.string("The query.")], required: ["jql"], queryShaped: true,
+                           route: IngestRoute("/rest/api/3/search/jql", query: ["jql": .input("jql"), "maxResults": "50"], items: "issues",
+                                              paging: .token(field: "nextPageToken", parameter: "nextPageToken"),
+                                              map: IngestMapper(["key": "key", "summary": "fields.summary"]))),
         ]
     }
 
@@ -37,7 +46,19 @@ extension AcmeIntegration {
 }
 ```
 
-`data_fetch acme.issue {"key":"KAN-123"}` calls the service and stores the compact answer,
+A route is a path with `{field}` taken from the input (percent-encoded), query parameters
+(`"50"`, `.input("state", default: "open")`, `.limit("limit", default: 15, max: 50)`,
+`.compute { input in … }`), where the list is in the answer (`items: "issues"`), paging
+(`.linkHeader`, `.token`, `.link`) and a limit (`.first(150)`, `.last(60)`). A mapper names the
+fields to keep, each from a path: `"user.login"`, `"labels[].name"` (each element's name),
+`"run_started_at|created_at"` (the first that isn't null), or `.path("draft", or: false)`,
+`.exists("merged_at")`, `.prefix("head_sha", 7)`, `.firstLine("message")`,
+`.list("files", fileMapper, limit: .first(150))`, `IngestField { item, input in … }` (nil leaves
+the field out). `keep:` drops items; `.pluck("login")` makes each item one value. A resource can
+also combine routes (`parts: ["": me, "organizations": orgs]`), or keep code of its own
+(`IngestResource(…) { input in … }`) for answers that need it, such as text or decoding.
+
+`data_fetch acme.issue {"key":"KAN-123"}` fetches the route and stores the mapped answer,
 cleaned of secrets and capped at 200 KB, under kind `acme.issue`, keyed by the normalized
 input. `acme_issue {"key":"KAN-123"}` returns it with `synced_at` and `stale`, or says what to
 fetch. Answers to queries (`queryShaped: true`) are dropped after a day once their kind is stored
@@ -49,8 +70,8 @@ item, with the input fields you stamp, `synced_at` and `stale`, the newest copy 
 ## Tables
 
 An integration can also keep its own SwiftData tables, for what its widgets filter and sort
-(pull requests, runs, issues). A row model adopts `IngestRow` and maps an item to typed fields;
-an `IngestTable` says which resources fill it:
+(pull requests, runs, issues). A row model adopts `IngestRow` and declares its typed fields; the
+table's config says which resources fill it, what tells items apart, and how an item fills a row:
 
 ```swift
 @Model final class AcmeIssue: IngestRow {
@@ -59,20 +80,24 @@ an `IngestTable` says which resources fill it:
     var syncedAt = Date.distantPast
     var key = ""
     var status = ""
+    var updated: Date?
     init() {}
-    func update(from item: JSONValue) {
-        key = item["key"]?.string ?? ""
-        status = item["status"]?.string ?? ""
-    }
 }
 
 // At start:
 database = try IngestDatabase(name: "acme", models: [AcmeIssue.self], folder: IngestDatabase.folder)
 // In `ingestor`:
 ingestor.database = database
-ingestor.tables = [IngestTable(AcmeIssue.self, from: resources) { $0["key"]?.string ?? "" }]
+ingestor.tables = [IngestTable(AcmeIssue.self, from: resources, id: "key") { row, item in
+    row.key = item.string("key")
+    row.status = item.string("status")
+    row.updated = item.date("updated")
+}]
 try ingestor.syncTables()
 ```
+
+`item.string`, `int`, `bool`, `date` and `strings` read a path with a default. A model can map
+itself instead (`func update(from:)`) when the table gives no mapper.
 
 After each fetch, the tables filled by that resource mirror the cache again: one row per item
 (the newest copy), rows whose answers expired are deleted, and unchanged items aren't rewritten.
@@ -143,8 +168,14 @@ stored answers and the scope's ETags, then empties the tables, for a "Clear fetc
 
 ## Requests
 
-`IngestClient` makes a fetcher's GET requests through the integration's `IntegrationConnection`:
+`IngestClient` makes the GET requests through the integration's `IntegrationConnection`, which
+adds the auth headers. It's the ingestor's `client` for routes, and resources with code of their
+own use it too (`json`, `text`, `fetch(route, input:)`):
 
+- a request that failed for a passing reason (500, 502, 503, 504, 408, a timeout, a dropped
+  network) is tried again after about 0.5 s, then 1 s, doubling up to `maxDelay` with some
+  jitter: `client.retry = IngestRetry(attempts: 3, base: 0.5, maxDelay: 8)`, or `.none`;
+  other errors (401, 404, 422…) aren't retried;
 - it sends the last answer's ETag, and a 304 returns the stored copy (GitHub doesn't count those
   against the rate limit);
 - after a rate-limit error (429, or a 403 saying so), or an answer with
