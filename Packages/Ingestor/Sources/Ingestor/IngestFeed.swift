@@ -59,20 +59,9 @@ public final class IngestFeed {
     /// then shows the result.
     public func refresh() async {
         guard let host else { return }
-        let key = "\(ObjectIdentifier(host)) \(fetcher) \(input.jsonString())"
-        if let running = Self.running[key] {
-            await running.value
-        } else {
-            isFetching = true
-            let fetcher = fetcher, input = input
-            let task = Task { @MainActor () -> String? in
-                do { _ = try await host.fetch(fetcher, input); return nil } catch { return error.localizedDescription }
-            }
-            Self.running[key] = Task { _ = await task.value }
-            error = await task.value
-            Self.running[key] = nil
-            isFetching = false
-        }
+        isFetching = true
+        error = await IngestFetches.run(host, fetcher, input)
+        isFetching = false
         await read()
     }
 
@@ -119,8 +108,25 @@ public final class IngestFeed {
         syncedAt = answer["synced_at"].flatMap { DashDate.parse($0) }
         stale = answer["stale"]?.bool ?? (syncedAt == nil)
     }
+}
 
-    private static var running: [String: Task<Void, Never>] = [:]
+/// Fetches asked for by views: one request for every view asking the same thing of the same host.
+@MainActor
+enum IngestFetches {
+    private static var running: [String: Task<String?, Never>] = [:]
+
+    /// Asks the integration to fetch; the error, if it failed.
+    static func run(_ host: any ExtensionContext, _ fetcher: String, _ input: JSONValue) async -> String? {
+        let key = "\(ObjectIdentifier(host)) \(fetcher) \(input.jsonString())"
+        if let task = running[key] { return await task.value }
+        let task = Task { @MainActor () -> String? in
+            do { _ = try await host.fetch(fetcher, input); return nil } catch { return error.localizedDescription }
+        }
+        running[key] = task
+        let result = await task.value
+        running[key] = nil
+        return result
+    }
 }
 
 /// "Synced 5 min ago" (or "Refreshing…", or the error), with a refresh button.
