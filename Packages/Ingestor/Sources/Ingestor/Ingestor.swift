@@ -31,6 +31,10 @@ public struct Ingestor {
     /// Checks the normalized input (shape of ids, paths…); throw `ToolError` to refuse it.
     public var validate: (JSONValue) throws -> Void = { _ in }
     public var notStarted: String
+    /// The integration's own tables, updated after each fetch of a resource that fills them.
+    public var tables: [IngestTable] = []
+    /// Where the tables live; nil: no tables.
+    public var database: IngestDatabase?
 
     public init(source: String, scope: String, store: (any SyncedStore)?, maxAge: Duration, notStarted: String? = nil) {
         self.source = source
@@ -78,6 +82,8 @@ public struct Ingestor {
         let syncedAt = clock()
         store.upsert([SyncedRecord(kind: resource.kind, scope: scope, key: key, value: ["input": input, "data": data], source: source, updatedAt: syncedAt)])
         if resource.queryShaped { expire(resource.kind, before: syncedAt.addingTimeInterval(-retention)) }
+        // The cache is what counts: a table that fails to update catches up at the next fetch or start.
+        try? syncTables(for: resource.kind)
         IngestNotification.post(fetcher: resource.fetcher, kind: resource.kind, scope: scope, key: key)
         return IngestReceipt(stored: unchanged ? 0 : 1, unchanged: unchanged ? 1 : 0, keys: [resource.kind + "/" + key], syncedAt: syncedAt,
                              readWith: resource.reader + " " + input.jsonString())
@@ -126,25 +132,34 @@ public struct Ingestor {
     /// single objects): each item gets the input fields in `stamp` (null when absent), `synced_at`
     /// and `stale`; one row per stamp values and `id`, from the most recent fetch.
     public func rows(_ resources: [IngestResource], stamp: [String] = [], id: (JSONValue) -> String) -> [JSONValue] {
+        keyedRows(resources, stamp: stamp, id: id).map { row in
+            let freshness = Freshness(syncedAt: row.syncedAt, maxAge: row.maxAge, refresh: nil, now: clock())
+            return row.item.merging(["synced_at": freshness.json["synced_at"] ?? .null, "stale": .bool(freshness.stale)])
+        }
+    }
+
+    /// The newest copy of every item of these resources, keyed by the stamp values and `id`
+    /// ("acme/billing-api#7"), sorted by key: what `rows` and the tables are built from.
+    func keyedRows(_ resources: [IngestResource], stamp: [String], id: (JSONValue) -> String)
+        -> [(key: String, item: JSONValue, syncedAt: Date, maxAge: Duration)] {
         guard let store else { return [] }
-        var newest: [String: (row: JSONValue, at: Date)] = [:]
+        var newest: [String: (item: JSONValue, at: Date, maxAge: Duration)] = [:]
         for resource in resources {
-            let rows = store.rows(kind: resource.kind, scope: scope, maxAge: resource.maxAge ?? maxAge) { resource.refresh($0.value["input"] ?? [:]) }
-            for (value, freshness) in rows {
-                let data = value["data"] ?? .null
+            for record in store.records(kind: resource.kind, scope: scope) {
+                let input = record.value["input"] ?? [:]
+                let data = record.value["data"] ?? .null
                 let items = data.array ?? data["items"]?.array ?? (data.object != nil ? [data] : [])
-                var fields: [String: JSONValue] = ["synced_at": freshness.json["synced_at"] ?? .null, "stale": .bool(freshness.stale)]
-                for name in stamp { fields[name] = value["input"]?[name] ?? .null }
-                let prefix = stamp.map { value["input"]?[$0]?.string ?? "" }.joined(separator: "|")
-                let at = freshness.syncedAt ?? .distantPast
+                var fields: [String: JSONValue] = [:]
+                for name in stamp { fields[name] = input[name] ?? .null }
+                let prefix = stamp.map { input[$0]?.string ?? input[$0]?.jsonString() ?? "" }.joined(separator: "|")
                 for item in items {
                     let key = prefix + "#" + id(item)
-                    if let seen = newest[key], seen.at > at { continue }
-                    newest[key] = (item.merging(.object(fields)), at)
+                    if let seen = newest[key], seen.at > record.updatedAt { continue }
+                    newest[key] = (item.merging(.object(fields)), record.updatedAt, resource.maxAge ?? maxAge)
                 }
             }
         }
-        return newest.keys.sorted().compactMap { newest[$0]?.row }
+        return newest.keys.sorted().compactMap { key in newest[key].map { (key, $0.item, $0.at, $0.maxAge) } }
     }
 
     // MARK: Shapes
