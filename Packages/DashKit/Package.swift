@@ -4,7 +4,7 @@ import PackageDescription
 /// The Dash extension SDK: what integrations, features and plugins build on.
 /// - DashKit: extension protocols, metadata, widgets, Dashii tools and services, activity,
 ///   storage (Keychain, preferences), connections, and the plugin entry point.
-/// - DashKitUI: shared SwiftUI components and the snap grid.
+/// - DashKitUI: shared SwiftUI components and the snap grid (built on the MagnetGrid package).
 /// - DashKitTesting: test doubles (host, Dashii, permissions, integration, HTTP stubs) for
 ///   plugin tests (`import DashKitTesting`).
 ///
@@ -18,8 +18,12 @@ let package = Package(
         // dynamic DashKit, and the doubles are a few small classes.
         .library(name: "DashKit", type: .dynamic, targets: ["DashKit", "DashKitUI", "DashKitTesting"]),
     ],
+    dependencies: [
+        // Linked into the framework and imported internally: plugins only see DashKitUI's grid types.
+        .package(path: "../MagnetGrid"),
+    ],
     targets: [
-        .target(name: "DashKitUI", swiftSettings: [.unsafeFlags(["-enable-library-evolution"])]),
+        .target(name: "DashKitUI", dependencies: ["MagnetGrid"], swiftSettings: [.unsafeFlags(["-enable-library-evolution"])]),
         .target(name: "DashKit", dependencies: ["DashKitUI"], swiftSettings: [.unsafeFlags(["-enable-library-evolution"])]),
         .target(name: "DashKitTesting", dependencies: ["DashKit"], swiftSettings: [.unsafeFlags(["-enable-library-evolution"])]),
         .testTarget(name: "DashKitUITests", dependencies: ["DashKitUI"]),
