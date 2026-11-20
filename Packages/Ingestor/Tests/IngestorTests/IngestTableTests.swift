@@ -109,6 +109,27 @@ struct IngestTableTests {
         #expect(try rows(database).isEmpty)
     }
 
+    @Test func storedDataIsCountedAndClearedWithItsTablesAndETags() async throws {
+        let database = try IngestDatabase(name: "acme", models: [AcmePull.self], inMemory: true)
+        let ingestor = ingestor(database)
+        #expect(ingestor.summary(resources) == (0, nil) as (Int, Date?))
+        service.pulls["acme/billing-api"] = [["number": 7, "title": "Fix the invoice total"], ["number": 8, "title": "Retry webhooks"]]
+        try await ingestor.fetch(resources[0], ["repo": "acme/billing-api"])
+        clock.advance(60)
+        try await ingestor.fetch(resources[1], ["repo": "acme/billing-api", "number": 7])
+        let etag = SyncedRecord(kind: IngestClient.etagKind, scope: ingestor.scope, key: "k", value: ["etag": "\"1\""], source: "acme", updatedAt: clock.now)
+        let elsewhere = SyncedRecord(kind: "acme.pulls", scope: "acme:other.test", key: "k", value: [:], source: "acme", updatedAt: clock.now)
+        store.upsert([etag, elsewhere])
+
+        let summary = ingestor.summary(resources)
+        #expect(summary.answers == 2 && summary.newest == clock.now && database.count(AcmePull.self) == 2)
+
+        try ingestor.clear(resources)
+        #expect(ingestor.summary(resources).answers == 0 && database.count(AcmePull.self) == 0)
+        #expect(store.records(kind: IngestClient.etagKind, scope: ingestor.scope).isEmpty)
+        #expect(store.records(kind: "acme.pulls", scope: "acme:other.test").count == 1)
+    }
+
     @Test func aDatabaseThatCantBeOpenedIsMadeAgainAndRebuiltFromTheCache() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "ingest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }

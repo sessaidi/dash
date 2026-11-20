@@ -126,6 +126,23 @@ public struct Ingestor {
         if kept.count < records.count { store.replace(kind: kind, scope: scope, with: kept) }
     }
 
+    // MARK: Stored data
+
+    /// How many answers of these resources are stored, and when the newest was fetched.
+    public func summary(_ resources: [IngestResource]) -> (answers: Int, newest: Date?) {
+        guard let store else { return (0, nil) }
+        let records = Set(resources.map(\.kind)).flatMap { store.records(kind: $0, scope: scope) }
+        return (records.count, records.map(\.updatedAt).max())
+    }
+
+    /// Deletes every stored answer of these resources and the ETags of this scope, then empties
+    /// the tables; the next fetches start afresh.
+    public func clear(_ resources: [IngestResource]) throws {
+        guard let store else { throw ToolError(notStarted) }
+        for kind in Array(Set(resources.map(\.kind))) + [IngestClient.etagKind] { store.replace(kind: kind, scope: scope, with: []) }
+        try syncTables()
+    }
+
     // MARK: Datasets
 
     /// Rows for a DashQL dataset from every stored answer of these resources (lists, `items` and
