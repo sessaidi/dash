@@ -34,6 +34,21 @@ final class AcmeRun: IngestRow {
     func update(from item: JSONValue) {}
 }
 
+/// A row filled by its table's mapper: the model only declares fields.
+@Model
+final class AcmeIssue: IngestRow {
+    var rowKey = ""
+    var item = ""
+    var syncedAt = Date.distantPast
+    var key = ""
+    var status = ""
+    var points = 0
+    var flagged = false
+    var updated: Date?
+    var labels: [String] = []
+    init() {}
+}
+
 /// An integration's own tables: filled from what the ingestor stored, the newest copy of each
 /// item, rows dropped with their answers, rebuilt from the cache when the file is made again.
 @MainActor
@@ -107,6 +122,31 @@ struct IngestTableTests {
         store.replace(kind: "acme.pulls", scope: ingestor.scope, with: [])
         try ingestor.syncTables()
         #expect(try rows(database).isEmpty)
+    }
+
+    @Test func aTablesMapperFillsItsRows() async throws {
+        let database = try IngestDatabase(name: "acme", models: [AcmeIssue.self], inMemory: true)
+        var ingestor = makeIngestor(store, clock: clock)
+        let issues = IngestResource(kind: "acme.issues", reader: "acme_issues", summary: "Issues.") { _ in
+            [["key": "KAN-123", "fields": ["status": ["name": "Doing"], "points": 3, "flagged": true, "updated": "2026-11-17T09:00:00Z",
+                                           "labels": ["backend", "api"]]],
+             ["key": "KAN-124", "fields": ["status": ["name": "Done"]]]]
+        }
+        ingestor.database = database
+        ingestor.tables = [IngestTable(AcmeIssue.self, from: [issues], id: "key") { row, item in
+            row.key = item.string("key")
+            row.status = item.string("fields.status.name")
+            row.points = item.int("fields.points")
+            row.flagged = item.bool("fields.flagged")
+            row.updated = item.date("fields.updated")
+            row.labels = item.strings("fields.labels")
+        }]
+        try await ingestor.fetch(issues, [:])
+        let rows = try database.context.fetch(FetchDescriptor<AcmeIssue>(sortBy: [SortDescriptor(\.rowKey)]))
+        #expect(rows.map(\.rowKey) == ["#KAN-123", "#KAN-124"])
+        #expect(rows[0].status == "Doing" && rows[0].points == 3 && rows[0].flagged && rows[0].labels == ["backend", "api"])
+        #expect(rows[0].updated == DashDate.parse("2026-11-17T09:00:00Z"))
+        #expect(rows[1].status == "Done" && rows[1].points == 0 && !rows[1].flagged && rows[1].updated == nil && rows[1].labels.isEmpty)
     }
 
     @Test func storedDataIsCountedAndClearedWithItsTablesAndETags() async throws {

@@ -26,8 +26,13 @@ public protocol IngestRow: PersistentModel {
     /// When Dash fetched it.
     var syncedAt: Date { get set }
     init()
-    /// Sets the typed fields from the item (which carries the stamped input fields).
+    /// Sets the typed fields from the item (which carries the stamped input fields), unless the
+    /// table maps them (`IngestTable(…, map:)`).
     func update(from item: JSONValue)
+}
+
+extension IngestRow {
+    public func update(from item: JSONValue) {}
 }
 
 /// One of an integration's tables: which resources fill it and how their items are told apart.
@@ -40,9 +45,11 @@ public struct IngestTable {
     let sync: @MainActor (Ingestor, ModelContext) throws -> Void
 
     /// `stamp`: input fields copied onto each item and into its key (e.g. "repo"); `id`: the
-    /// item's id within them (e.g. its number).
+    /// item's id within them (e.g. its number); `map`: sets a row's fields from an item (nil: the
+    /// row's own `update(from:)`).
     public init<Row: IngestRow>(_ row: Row.Type, from resources: [IngestResource], stamp: [String] = [],
-                                id: @escaping (JSONValue) -> String) {
+                                id: @escaping (JSONValue) -> String, map: ((Row, JSONValue) -> Void)? = nil) {
+        let update = map ?? { row, item in row.update(from: item) }
         name = String(describing: row)
         kinds = Set(resources.map(\.kind))
         sync = { ingestor, context in
@@ -56,7 +63,7 @@ public struct IngestTable {
                 if let row = existing.removeValue(forKey: key) {
                     if row.item != json {
                         row.item = json
-                        row.update(from: item)
+                        update(row, item)
                     }
                     if row.syncedAt != syncedAt { row.syncedAt = syncedAt }
                 } else {
@@ -64,7 +71,7 @@ public struct IngestTable {
                     row.rowKey = key
                     row.item = json
                     row.syncedAt = syncedAt
-                    row.update(from: item)
+                    update(row, item)
                     context.insert(row)
                 }
             }
@@ -72,6 +79,21 @@ public struct IngestTable {
             if context.hasChanges { try context.save() }
         }
     }
+
+    /// `id` is a path in the item ("number", "key", "metadata.uid").
+    public init<Row: IngestRow>(_ row: Row.Type, from resources: [IngestResource], stamp: [String] = [], id: String,
+                                map: ((Row, JSONValue) -> Void)? = nil) {
+        self.init(row, from: resources, stamp: stamp, id: { IngestRoute.text($0.at(id)) ?? "" }, map: map)
+    }
+}
+
+/// Typed values out of an item, for table mappers: `row.number = item.int("number")`.
+extension JSONValue {
+    public func string(_ path: String) -> String { at(path)?.string ?? "" }
+    public func int(_ path: String) -> Int { at(path)?.int ?? 0 }
+    public func bool(_ path: String) -> Bool { at(path)?.bool ?? false }
+    public func date(_ path: String) -> Date? { at(path).flatMap { DashDate.parse($0) } }
+    public func strings(_ path: String) -> [String] { at(path)?.array?.compactMap(\.string) ?? [] }
 }
 
 /// An integration's own database file, holding its tables: `<folder>/<name>.store`, apart from
