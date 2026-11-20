@@ -33,5 +33,6 @@ Then fill in Settings: Claude Code must be installed and logged in (`claude /log
 | `Dash/Extensions/*` | What ships in the app: Basics (Note, World Clock) and the Marketplace. Every integration and feature is a plugin in [dash-registry](https://github.com/sessaidi/dash-registry), installed from Settings › Marketplace (see docs/PLUGINS.md) |
 | `Examples/Registry` | Template registry repo (marketplace) with example integrations and features |
 | `Packages/ClaudeCodeKit` | Swift library for the Claude Code CLI, modelled on the Agent SDK: `query()`, `ClaudeCodeSession`, typed messages, `canUseTool`, interrupt |
+| `Packages/MagnetGrid` | SwiftUI magnetic grid for dashboards: cells snap to slots while dragged or resized, neighbours are pushed aside and gaps close. DashKit's `SnapGrid` is built on it |
 | `docs/PLUGINS.md` | The plugin SDK: writing, testing and publishing `.dashplugin` extensions |
 | `docs/KNOWLEDGE.md` | What the knowledge graph extracts from your repositories, and how Dashii and DashQL read it |
