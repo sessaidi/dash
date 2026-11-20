@@ -41,7 +41,7 @@ public final class IngestFeed {
         self.autoFetch = autoFetch
         observer = NotificationCenter.default.addObserver(forName: IngestNotification.name, object: nil, queue: .main) { [weak self] note in
             guard note.userInfo?["fetcher"] as? String == fetcher else { return }
-            MainActor.assumeIsolated { Task { await self?.read() } }
+            MainActor.assumeIsolated { _ = Task { await self?.read() } }
         }
     }
 
