@@ -108,6 +108,39 @@ await runs.load()   // runs.rows, runs.isFetching, runs.error
 Only the integration writes its tables. A feature keeps its own state in its own models, and
 anything new comes from the integration's fetchers.
 
+## Background fetching
+
+An integration can keep some resources fetched on a cycle, set by the user in its settings:
+
+```swift
+// In init:
+schedule = IngestSchedule(prefix: "acme", defaults: defaults)
+schedule.items = [
+    IngestSyncItem(id: "issues", title: "Open issues", detail: "Of each watched project.", fetcher: "acme.issues",
+                   defaultMinutes: 10) { [weak self] in (self?.projects ?? []).map { ["project": .string($0)] } },
+    IngestSyncItem(id: "releases", title: "Releases", fetcher: "acme.releases", defaultMinutes: 60, defaultOn: false),
+]
+schedule.blocked = { [weak self] in self?.hasToken == true ? nil : "Add a token first." }
+// start(host:): schedule.start(host: host)    stop(): schedule.stop()
+// In the settings view:
+IngestScheduleSection(schedule, footer: "…")
+```
+
+While Dash runs, each item that's on is fetched for each of its inputs once its interval has
+passed, through the integration's own fetchers (so tables and widgets follow). The section offers
+a switch for all background fetching, and per item a switch, an interval (1 minute to a day), when
+it last ran or what failed, and Fetch Now. Choices and last runs are kept in `defaults` under
+`<prefix>.sync.…`, so a restart doesn't fetch everything again. While `blocked` gives a reason
+(no token, a used-up rate limit) nothing is fetched and the section says why; an item with no
+inputs yet (nothing watched) runs as soon as it has some.
+
+## Stored data
+
+`ingestor.summary(resources)` counts the stored answers and gives the newest one's time;
+`IngestDatabase.count(Row.self)` counts a table's rows. `ingestor.clear(resources)` deletes the
+stored answers and the scope's ETags, then empties the tables, for a "Clear fetched data" button.
+`ingestor.retention` sets how long answers to queries are kept.
+
 ## Requests
 
 `IngestClient` makes a fetcher's GET requests through the integration's `IntegrationConnection`:

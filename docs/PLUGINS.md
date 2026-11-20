@@ -223,7 +223,9 @@ fetchers, readers and dataset rows. Its `IngestClient` sends ETags and pauses on
 stale, and `IngestTable` keeps typed SwiftData tables of what was fetched, in the integration's
 own database file, rebuilt from the stored answers whenever that file can't be opened. A feature
 that depends on the integration can read those tables read-only (`IngestDatabase.reading`,
-`IngestRows`) when it's built with the integration's schema file of the same version. Link it statically: in `project.yml`, add `Ingestor: { path: "${DASH_ROOT}/Packages/Ingestor" }`
+`IngestRows`) when it's built with the integration's schema file of the same version.
+`IngestSchedule` keeps chosen resources fetched on a cycle the user sets in the integration's
+settings (`IngestScheduleSection`), and `summary`/`clear` show and delete what was stored. Link it statically: in `project.yml`, add `Ingestor: { path: "${DASH_ROOT}/Packages/Ingestor" }`
 to `packages` and `- package: Ingestor` to the plugin's and the tests' dependencies.
 
 **Functions** (`DashiiFunction<Input, Output>`): one job Dashii does for you, typed. The
