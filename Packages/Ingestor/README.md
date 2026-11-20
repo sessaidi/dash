@@ -46,6 +46,44 @@ again.
 `ingestor.rows(resources, stamp: ["repo"], id:)` gives a DashQL dataset its rows: every stored
 item, with the input fields you stamp, `synced_at` and `stale`, the newest copy of each.
 
+## Tables
+
+An integration can also keep its own SwiftData tables, for what its widgets filter and sort
+(pull requests, runs, issues). A row model adopts `IngestRow` and maps an item to typed fields;
+an `IngestTable` says which resources fill it:
+
+```swift
+@Model final class AcmeIssue: IngestRow {
+    var rowKey = ""
+    var item = ""
+    var syncedAt = Date.distantPast
+    var key = ""
+    var status = ""
+    init() {}
+    func update(from item: JSONValue) {
+        key = item["key"]?.string ?? ""
+        status = item["status"]?.string ?? ""
+    }
+}
+
+// At start:
+database = try IngestDatabase(name: "acme", models: [AcmeIssue.self], folder: IngestDatabase.folder)
+// In `ingestor`:
+ingestor.database = database
+ingestor.tables = [IngestTable(AcmeIssue.self, from: resources) { $0["key"]?.string ?? "" }]
+try ingestor.syncTables()
+```
+
+After each fetch, the tables filled by that resource mirror the cache again: one row per item
+(the newest copy), rows whose answers expired are deleted, and unchanged items aren't rewritten.
+Widgets read them with `@Query` and `.modelContainer(database.container)`.
+
+The tables live in the integration's own file, `~/Library/Application Support/Dash/Ingest/<name>.store`,
+not in Dash's database. The cache stays the source of truth, so when a plugin update changes a
+model in a way SwiftData can't migrate, the file is made again and rebuilt from the cache:
+nothing is lost, and Dash's own data is never at risk. Other plugins read an integration's data
+through its readers (or an `IngestFeed`), not its tables.
+
 ## Requests
 
 `IngestClient` makes a fetcher's GET requests through the integration's `IntegrationConnection`:
