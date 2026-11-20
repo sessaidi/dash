@@ -216,6 +216,13 @@ Conventions (the GitHub plugin is the reference: `plugins/GitHub/Sources/Fetch`)
   (Settings › Dashii, default 6). Every fetch appears in the Debug window's Activity pane as
   `data.fetched`, `data.fetch_failed` or `data.fetch_limited`; its requests appear in Network.
 
+The `Ingestor` package (`Packages/Ingestor`) follows these conventions for you: describe each
+resource once (`IngestResource`: kind, reader, input schema, how to load it) and get the
+fetchers, readers and dataset rows. Its `IngestClient` sends ETags and pauses on rate limits, and
+`IngestFeed` lets a widget show the stored data, fetching in the background when it's missing or
+stale. Link it statically: in `project.yml`, add `Ingestor: { path: "${DASH_ROOT}/Packages/Ingestor" }`
+to `packages` and `- package: Ingestor` to the plugin's and the tests' dependencies.
+
 **Functions** (`DashiiFunction<Input, Output>`): one job Dashii does for you, typed. The
 instructions and output schema live in one place; the input is encoded for you (JSON, or
 `CompactFormat` for row-heavy input); the answer is decoded, checked, asked for once more with
